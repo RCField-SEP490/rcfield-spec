@@ -248,8 +248,8 @@ flowchart LR
 ## Step 4 — Write the File
 
 Determine the output file path:
-- If the flow name is clear: `docs/sequence-flow-{kebab-case-name}.md`
-- If a source file was given and flow name is derivable from it: use that name
+- If the flow name is clear: `docs/diagrams/sequence/sequence-flow-{kebab-case-name}.md`
+- If a source file was given and flow name is derivable from it: use that name under `docs/diagrams/sequence/`
 - Ask the user to confirm the file name if ambiguous
 
 Write the completed document to the determined path.
