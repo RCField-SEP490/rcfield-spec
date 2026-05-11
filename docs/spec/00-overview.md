@@ -7,15 +7,17 @@
 
 ## Tên đề tài
 
-- **English**: RCField – RC Cafe Operations & Marketplace Platform  
-- **Vietnamese**: Nền tảng Số hóa Vận hành và Kết nối Cafe Xe RC  
+- **English**: RCField – RC Car Field Operations & Booking Platform  
+- **Vietnamese**: Nền tảng Số hóa Vận hành và Đặt lịch Sân Xe RC  
 - **Mã**: SU26SE098 | **GVHD**: Nguyễn Minh Sang
 
 ---
 
 ## Bối cảnh
 
-Cafe xe RC (Radio-Controlled Car) là mô hình giải trí trải nghiệm đang nổi tại Việt Nam. Hai nhóm khách:
+Sân xe RC (Radio-Controlled Car) là mô hình giải trí trải nghiệm đang nổi tại Việt Nam. Các địa điểm này thường được gọi là "cafe xe RC" theo tên thông dụng, nhưng **RCField chỉ số hóa phần vận hành xe** — đặt lịch, thuê xe, bàn giao tài sản, thanh toán. Đồ uống / F&B tại quán là dịch vụ ngoài app, khách tự thanh toán trực tiếp tại quán.
+
+Hai nhóm khách:
 
 - **RENTAL customers**: vãng lai, thuê xe của quán, không cần mang xe riêng
 - **BYOC customers** (Bring Your Own Car): hobbyist, mang xe cá nhân đến luyện tập / giao lưu
@@ -63,6 +65,10 @@ RCField là **vertical SaaS marketplace** kết hợp:
 - Dispute resolution
 - Provider analytics dashboard
 - Full test suite + deployment
+
+### Ngoài scope (mọi phase)
+- **F&B / đồ uống** — khách tự mua trực tiếp tại quán, không qua app
+- **POS / order đồ ăn uống** — không thuộc RCField
 
 ### Ngoài scope (Phase 2)
 - Tournament management

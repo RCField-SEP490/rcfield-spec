@@ -31,8 +31,10 @@ git clone https://github.com/rcfield-org/rcfield-app.git
 
 ## Project Overview
 
-**RCField** là vertical SaaS platform số hóa vận hành cafe xe RC tại Việt Nam.
-Kết nối 3 actor chính: **Customer** (đặt lịch/thuê xe), **Provider+Staff** (quản lý quán/đội xe), **Admin** (platform oversight).
+**RCField** là vertical SaaS platform số hóa vận hành sân xe RC tại Việt Nam.
+Kết nối 3 actor chính: **Customer** (đặt lịch/thuê xe), **Provider+Staff** (quản lý sân/đội xe), **Admin** (platform oversight).
+
+> **Phạm vi app**: Chỉ quản lý vận hành xe (booking, fleet, inspection, payment). F&B / đồ uống tại sân **không** thuộc RCField — khách tự thanh toán trực tiếp tại quán.
 
 Hai chế độ booking: **RENTAL** (thuê xe của quán) và **BYOC** (mang xe cá nhân).
 Core value prop: structured evidence at every asset handover → eliminates damage disputes.

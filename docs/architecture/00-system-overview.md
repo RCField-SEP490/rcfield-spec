@@ -6,6 +6,9 @@
 > Tài liệu này mô tả kiến trúc tổng thể của RCField ở mức system level.
 > Đọc `docs/spec/00-overview.md` để hiểu business context trước.
 
+> **Scope reminder**: RCField chỉ quản lý vận hành xe RC — đặt lịch, fleet, bàn giao tài sản, thanh toán.
+> F&B / đồ uống tại sân **nằm ngoài app** — khách tự thanh toán trực tiếp tại quán.
+
 ---
 
 ## 1. System Context (C4 Level 1)
@@ -22,7 +25,7 @@ C4Context
     Person(provider, "Provider", "Quản lý quán, đội xe, xem analytics")
     Person(admin, "Admin", "Duyệt quán, xử lý dispute, monitor platform")
 
-    System(rcfield, "RCField Platform", "Web SaaS: booking lifecycle, fleet mgmt, payment, inspection, dispute")
+    System(rcfield, "RCField Platform", "Web SaaS: booking, fleet, inspection, payment cho sân xe RC. KHÔNG bao gồm F&B.")
 
     System_Ext(vnpay, "VNPay Gateway", "Xử lý thanh toán trực tuyến (sandbox)")
     System_Ext(s3, "S3-compatible Storage", "Lưu ảnh check-in/out (4 góc per inspection)")
