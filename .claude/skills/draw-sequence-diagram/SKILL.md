@@ -34,6 +34,23 @@ The input may be one of:
 - `docs/spec/03-payment-engine.md` — payment components and rules
 - Any other `docs/spec/` files relevant to the flow being diagrammed
 
+**Scan source code for existing API implementations:**
+
+Check if the backend source exists at `../rcfield-app/apps/api/src/` (relative to workspace root):
+
+- If the path **exists**: scan for routes and controllers relevant to this flow:
+  - Search `routes/` for router files matching keywords in the flow (e.g., `booking`, `payment`, `inspection`)
+  - Search `controllers/` for handler methods on those routes
+  - Extract **actual HTTP method + path** (e.g., `POST /bookings`, `PATCH /bookings/:id/confirm`) and **actual function names**
+  - Use these real values in the diagram — override any spec-derived placeholders
+  - In the **Key Files** section, link to the actual source files found
+  - Add an `> [IMPLEMENTED]` badge next to each endpoint that exists in code
+
+- If the path **does not exist** (no codebase yet):
+  - Derive endpoint paths from `docs/spec/05-api-contracts.md` if available, otherwise infer from spec logic
+  - Mark each inferred endpoint with `> [REFERENCE ONLY — not yet implemented]` in the diagram notes
+  - Add a callout at the top of the document: `> ⚠️ API endpoints shown are derived from spec only. Verify against implementation when codebase is available.`
+
 **Participant vocabulary for this project** (use these consistently):
 
 | Short | Label | Context |
