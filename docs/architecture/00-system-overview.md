@@ -25,14 +25,14 @@ C4Context
     System(rcfield, "RCField Platform", "Web SaaS: booking, fleet, inspection, payment, F&B management cho sân xe RC")
 
     System_Ext(payment, "Payment Gateway (TBD)", "Xử lý thanh toán booking + F&B pre-order")
-    System_Ext(s3, "S3-compatible Storage", "Lưu ảnh check-in/out (4 góc per inspection)")
+    System_Ext(s3, "Cloudinary", "Lưu ảnh check-in/out (4 góc per inspection) — lưu URL về DB")
 
     Rel(customer, rcfield, "Đặt lịch, pre-order F&B, thanh toán, xác nhận")
     Rel(staff, rcfield, "Check-in/out, ghi order, gia hạn, upload ảnh")
     Rel(provider, rcfield, "Quản lý fleet + menu, xem doanh thu")
     Rel(admin, rcfield, "Duyệt sân, xử lý dispute")
     Rel(rcfield, payment, "Tạo payment URL, verify callback (booking + F&B pre-order)")
-    Rel(rcfield, s3, "Upload & retrieve inspection photos")
+    Rel(rcfield, s3, "Upload ảnh inspection, lấy URL về lưu DB")
 ```
 
 ---
@@ -67,14 +67,14 @@ C4Container
     }
 
     System_Ext(vnpay, "VNPay", "Payment gateway")
-    System_Ext(s3, "S3 Storage", "Photo storage")
+    System_Ext(s3, "Cloudinary", "Photo storage — upload ảnh, lưu URL")
     System_Ext(notify, "Push/SMS", "Notification (optional)")
 
     Rel(user, web, "Dùng app", "HTTPS")
     Rel(web, api, "API calls", "REST / JSON")
     Rel(api, db, "Read/write", "TypeORM")
     Rel(api, vnpay, "Create payment URL + verify callback (booking + F&B pre-order)", "HTTPS")
-    Rel(api, s3, "Upload/get inspection photos", "S3 API")
+    Rel(api, s3, "Upload inspection photos, get URL", "HTTPS")
     Rel(api, notify, "Push notifications", "HTTPS")
     Rel(scheduler, api, "Trigger timeout transitions", "Internal")
 ```
@@ -130,9 +130,9 @@ graph TD
 | ORM | TypeORM | Entity-based, migration-first |
 | Database | PostgreSQL | Tất cả data — không dùng NoSQL |
 | Auth | JWT + RBAC | 4 roles: CUSTOMER, PROVIDER, STAFF, ADMIN |
-| Validation | zod hoặc express-validator | Bắt buộc trên mọi request body |
+| Validation | zod | Schema reusable, type inference — bắt buộc trên mọi request body |
 | Payment | Gateway TBD (VNPay / MoMo / VietQR) | Verify server-side signature |
-| Storage | S3-compatible | 4 ảnh per inspection record |
+| Storage | Cloudinary | Upload ảnh inspection — lưu URL về DB |
 | Jobs | node-cron | Timeout rules (PENDING 30m, no-show, dispute 72h) |
 
 ### Frontend (`rcfield-app/apps/web`)
@@ -234,7 +234,7 @@ F&B on-site (thêm tại quán):        Tiền mặt / chuyển khoản thẳng 
 | Immutable ledger | Không edit amount component đã tạo — tạo component mới | `03-payment-engine.md` |
 | Single state machine | Mọi booking state change đều qua `BookingService.transition()` | `02-state-machine.md` |
 | Evidence-based handover | 4 ảnh + checklist tại mỗi điểm bàn giao → dispute có bằng chứng số | `04-inspection-flow.md` |
-| Express.js thay NestJS | Lightweight, phù hợp team size và timeline SEP490 | `docs/adr/001-why-nestjs.md` |
+| Express.js thay NestJS | Team 4 người chưa dùng NestJS, timeline 4 tháng — Express an toàn hơn | `docs/adr/002-backend-framework-express.md` |
 | Role-based routing (FE) | 1 app cho 4 actor — đơn giản hóa deployment | — |
 | F&B pre-order gộp 1 payment | Customer không muốn trả 2 lần — gộp booking + F&B vào 1 transaction | — |
 | F&B on-site tách riêng | Tiền chạy thẳng Provider, Platform không thể làm trung gian cho F&B at-venue | — |

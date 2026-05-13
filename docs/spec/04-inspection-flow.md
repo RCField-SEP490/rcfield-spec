@@ -93,8 +93,19 @@ Bước 1-4 tương tự nhưng:
 
 ## Photo Storage
 
+**Provider**: Cloudinary — upload ảnh, lưu URL về DB. Không tự manage storage.
+
 ```
-S3 path: inspections/{booking_id}/{check_in|check_out}/{front|back|left|right}.jpg
+Lưu vào DB (inspection_records.photos jsonb):
+{
+  "front": "https://res.cloudinary.com/.../front.jpg",
+  "back":  "https://res.cloudinary.com/.../back.jpg",
+  "left":  "https://res.cloudinary.com/.../left.jpg",
+  "right": "https://res.cloudinary.com/.../right.jpg"
+}
+
+Folder convention trên Cloudinary:
+  inspections/{booking_id}/{check_in|check_out}/{angle}
 
 Retention: tối thiểu 90 ngày sau booking COMPLETED
            nếu có dispute: giữ đến 30 ngày sau dispute RESOLVED

@@ -72,8 +72,8 @@ Core value prop: structured evidence at every asset handover → eliminates dama
 - **Database**: PostgreSQL via TypeORM
 - **Auth**: JWT + RBAC (4 roles: CUSTOMER, PROVIDER, STAFF, ADMIN)
 - **Payment**: Payment gateway TBD (VNPay / MoMo / VietQR)
-- **File storage**: S3-compatible (check-in/out photos)
-- **Validation**: express-validator hoặc zod on all request bodies
+- **File storage**: Cloudinary (upload ảnh check-in/out, lưu URL về DB)
+- **Validation**: zod on all request bodies
 
 ### Frontend (`rcfield-app/apps/web`)
 - **Framework**: ReactJS (Vite hoặc CRA)
