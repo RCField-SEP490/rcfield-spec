@@ -31,13 +31,23 @@ git clone https://github.com/rcfield-org/rcfield-app.git
 
 ## Project Overview
 
-**RCField** là vertical SaaS platform số hóa vận hành sân xe RC tại Việt Nam.
-Kết nối 3 actor chính: **Customer** (đặt lịch/thuê xe), **Provider+Staff** (quản lý sân/đội xe), **Admin** (platform oversight).
+**RCField** là **B2B SaaS** bán cho **1 doanh nghiệp** vận hành chuỗi sân xe RC tại Việt Nam.
+Không phải marketplace — giống mô hình chuỗi (Starbucks): 1 Provider, nhiều chi nhánh, dùng chung 1 hệ thống.
 
-> **Phạm vi app**: Chỉ quản lý vận hành xe (booking, fleet, inspection, payment). F&B / đồ uống tại sân **không** thuộc RCField — khách tự thanh toán trực tiếp tại quán.
+**Roles**:
+- **ADMIN** — Team RCField (bên bán phần mềm): feature flag management, system monitoring
+- **PROVIDER** — Chủ doanh nghiệp RC: quản lý toàn bộ chi nhánh, xem báo cáo tổng hợp
+- **STAFF** — Nhân viên từng chi nhánh: vận hành check-in/out, F&B, gia hạn
+- **CUSTOMER** — Khách đặt lịch: tìm chi nhánh gần nhất, đặt xe, thanh toán
 
 Hai chế độ booking: **RENTAL** (thuê xe của quán) và **BYOC** (mang xe cá nhân).
 Core value prop: structured evidence at every asset handover → eliminates damage disputes.
+
+**Booking channels**: app trực tiếp / link chia sẻ (Zalo, FB) / Staff tạo thủ công (walk-in, gọi điện).
+
+**F&B**: Customer pre-order khi đặt lịch (gộp 1 lần thanh toán) + Staff ghi order thêm tại quán (khách trả trực tiếp cho quán). Platform không thu phí trên F&B.
+
+**Payment**: Booking + F&B pre-order → 1 lần qua payment gateway (TBD). F&B tại quán → tiền mặt hoặc chuyển khoản thẳng Provider. Platform thu 15% trên booking xe, 0% trên F&B.
 
 ---
 
@@ -60,8 +70,8 @@ Core value prop: structured evidence at every asset handover → eliminates dama
 - **Runtime**: Node.js 20+, TypeScript strict mode
 - **Framework**: Express.js — router-per-domain architecture
 - **Database**: PostgreSQL via TypeORM
-- **Auth**: JWT + RBAC (5 roles: CUSTOMER, PROVIDER, STAFF, ADMIN, PLATFORM)
-- **Payment**: VNPay sandbox
+- **Auth**: JWT + RBAC (4 roles: CUSTOMER, PROVIDER, STAFF, ADMIN)
+- **Payment**: Payment gateway TBD (VNPay / MoMo / VietQR)
 - **File storage**: S3-compatible (check-in/out photos)
 - **Validation**: express-validator hoặc zod on all request bodies
 

@@ -1,13 +1,10 @@
 # Architecture: System Overview
 
-**Last updated**: 2026-05-11
+**Last updated**: 2026-05-12
 **Status**: Draft — đang hoàn thiện dần
 
 > Tài liệu này mô tả kiến trúc tổng thể của RCField ở mức system level.
 > Đọc `docs/spec/00-overview.md` để hiểu business context trước.
-
-> **Scope reminder**: RCField chỉ quản lý vận hành xe RC — đặt lịch, fleet, bàn giao tài sản, thanh toán.
-> F&B / đồ uống tại sân **nằm ngoài app** — khách tự thanh toán trực tiếp tại quán.
 
 ---
 
@@ -20,21 +17,21 @@ tích hợp với 2 external system (VNPay, S3).
 C4Context
     title System Context — RCField Platform
 
-    Person(customer, "Customer", "Đặt lịch, thuê xe / BYOC, thanh toán, xác nhận check-in/out")
-    Person(staff, "Staff", "Check-in/out, đề xuất gia hạn, upload ảnh bằng chứng")
-    Person(provider, "Provider", "Quản lý quán, đội xe, xem analytics")
-    Person(admin, "Admin", "Duyệt quán, xử lý dispute, monitor platform")
+    Person(customer, "Customer", "Đặt lịch, pre-order F&B, thanh toán, xác nhận check-in/out")
+    Person(staff, "Staff", "Check-in/out, ghi F&B order, đề xuất gia hạn, upload ảnh")
+    Person(provider, "Provider", "Quản lý sân, đội xe, menu F&B, xem doanh thu")
+    Person(admin, "Admin", "Duyệt sân, xử lý dispute, monitor platform")
 
-    System(rcfield, "RCField Platform", "Web SaaS: booking, fleet, inspection, payment cho sân xe RC. KHÔNG bao gồm F&B.")
+    System(rcfield, "RCField Platform", "Web SaaS: booking, fleet, inspection, payment, F&B management cho sân xe RC")
 
-    System_Ext(vnpay, "VNPay Gateway", "Xử lý thanh toán trực tuyến (sandbox)")
+    System_Ext(payment, "Payment Gateway (TBD)", "Xử lý thanh toán booking + F&B pre-order")
     System_Ext(s3, "S3-compatible Storage", "Lưu ảnh check-in/out (4 góc per inspection)")
 
-    Rel(customer, rcfield, "Đặt lịch, thanh toán, xác nhận")
-    Rel(staff, rcfield, "Check-in/out, gia hạn, upload ảnh")
-    Rel(provider, rcfield, "Quản lý fleet, xem doanh thu")
-    Rel(admin, rcfield, "Duyệt cafe, xử lý dispute")
-    Rel(rcfield, vnpay, "Tạo payment URL, verify callback")
+    Rel(customer, rcfield, "Đặt lịch, pre-order F&B, thanh toán, xác nhận")
+    Rel(staff, rcfield, "Check-in/out, ghi order, gia hạn, upload ảnh")
+    Rel(provider, rcfield, "Quản lý fleet + menu, xem doanh thu")
+    Rel(admin, rcfield, "Duyệt sân, xử lý dispute")
+    Rel(rcfield, payment, "Tạo payment URL, verify callback (booking + F&B pre-order)")
     Rel(rcfield, s3, "Upload & retrieve inspection photos")
 ```
 
@@ -42,14 +39,15 @@ C4Context
 
 ## 2. Actor & App Matrix
 
-| Actor | Role | App | Device target | Permissions |
-|-------|------|-----|--------------|-------------|
-| Customer | Đặt lịch / thanh toán | Web (mobile-first) | Mobile browser | CUSTOMER role |
-| Staff | Check-in/out, gia hạn | Web (mobile-first) | Mobile browser | STAFF role |
-| Provider | Quản lý quán + fleet | Web | Desktop/tablet | PROVIDER role |
-| Admin | Platform oversight | Web (admin portal) | Desktop | ADMIN role |
+| Actor | Role | Là ai | App | Device target |
+|-------|------|-------|-----|--------------|
+| Customer | CUSTOMER | Khách đặt lịch chơi xe | Web (mobile-first) | Mobile browser |
+| Staff | STAFF | Nhân viên từng chi nhánh | Web (mobile-first) | Mobile browser |
+| Provider | PROVIDER | Chủ doanh nghiệp RC (quản lý toàn chuỗi) | Web | Desktop/tablet |
+| Admin | ADMIN | Team RCField — bên bán phần mềm | Web (admin portal) | Desktop |
 
 > Tất cả 4 actor dùng chung 1 React web app — routing và UI render dựa trên `UserRole` từ JWT.
+> Provider xem aggregate toàn chuỗi + drill-down từng chi nhánh. Staff chỉ thấy chi nhánh được assign.
 
 ---
 
@@ -64,7 +62,7 @@ C4Container
     Container_Boundary(rcfield, "RCField Platform") {
         Container(web, "Web App", "ReactJS + TypeScript + Tailwind", "SPA mobile-first. Role-based UI routing.")
         Container(api, "API Server", "Node.js 20 + Express + TypeScript", "REST API. JWT auth. Business logic. State machine.")
-        ContainerDb(db, "PostgreSQL", "TypeORM", "Tất cả entity: User, Cafe, Booking, Payment, Inspection, Dispute")
+        ContainerDb(db, "PostgreSQL", "TypeORM", "Tất cả entity: User, Cafe, Booking, Payment, Inspection, Dispute, FbOrder")
         Container(scheduler, "Scheduler", "Node.js cron jobs", "Timeout rules: PENDING 30m, no-show 30m, checkout 2h/24h, dispute 72h")
     }
 
@@ -75,7 +73,7 @@ C4Container
     Rel(user, web, "Dùng app", "HTTPS")
     Rel(web, api, "API calls", "REST / JSON")
     Rel(api, db, "Read/write", "TypeORM")
-    Rel(api, vnpay, "Create payment URL + verify callback", "HTTPS")
+    Rel(api, vnpay, "Create payment URL + verify callback (booking + F&B pre-order)", "HTTPS")
     Rel(api, s3, "Upload/get inspection photos", "S3 API")
     Rel(api, notify, "Push notifications", "HTTPS")
     Rel(scheduler, api, "Trigger timeout transitions", "Internal")
@@ -85,7 +83,7 @@ C4Container
 
 ## 4. Domain Modules
 
-Hệ thống chia thành 7 module theo domain, mỗi module có router + controller + service riêng.
+Hệ thống chia thành 9 module theo domain, mỗi module có router + controller + service riêng.
 
 ```mermaid
 graph TD
@@ -98,12 +96,13 @@ graph TD
     subgraph Operations["Operations Modules"]
         FLEET["Fleet\n/cafes/:id/vehicles\nVehicle CRUD, tier, status"]
         INSPECTION["Inspection\n/bookings/:id/inspections\nCheck-in/out, photos, checklist"]
-        EXTENSION["Extension\n/bookings/:id/extensions\nPropose, approve, reject"]
+        EXTENSION["Extension\n/bookings/:id/extensions\nPropose, approve, reject + notify"]
         DISPUTE["Dispute\n/bookings/:id/disputes\nOpen, resolve (Admin)"]
+        FNB["F&B\n/cafes/:id/menu + /bookings/:id/fnb-orders\nMenu mgmt, pre-order, on-site order"]
     end
 
     subgraph Discovery["Discovery Modules"]
-        CAFE["Cafe\n/cafes\nListing, filter, profile"]
+        CAFE["Cafe\n/cafes\nListing, filter, profile, shareable link"]
     end
 
     AUTH --> BOOKING
@@ -111,7 +110,9 @@ graph TD
     BOOKING --> INSPECTION
     BOOKING --> EXTENSION
     BOOKING --> DISPUTE
+    BOOKING --> FNB
     CAFE --> FLEET
+    CAFE --> FNB
     FLEET --> BOOKING
 ```
 
@@ -128,9 +129,9 @@ graph TD
 | Framework | Express.js | Router-per-domain architecture |
 | ORM | TypeORM | Entity-based, migration-first |
 | Database | PostgreSQL | Tất cả data — không dùng NoSQL |
-| Auth | JWT + RBAC | 5 roles: CUSTOMER, PROVIDER, STAFF, ADMIN, PLATFORM |
+| Auth | JWT + RBAC | 4 roles: CUSTOMER, PROVIDER, STAFF, ADMIN |
 | Validation | zod hoặc express-validator | Bắt buộc trên mọi request body |
-| Payment | VNPay sandbox | Verify server-side signature |
+| Payment | Gateway TBD (VNPay / MoMo / VietQR) | Verify server-side signature |
 | Storage | S3-compatible | 4 ảnh per inspection record |
 | Jobs | node-cron | Timeout rules (PENDING 30m, no-show, dispute 72h) |
 
@@ -152,13 +153,14 @@ graph TD
 
 ```mermaid
 flowchart TD
-    A([Customer tạo booking]) --> B[POST /bookings\nSnapshot giá vào DB]
-    B --> C{Thanh toán VNPay}
-    C -->|Thành công| D[Tạo PaymentComponents\nSLOT_FEE + RENTAL_FEE + DEPOSIT → HELD]
+    A([Customer tạo booking\n+ chọn F&B pre-order optional]) --> B[POST /bookings\nSnapshot giá vào DB\nTạo FbOrder nếu có pre-order]
+    B --> C{Thanh toán\n1 lần: booking + F&B pre-order}
+    C -->|Thành công| D[Tạo PaymentComponents\nSLOT_FEE + RENTAL_FEE + DEPOSIT → HELD\nFB_PREORDER → HELD]
     C -->|Thất bại / 30m timeout| E([CANCELLED\nRefund 100%])
-    D --> F[Staff Check-in\n4 ảnh + checklist → S3]
+    D --> F[Staff Check-in\n4 ảnh + checklist → S3\nConfirm F&B pre-order đã chuẩn bị]
     F --> G([ACTIVE])
-    G -->|Optional| H[Staff đề xuất gia hạn\n→ Customer approve/reject]
+    G -->|Staff ghi thêm| G2[F&B on-site order\nKhách trả thẳng Provider\ntiền mặt / chuyển khoản]
+    G -->|Gần hết giờ| H[Notify Staff + Customer\nStaff đề xuất gia hạn\n→ Customer approve/reject]
     H --> G
     G --> I[Staff Check-out\n4 ảnh + damage flag]
     I -->|No damage| J[Customer confirm / 2h auto]
@@ -166,7 +168,7 @@ flowchart TD
     K -->|Xác nhận| J
     K -->|Dispute| L[Admin xét xử\ndựa trên evidence ảnh]
     L --> J
-    J --> M([COMPLETED\nPaymentEngine settle\nDisburse → Provider\nRefund → Customer])
+    J --> M([COMPLETED\nSettle: Disburse booking → Provider\nDisburse F&B pre-order → Provider 100%\nRefund deposit → Customer])
 ```
 
 ---
@@ -189,24 +191,31 @@ Request → JWT Middleware → RBAC Guard → Controller → Service
 
 ## 8. External Integrations
 
-### VNPay
+### Payment Gateway (TBD)
+
+> Payment gateway chưa được chốt (VNPay / MoMo / VietQR). Flow dưới đây mô tả cơ chế chung,
+> không phụ thuộc vào provider cụ thể.
 
 ```
-Customer                Web App             API Server            VNPay
-   │──── chọn thanh toán ──>│                   │                   │
-   │                        │── POST /bookings ─>│                   │
-   │                        │<── paymentUrl ─────│── tạo URL ────────│
-   │<─── redirect to URL ───│                   │                   │
-   │──────────────────────────────────────────────────────────────── thanh toán
-   │                        │<── redirect + params ─────────────────│
-   │                        │── POST /payment/confirm ──>│          │
-   │                        │                   │── verify signature ─>│
-   │                        │                   │<── valid ──────────│
-   │                        │<─── CONFIRMED ────│                   │
+Customer              Web App           API Server          Gateway
+   │── đặt lịch ────>│                     │                   │
+   │  (+ F&B nếu có) │── POST /bookings ──>│                   │
+   │                  │<── paymentUrl ──────│── tạo URL ────────│
+   │<── redirect ─────│                     │                   │
+   │──────────────────────────────────────────── thanh toán ───>│
+   │                  │<── callback + params ──────────────────│
+   │                  │── POST /payment/confirm ──>│            │
+   │                  │                    │── verify ─────────>│
+   │                  │                    │<── valid ──────────│
+   │                  │<─── CONFIRMED ─────│                   │
 ```
 
-> ⚠️ Cần xem xét thêm VNPay IPN (server-to-server callback) để handle trường hợp Customer
-> đóng browser giữa chừng sau khi thanh toán thành công. Xem Open Questions trong sequence diagram.
+**Dòng tiền:**
+```
+Booking (slot + rental + deposit):  Gateway → Platform → disburse Provider (trừ 15% fee)
+F&B pre-order:                      Gateway → Platform → disburse Provider (100%, 0% fee)
+F&B on-site (thêm tại quán):        Tiền mặt / chuyển khoản thẳng Provider (ngoài Platform)
+```
 
 ### S3 Storage
 
@@ -227,21 +236,27 @@ Customer                Web App             API Server            VNPay
 | Evidence-based handover | 4 ảnh + checklist tại mỗi điểm bàn giao → dispute có bằng chứng số | `04-inspection-flow.md` |
 | Express.js thay NestJS | Lightweight, phù hợp team size và timeline SEP490 | `docs/adr/001-why-nestjs.md` |
 | Role-based routing (FE) | 1 app cho 4 actor — đơn giản hóa deployment | — |
+| F&B pre-order gộp 1 payment | Customer không muốn trả 2 lần — gộp booking + F&B vào 1 transaction | — |
+| F&B on-site tách riêng | Tiền chạy thẳng Provider, Platform không thể làm trung gian cho F&B at-venue | — |
+| Payment gateway TBD | Chưa chốt provider — tách interface, dễ swap sau | — |
 
 ---
 
 ## 10. Open Questions (Architecture level)
 
-1. **Notification service**: Hiện chưa chọn provider cụ thể (Firebase FCM? Twilio SMS?).
-   Spec chỉ note "Push/SMS" — cần quyết định trước TP-2.
+1. **Payment gateway**: Chưa chốt provider (VNPay / MoMo / VietQR). Cần quyết định trước TP-2.
 
-2. **VNPay IPN**: Có cần server-to-server callback không? (xem Block 2 trong sequence diagram)
+2. **Payment IPN**: Có cần server-to-server callback từ gateway không? Tránh trường hợp Customer đóng browser sau khi thanh toán thành công.
 
-3. **Hosting / Deployment**: Chưa xác định — cloud provider, containerization (Docker?),
-   CI/CD pipeline. Cần quyết định trong TP-3.
+3. **Slot extension notification**: Notify khi còn bao nhiêu phút? (15 phút? 10 phút?) Cần confirm.
 
-4. **Platform fee disbursement mechanism**: Spec nêu 15% nhưng chưa rõ cơ chế thực thu
-   (trừ từ Provider disbursement hay tạo component riêng).
+4. **F&B QR code**: Platform generate QR động hay Provider tự upload QR tài khoản ngân hàng?
+
+5. **Platform fee disbursement**: 15% trừ trực tiếp khi disburse hay tạo thêm component `PLATFORM_FEE` riêng?
+
+6. **Notification service**: Chưa chọn provider (Firebase FCM? Twilio SMS?). Cần quyết định trước TP-2.
+
+7. **Hosting / Deployment**: Chưa xác định — cloud provider, Docker, CI/CD. Cần quyết định trong TP-3.
 
 ---
 
@@ -258,4 +273,4 @@ Customer                Web App             API Server            VNPay
 
 ---
 
-*Last updated: 2026-05-11 · Status: Draft*
+*Last updated: 2026-05-12 · Status: Draft*

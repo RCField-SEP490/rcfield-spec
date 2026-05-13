@@ -1,6 +1,6 @@
 # 00 — Project Overview
 
-**Last updated**: 2026-05  
+**Last updated**: 2026-05-13  
 **Status**: Active
 
 ---
@@ -15,7 +15,11 @@
 
 ## Bối cảnh
 
-Sân xe RC (Radio-Controlled Car) là mô hình giải trí trải nghiệm đang nổi tại Việt Nam. Các địa điểm này thường được gọi là "cafe xe RC" theo tên thông dụng, nhưng **RCField chỉ số hóa phần vận hành xe** — đặt lịch, thuê xe, bàn giao tài sản, thanh toán. Đồ uống / F&B tại quán là dịch vụ ngoài app, khách tự thanh toán trực tiếp tại quán.
+Sân xe RC (Radio-Controlled Car) là mô hình giải trí trải nghiệm đang nổi tại Việt Nam. Các địa điểm này thường được gọi là "cafe xe RC" theo tên thông dụng.
+
+**RCField** là phần mềm B2B bán cho **1 doanh nghiệp** vận hành chuỗi sân xe RC. Doanh nghiệp đó có nhiều **chi nhánh** (branches) ở các địa điểm khác nhau — mỗi chi nhánh có config riêng (giá, đội xe, menu F&B) nhưng dùng chung 1 hệ thống. Không phải marketplace nhiều thương hiệu — giống mô hình chuỗi hơn là sàn thương mại điện tử.
+
+RCField số hóa toàn bộ vận hành: đặt lịch, thuê xe, bàn giao tài sản có bằng chứng, thanh toán, và quản lý F&B.
 
 Hai nhóm khách:
 
@@ -35,10 +39,16 @@ Hai nhóm khách:
 
 ## Giải pháp
 
-RCField là **vertical SaaS marketplace** kết hợp:
-1. **Operations digitalization** — booking, fleet, inspection, payment
-2. **Evidence-based handover** — ảnh 4 góc + checklist tại mọi điểm bàn giao tài sản
-3. **Dispute resolution** — admin xét xử dựa trên digital evidence
+RCField là **B2B SaaS** cho chuỗi sân xe RC, kết hợp:
+1. **Multi-branch management** — 1 Provider quản lý nhiều chi nhánh, mỗi chi nhánh config độc lập
+2. **Operations digitalization** — booking, fleet, inspection, payment, F&B
+3. **Evidence-based handover** — ảnh 4 góc + checklist tại mọi điểm bàn giao tài sản
+4. **Dispute resolution** — admin xét xử dựa trên digital evidence
+
+**Booking channels** — khách có thể đặt lịch qua:
+- App trực tiếp (Customer tự đặt)
+- Link chia sẻ (Provider paste lên Zalo/FB → khách bấm vào đặt)
+- Thủ công (Staff tạo booking trên app cho khách walk-in / gọi điện)
 
 ---
 
@@ -46,9 +56,9 @@ RCField là **vertical SaaS marketplace** kết hợp:
 
 | Actor | Mô tả | App |
 |-------|-------|-----|
-| **Customer** | Đặt lịch, thuê xe / BYOC, thanh toán, đánh giá | Web (mobile-first) |
-| **Provider** | Chủ quán: quản lý hồ sơ, đội xe, analytics | Web |
-| **Staff** | Nhân viên quán: check-in/out, gia hạn | Web (mobile-first) |
+| **Customer** | Đặt lịch, chọn F&B pre-order, thanh toán, xác nhận check-in/out, đánh giá | Web (mobile-first) |
+| **Provider** | Chủ quán: quản lý hồ sơ, đội xe, menu F&B, xem doanh thu | Web |
+| **Staff** | Nhân viên quán: check-in/out, ghi F&B order, đề xuất gia hạn | Web (mobile-first) |
 | **Admin** | Platform: duyệt quán, xử lý dispute, monitor | Web |
 
 ---
@@ -56,19 +66,17 @@ RCField là **vertical SaaS marketplace** kết hợp:
 ## Scope (In / Out)
 
 ### Trong scope (MVP)
-- Cafe listing & discovery
+- Venue listing & discovery
 - Booking lifecycle (RENTAL + BYOC)
+- Multi-channel booking (app / link chia sẻ / thủ công)
 - Asset Risk Tier classification
 - Check-in / Check-out inspection với photo evidence
-- Slot extension proposal
-- Component-based payment (VNPay sandbox)
+- Slot extension proposal + notification khi gần hết giờ
+- F&B management: pre-order khi đặt lịch + ghi order tại quán
+- Component-based payment (gateway TBD)
 - Dispute resolution
-- Provider analytics dashboard
+- Provider analytics dashboard (xe + F&B)
 - Full test suite + deployment
-
-### Ngoài scope (mọi phase)
-- **F&B / đồ uống** — khách tự mua trực tiếp tại quán, không qua app
-- **POS / order đồ ăn uống** — không thuộc RCField
 
 ### Ngoài scope (Phase 2)
 - Tournament management
