@@ -152,6 +152,7 @@ CREATE UNIQUE INDEX idx_refresh_tokens_token ON refresh_tokens(token);
 | `slot_fee_rate` | `numeric(15,2)` | NOT NULL | Giá mỗi slot (VNĐ) — hiển thị, tính tiền dùng snapshot |
 | `max_concurrent_bookings` | `integer` | NOT NULL, DEFAULT 10 | Số lượng booking đồng thời tối đa |
 | `min_booking_notice_minutes` | `integer` | NOT NULL, DEFAULT 60 | Phải đặt trước tối thiểu bao nhiêu phút |
+| `byoc_capacity` | `integer` | NOT NULL, DEFAULT 5 | Số lượng BYOC tối đa cùng 1 slot |
 
 **Timestamps:**
 
@@ -217,6 +218,7 @@ CREATE INDEX idx_staff_cafe_cafe_id ON staff_cafe_assignments(cafe_id);
 | `hourly_rate` | `numeric(15,2)` | NOT NULL | Giá thuê / giờ |
 | `security_deposit` | `numeric(15,2)` | NOT NULL | Tiền đặt cọc |
 | `damage_multiplier` | `numeric(4,2)` | NOT NULL, DEFAULT 1.00 | 1.0 / 1.5 / 2.0 |
+| `compatible_track_types` | `text[]` | NOT NULL, DEFAULT '{}' | Track types xe này chạy được. Rỗng = tất cả track |
 | `cover_image_url` | `text` | NULL | Ảnh đại diện (lấy từ vehicle_images) |
 | `last_maintenance_at` | `timestamptz` | NULL | |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
@@ -242,8 +244,9 @@ CREATE INDEX idx_vehicles_tier ON vehicles(tier);
 | `vehicle_id` | `uuid` | NULL, FK → vehicles(id) | NULL nếu BYOC |
 | `mode` | `enum('RENTAL','BYOC')` | NOT NULL | |
 | `status` | `enum('PENDING','CONFIRMED','ACTIVE','EXTENDING','CHECKING_OUT','DISPUTED','COMPLETED','CANCELLED')` | NOT NULL, DEFAULT 'PENDING' | |
-| `slot_start` | `timestamptz` | NOT NULL | |
+| `slot_start` | `timestamptz` | NOT NULL | Phải trùng với boundary của fixed slot |
 | `slot_end` | `timestamptz` | NOT NULL | Cập nhật khi gia hạn |
+| `slot_count` | `integer` | NOT NULL, DEFAULT 1 | Số slot đặt liên tiếp (VD: 2 = 2 tiếng) |
 | `snapshot` | `jsonb` | NOT NULL | BookingSnapshot — bất biến sau khi tạo |
 | `notes` | `text` | NULL | Ghi chú của customer |
 | `cancelled_by` | `uuid` | NULL, FK → users(id) | Ai huỷ |
@@ -267,15 +270,19 @@ CREATE INDEX idx_bookings_vehicle_slot ON bookings(vehicle_id, slot_start, slot_
 **`snapshot` JSON structure:**
 ```jsonc
 {
-  "slot_fee_rate": 150000,      // VNĐ/slot
-  "rental_fee": 50000,          // VNĐ (0 nếu BYOC)
-  "security_deposit": 500000,   // VNĐ (0 nếu BYOC)
+  "slot_fee_rate": 150000,          // VNĐ/slot
+  "slot_count": 2,                  // Số slot đặt
+  "slot_duration_minutes": 60,      // Phút/slot
+  "total_slot_fee": 300000,         // slot_fee_rate × slot_count
+  "rental_fee": 50000,              // VNĐ (0 nếu BYOC)
+  "security_deposit": 500000,       // VNĐ (0 nếu BYOC)
   "damage_multiplier": 1.5,
   "platform_fee_pct": 0.15,
   "refund_rule": "R1",
-  "slot_duration_minutes": 60,
-  "vehicle_name": "Traxxas Slash 4x4",  // snapshot tên xe
-  "cafe_name": "RCField Q7"             // snapshot tên chi nhánh
+  "vehicle_name": "Traxxas Slash 4x4",
+  "vehicle_tier": "PREMIUM",
+  "cafe_name": "RCField Q7",
+  "cafe_slug": "rcfield-quan-7"
 }
 ```
 

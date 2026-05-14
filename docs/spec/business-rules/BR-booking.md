@@ -5,7 +5,54 @@
 
 ---
 
-## 1. Tạo booking
+## 1. Slot system
+
+**BR-BK-000-A** — Fixed slots  
+Hệ thống generate sẵn các khung giờ theo `cafe.slot_duration_minutes`:
+```
+slot_duration = 60 phút → slots: 09:00, 10:00, 11:00, ..., 21:00
+slot_duration = 90 phút → slots: 09:00, 10:30, 12:00, ..., 19:30
+```
+Customer chỉ được chọn `slot_start` trùng với boundary đó — không tự nhập giờ tự do.
+
+**BR-BK-000-B** — Multi-slot booking  
+Customer chọn giờ bắt đầu + số tiếng (1h / 2h / 3h / 4h):
+```
+slot_start = 10:00, slot_count = 2 → slot_end = 12:00
+```
+Hệ thống check tất cả N slots liên tiếp đều available trước khi cho đặt.
+
+**BR-BK-000-C** — Availability check RENTAL  
+IF: Customer muốn đặt xe X trong khung giờ T  
+THEN: Xe X available khi:
+1. `vehicle.status = AVAILABLE`
+2. Không có booking nào của xe X với `status NOT IN ('CANCELLED')` overlap khung giờ T
+3. `vehicle.compatible_track_types` chứa track type customer chọn (nếu có chọn)
+
+**BR-BK-000-D** — Availability check BYOC  
+IF: Customer muốn đặt BYOC trong khung giờ T  
+THEN: BYOC available khi:
+1. Số BYOC booking trong khung giờ T có `status NOT IN ('CANCELLED')` < `cafe.byoc_capacity`
+
+**BR-BK-000-E** — Nhiều khách cùng slot  
+Nhiều customer có thể book cùng 1 khung giờ nếu mỗi người đặt xe khác nhau (RENTAL) hoặc còn chỗ BYOC:
+```
+Slot 10:00–11:00:
+  Khách A → xe Traxxas Slash   ✅
+  Khách B → xe Arrma Kraton    ✅ (xe khác, không conflict)
+  Khách C → BYOC               ✅ (nếu byoc_capacity chưa đầy)
+  Khách D → xe Traxxas Slash   ❌ (xe đã bị A đặt)
+```
+
+**BR-BK-000-F** — Xe gắn với track  
+IF: `vehicle.compatible_track_types` không rỗng  
+THEN: Xe đó chỉ có thể book khi cafe có track type tương ứng  
+IF: `vehicle.compatible_track_types` rỗng  
+THEN: Xe chạy được tất cả track của chi nhánh
+
+---
+
+## 2. Tạo booking
 
 **BR-BK-001** — Snapshot giá tại thời điểm tạo  
 IF: Customer tạo booking  
@@ -34,7 +81,7 @@ Customer có thể tạo booking qua 3 kênh:
 
 ---
 
-## 2. Thanh toán & xác nhận
+## 3. Thanh toán & xác nhận
 
 **BR-BK-006** — Window thanh toán  
 IF: Booking được tạo (status = PENDING)  
@@ -48,7 +95,7 @@ THEN: Tổng thanh toán = booking fee + F&B pre-order fee (1 transaction duy nh
 
 ---
 
-## 3. Huỷ booking
+## 4. Huỷ booking
 
 **BR-BK-008** — Customer huỷ trước 24h  
 IF: Customer huỷ và thời điểm huỷ > 24h trước `slot_start`  
@@ -72,7 +119,7 @@ THEN: Không thể huỷ — chỉ có thể check-out hoặc mở dispute
 
 ---
 
-## 4. No-show
+## 5. No-show
 
 **BR-BK-013** — Timeout no-show  
 IF: Booking đang CONFIRMED và Staff không check-in trong vòng 30 phút sau `slot_start`  
@@ -83,7 +130,7 @@ THEN: Auto-cancel
 
 ---
 
-## 5. Eligibility
+## 6. Eligibility
 
 **BR-BK-014** — Eligibility BYOC  
 IF: Customer chọn BYOC  

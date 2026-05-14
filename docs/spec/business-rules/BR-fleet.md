@@ -46,7 +46,20 @@ THEN: Không thể tạo booking. Không thể chuyển về AVAILABLE. Chỉ d�
 
 ---
 
-## 3. Quản lý fleet per-branch
+## 3. Track compatibility
+
+**BR-FL-010** — Xe gắn với track cụ thể  
+IF: `vehicle.compatible_track_types` không rỗng (VD: `['DRIFT']`)  
+THEN: Xe đó chỉ available để book khi customer chọn đúng track type đó  
+NOTE: Dùng cho xe chuyên dụng (VD: xe drift không thể dùng trên sân obstacle)
+
+**BR-FL-011** — Xe dùng được mọi track  
+IF: `vehicle.compatible_track_types` rỗng (`[]`)  
+THEN: Xe đó available cho tất cả track type mà chi nhánh có
+
+---
+
+## 4. Quản lý fleet per-branch
 
 **BR-FL-008** — Fleet thuộc về chi nhánh  
 Mỗi xe (`Vehicle`) thuộc về đúng 1 `Cafe` (chi nhánh). Xe không thể chia sẻ giữa các chi nhánh.
