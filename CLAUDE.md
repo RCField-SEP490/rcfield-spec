@@ -200,6 +200,11 @@ graphify run                        # build graph từ docs/spec/
 ```
 
 <!-- SPECKIT START -->
-For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan
+Current active feature plan: `specs/001-user-login/plan.md`
+For implementation context, read in order:
+1. `specs/001-user-login/plan.md` — technical context, structure, constitution check
+2. `specs/001-user-login/research.md` — key decisions (Google OAuth, token storage, brute-force)
+3. `specs/001-user-login/data-model.md` — User + RefreshToken entities
+4. `specs/001-user-login/contracts/auth.md` — API endpoint contracts
+5. `specs/001-user-login/quickstart.md` — implementation order and code snippets
 <!-- SPECKIT END -->

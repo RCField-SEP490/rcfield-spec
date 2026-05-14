@@ -52,6 +52,13 @@ erDiagram
     users ||--o{ notification_logs : "receives notifications"
     users ||--o{ trust_score_logs : "score history"
     bookings ||--o{ trust_score_logs : "triggered by"
+    cafes ||--o{ cafe_closures : "has closures"
+    cafes ||--o{ promotions : "may offer"
+    cafes ||--o{ cafe_announcements : "announces"
+    promotions ||--o{ promotion_usages : "applied in"
+    bookings ||--o| promotion_usages : "uses promo"
+    bookings ||--o| reviews : "reviewed after"
+    vehicles ||--o{ vehicle_maintenance_logs : "maintenance history"
 ```
 
 ---
@@ -294,7 +301,20 @@ CREATE INDEX idx_bookings_vehicle_slot ON bookings(vehicle_id, slot_start, slot_
   "vehicle_name": "Traxxas Slash 4x4",
   "vehicle_tier": "PREMIUM",
   "cafe_name": "RCField Q7",
-  "cafe_slug": "rcfield-quan-7"
+  "cafe_slug": "rcfield-quan-7",
+  // Promo — null nếu không dùng mã
+  "promo": {
+    "code": "SUMMER20",
+    "discount_type": "PERCENT",     // hoặc "FIXED"
+    "discount_value": 20,
+    "max_discount_amount": 100000   // null = không giới hạn
+  },
+  // Calculated tại thời điểm tạo — dùng cho mọi tính toán tiếp theo
+  "calculated": {
+    "subtotal": 350000,             // total_slot_fee + rental_fee
+    "discount_amount": 70000,       // 0 nếu không có promo
+    "total_charge": 280000          // subtotal - discount_amount (customer trả cái này + deposit)
+  }
 }
 ```
 
@@ -661,7 +681,9 @@ CREATE INDEX idx_cafe_closures_cafe_id ON cafe_closures(cafe_id);
 
 ### 3.22 `promotions`
 
-> Mã khuyến mãi / discount code — áp dụng khi tạo booking.
+> Mã khuyến mãi / discount code — áp dụng khi tạo booking.  
+> `cafe_id IS NULL` = global (toàn chuỗi). `cafe_id = X` = chỉ chi nhánh X.  
+> Xem `business-rules/BR-promotions.md` để biết logic validation và tính discount.
 
 | Column | Type | Constraints | Ghi chú |
 |--------|------|-------------|---------|
@@ -812,9 +834,67 @@ CREATE INDEX idx_cafe_announcements_cafe_id ON cafe_announcements(cafe_id, is_ac
 | 18 | `notification_logs` | Lịch sử notification đã gửi |
 | 19 | `feature_flags` | Bật/tắt tính năng — ADMIN quản lý (kể cả AI features) |
 | 20 | `trust_score_logs` | Lịch sử thay đổi trust_score — immutable audit trail |
+| 21 | `cafe_closures` | Ngày đóng cửa theo lịch (Tết, bảo trì) |
+| 22 | `promotions` | Mã khuyến mãi (PERCENT / FIXED) |
+| 23 | `promotion_usages` | Lịch sử áp dụng mã khuyến mãi per booking |
+| 24 | `vehicle_maintenance_logs` | Lịch sử bảo trì / sửa chữa xe |
+| 25 | `reviews` | Đánh giá sao của customer sau khi chơi |
+| 26 | `cafe_announcements` | Thông báo / banner của chi nhánh hiển thị trên web |
 
 ---
 
+## 5. Redis — Slot Locking
+
+> Redis dùng để ngăn double booking tại thời điểm checkout — không dùng cho promo.
+
+### Key schema
+
+**RENTAL** — lock 1 xe cụ thể trong 1 slot:
+```
+Key:   slot:rental:{cafeId}:{vehicleId}:{date}:{slotStart}
+Value: {userId}
+TTL:   1800s (30 phút)
+Cmd:   SET NX EX
+```
+
+**BYOC** — đếm số lượng người đặt cùng 1 slot (giới hạn theo `cafe.byoc_capacity`):
+```
+Key:   slot:byoc:{cafeId}:{trackType}:{date}:{slotStart}
+Value: counter (integer)
+TTL:   1800s (30 phút)
+Cmd:   INCR → check <= byoc_capacity, nếu vượt thì DECR + từ chối
+```
+
+### Flow
+
+```
+[Checkout] Customer xác nhận đặt
+  ↓
+RENTAL: SET NX slot:rental:...   → 0 = slot đang bị giữ → báo lỗi
+BYOC:   INCR slot:byoc:...       → counter > byoc_capacity → DECR + báo lỗi
+  ↓
+Tạo booking (status = PENDING) trong DB + lock promo (nếu có) trong DB transaction
+  ↓
+[Thanh toán thành công]
+  → booking.status = CONFIRMED
+  → DEL Redis key (slot được lock bởi DB booking, không cần Redis nữa)
+
+[Không thanh toán — hết TTL 30 phút]
+  → Redis key tự hết hạn → slot tự do
+  → Cron job (chạy mỗi 5 phút) scan PENDING bookings quá hạn:
+      - booking.status = CANCELLED
+      - Rollback promo usage (nếu có): uses_count - 1, xóa promotion_usages record
+```
+
+### Tại sao cron vẫn cần
+
+Redis TTL giải phóng slot (availability) tự động. Nhưng cần cron để:
+- Cập nhật `booking.status = CANCELLED` trong DB (audit trail)
+- Rollback `promotion_usages` + `promotions.uses_count`
+
+Cron không cần chạy nhanh — 5 phút/lần là đủ vì slot đã được Redis giải phóng rồi.
+
+---
 
 ## Reference
 
@@ -826,4 +906,4 @@ CREATE INDEX idx_cafe_announcements_cafe_id ON cafe_announcements(cafe_id, is_ac
 
 ---
 
-*Last updated: 2026-05-14 · 20 tables*
+*Last updated: 2026-05-14 · 26 tables*

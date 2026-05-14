@@ -110,12 +110,29 @@ Nếu damage_charge > security_deposit:
 
 ---
 
+## Discount (Mã giảm giá)
+
+> Chi tiết validation và tạo mã: xem `business-rules/BR-promotions.md`
+
+```
+subtotal        = slot_fee_total + rental_fee_total
+discount_amount = tính từ promotion (PERCENT hoặc FIXED, xem BR-PR-004)
+total_charge    = subtotal - discount_amount    ← số tiền customer thực sự trả
+```
+
+`security_deposit` KHÔNG bị discount — luôn thu đủ.
+
+Customer thanh toán `total_charge + security_deposit` trong 1 lần qua payment gateway.
+
+---
+
 ## Platform Fee
 
 ```
 platform_fee = 0.15 × sum(disbursed_components_to_provider)
 
 Disbursed components = SLOT_FEE + RENTAL_FEE + EXTENSION_FEE + DAMAGE_CHARGE
+  (tính theo giá trị thực tế sau discount, không phải subtotal gốc)
 KHÔNG tính trên: SECURITY_DEPOSIT (là tiền của customer)
 ```
 

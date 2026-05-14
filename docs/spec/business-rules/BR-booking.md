@@ -85,11 +85,23 @@ Customer có thể tạo booking qua 3 kênh:
 
 ## 3. Thanh toán & xác nhận
 
-**BR-BK-006** — Window thanh toán  
-IF: Booking được tạo (status = PENDING)  
-THEN: Customer phải hoàn thành thanh toán trong 30 phút  
-IF: Quá 30 phút chưa thanh toán  
-THEN: Auto-cancel, hoàn tiền 100%
+**BR-BK-006** — Slot lock bằng Redis trước khi tạo booking  
+IF: Customer xác nhận đặt lịch  
+THEN: Hệ thống thực hiện theo thứ tự:
+1. SET NX Redis key cho slot (RENTAL) hoặc INCR counter (BYOC) — TTL 1800s
+2. Nếu Redis báo slot đang bị giữ → từ chối ngay, KHÔNG tạo booking
+3. Nếu Redis thành công → tạo booking (status = PENDING) trong DB
+
+NOTE: Redis key hết TTL → slot tự giải phóng về mặt availability (người khác có thể đặt).  
+Cron job cập nhật `booking.status = CANCELLED` và rollback promo sau đó (không cần tức thì).
+
+**BR-BK-006-B** — Window thanh toán  
+IF: Booking ở status = PENDING  
+THEN: Customer phải hoàn thành thanh toán trong 30 phút (`payment_expires_at = created_at + 30m`)  
+IF: Thanh toán thành công  
+THEN: `booking.status = CONFIRMED`, DEL Redis key  
+IF: Hết 30 phút chưa thanh toán  
+THEN: Redis key hết TTL tự giải phóng slot. Cron cập nhật status = CANCELLED + rollback promo.
 
 **BR-BK-007** — F&B pre-order gộp vào 1 lần thanh toán  
 IF: Customer chọn F&B pre-order khi đặt lịch  
