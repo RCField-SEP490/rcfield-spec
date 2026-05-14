@@ -51,6 +51,17 @@ Core value prop: structured evidence at every asset handover → eliminates dama
 
 ---
 
+## Project-Specific Guidelines
+
+> **Before writing any code**, read the `CLAUDE.md` inside the relevant project:
+>
+> - **Backend**: `rcfeild-be/CLAUDE.md` — controller conventions, logger usage, validation, enums, naming
+> - **Frontend**: `rcfeild-fe/CLAUDE.md` — *(when available)*
+>
+> These files contain coding rules that all agents must follow for that project.
+
+---
+
 ## Spec Files — Đọc trước khi implement bất kỳ feature nào
 
 | File | Khi nào cần đọc |
@@ -66,7 +77,7 @@ Core value prop: structured evidence at every asset handover → eliminates dama
 
 ## Tech Stack
 
-### Backend (`rcfield-app/apps/api`)
+### Backend (`rcfield-be`)
 - **Runtime**: Node.js 20+, TypeScript strict mode
 - **Framework**: Express.js — router-per-domain architecture
 - **Database**: PostgreSQL via TypeORM
@@ -75,7 +86,7 @@ Core value prop: structured evidence at every asset handover → eliminates dama
 - **File storage**: Cloudinary (upload ảnh check-in/out, lưu URL về DB)
 - **Validation**: zod on all request bodies
 
-### Frontend (`rcfield-app/apps/web`)
+### Frontend (`rcfield-fe`)
 - **Framework**: ReactJS (Vite hoặc CRA)
 - **Language**: TypeScript strict mode
 - **Styling**: Tailwind CSS
