@@ -50,6 +50,8 @@ erDiagram
     users ||--o{ refresh_tokens : "has sessions"
     users ||--o{ password_reset_tokens : "resets via"
     users ||--o{ notification_logs : "receives notifications"
+    users ||--o{ trust_score_logs : "score history"
+    bookings ||--o{ trust_score_logs : "triggered by"
 ```
 
 ---
@@ -147,7 +149,7 @@ CREATE UNIQUE INDEX idx_refresh_tokens_token ON refresh_tokens(token);
 | Column | Type | Constraints | Ghi chú |
 |--------|------|-------------|---------|
 | `operating_hours` | `jsonb` | NOT NULL | `{ mon: {open:"09:00", close:"22:00"}, ... }` |
-| `track_types` | `text[]` | NOT NULL, DEFAULT '{}' | `DRIFT`, `OBSTACLE`, `HILL_CLIMB` |
+| `track_types` | `text[]` | NOT NULL, DEFAULT '{}' | Các loại sân của chi nhánh. Giá trị hợp lệ: `DRIFT`, `CIRCUIT`, `OFFROAD`. VD: `['DRIFT','CIRCUIT']` |
 | `slot_duration_minutes` | `integer` | NOT NULL, DEFAULT 60 | Đơn vị slot (phút) |
 | `slot_fee_rate` | `numeric(15,2)` | NOT NULL | Giá mỗi slot (VNĐ) — hiển thị, tính tiền dùng snapshot |
 | `max_concurrent_bookings` | `integer` | NOT NULL, DEFAULT 10 | Số lượng booking đồng thời tối đa |
@@ -218,7 +220,7 @@ CREATE INDEX idx_staff_cafe_cafe_id ON staff_cafe_assignments(cafe_id);
 | `hourly_rate` | `numeric(15,2)` | NOT NULL | Giá thuê / giờ |
 | `security_deposit` | `numeric(15,2)` | NOT NULL | Tiền đặt cọc |
 | `damage_multiplier` | `numeric(4,2)` | NOT NULL, DEFAULT 1.00 | 1.0 / 1.5 / 2.0 |
-| `compatible_track_types` | `text[]` | NOT NULL, DEFAULT '{}' | Track types xe này chạy được. Rỗng = tất cả track |
+| `compatible_track_types` | `text[]` | NOT NULL, DEFAULT '{}' | Sân xe này chạy được. Giá trị hợp lệ: `DRIFT`, `CIRCUIT`, `OFFROAD`. Rỗng = chạy được tất cả sân của chi nhánh. Chỉ áp dụng với RENTAL — BYOC không bị ràng buộc |
 | `cover_image_url` | `text` | NULL | Ảnh đại diện (lấy từ vehicle_images) |
 | `last_maintenance_at` | `timestamptz` | NULL | |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
@@ -239,15 +241,20 @@ CREATE INDEX idx_vehicles_tier ON vehicles(tier);
 | Column | Type | Constraints | Ghi chú |
 |--------|------|-------------|---------|
 | `id` | `uuid` | PK | |
-| `customer_id` | `uuid` | NOT NULL, FK → users(id) | |
+| `customer_id` | `uuid` | NOT NULL, FK → users(id) | Luôn có account — guest điền thông tin thì system tạo account trước |
 | `cafe_id` | `uuid` | NOT NULL, FK → cafes(id) | |
 | `vehicle_id` | `uuid` | NULL, FK → vehicles(id) | NULL nếu BYOC |
 | `mode` | `enum('RENTAL','BYOC')` | NOT NULL | |
+| `source` | `enum('APP','STAFF_MANUAL')` | NOT NULL, DEFAULT 'APP' | Kênh tạo booking |
+| `track_type` | `varchar(50)` | NOT NULL | Sân customer chọn: `DRIFT`, `CIRCUIT`, hoặc `OFFROAD`. Backend tự fill nếu cafe chỉ có 1 loại sân. BYOC customer chọn thoải mái bất kỳ sân nào của cafe |
 | `status` | `enum('PENDING','CONFIRMED','ACTIVE','EXTENDING','CHECKING_OUT','DISPUTED','COMPLETED','CANCELLED')` | NOT NULL, DEFAULT 'PENDING' | |
 | `slot_start` | `timestamptz` | NOT NULL | Phải trùng với boundary của fixed slot |
 | `slot_end` | `timestamptz` | NOT NULL | Cập nhật khi gia hạn |
 | `slot_count` | `integer` | NOT NULL, DEFAULT 1 | Số slot đặt liên tiếp (VD: 2 = 2 tiếng) |
+| `payment_expires_at` | `timestamptz` | NOT NULL | `created_at + 30 phút` — cron job auto-cancel khi quá hạn |
 | `snapshot` | `jsonb` | NOT NULL | BookingSnapshot — bất biến sau khi tạo |
+| `promotion_id` | `uuid` | NULL, FK → promotions(id) | Mã khuyến mãi áp dụng (nếu có) |
+| `discount_amount` | `numeric(15,2)` | NULL | Số tiền được giảm — snapshot tại thời điểm tạo |
 | `notes` | `text` | NULL | Ghi chú của customer |
 | `cancelled_by` | `uuid` | NULL, FK → users(id) | Ai huỷ |
 | `cancelled_at` | `timestamptz` | NULL | |
@@ -262,6 +269,10 @@ CREATE INDEX idx_bookings_cafe_id ON bookings(cafe_id);
 CREATE INDEX idx_bookings_vehicle_id ON bookings(vehicle_id);
 CREATE INDEX idx_bookings_status ON bookings(status);
 CREATE INDEX idx_bookings_slot_start ON bookings(slot_start);
+CREATE INDEX idx_bookings_track_type ON bookings(cafe_id, track_type);
+-- Cron job auto-cancel PENDING bookings
+CREATE INDEX idx_bookings_payment_expires ON bookings(payment_expires_at)
+  WHERE status = 'PENDING';
 -- Tránh double-booking
 CREATE INDEX idx_bookings_vehicle_slot ON bookings(vehicle_id, slot_start, slot_end)
   WHERE status NOT IN ('CANCELLED');
@@ -279,6 +290,7 @@ CREATE INDEX idx_bookings_vehicle_slot ON bookings(vehicle_id, slot_start, slot_
   "damage_multiplier": 1.5,
   "platform_fee_pct": 0.15,
   "refund_rule": "R1",
+  "track_type": "DRIFT",
   "vehicle_name": "Traxxas Slash 4x4",
   "vehicle_tier": "PREMIUM",
   "cafe_name": "RCField Q7",
@@ -591,6 +603,191 @@ INSERT INTO feature_flags (feature_key, display_name, is_enabled) VALUES
 
 ---
 
+### 3.20 `trust_score_logs`
+
+> Lịch sử thay đổi trust_score của CUSTOMER. Mỗi sự kiện tạo 1 row immutable.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `user_id` | `uuid` | NOT NULL, FK → users(id) | CUSTOMER bị ảnh hưởng |
+| `booking_id` | `uuid` | NULL, FK → bookings(id) | Booking liên quan (nếu có) |
+| `delta` | `numeric(5,2)` | NOT NULL | Dương = tăng, âm = giảm. VD: `-10.00`, `+5.00` |
+| `score_before` | `numeric(5,2)` | NOT NULL | trust_score trước khi thay đổi |
+| `score_after` | `numeric(5,2)` | NOT NULL | trust_score sau khi thay đổi |
+| `reason` | `enum('NO_SHOW','DAMAGE_CONFIRMED','DISPUTE_LOST','BOOKING_STREAK','ADMIN_ADJUSTMENT')` | NOT NULL | Lý do |
+| `note` | `text` | NULL | Mô tả thêm (Admin ghi khi ADMIN_ADJUSTMENT) |
+| `created_by` | `uuid` | NULL, FK → users(id) | NULL = system tự động, NOT NULL = Admin thao tác thủ công |
+| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
+
+**Indexes:**
+```sql
+CREATE INDEX idx_trust_score_logs_user_id ON trust_score_logs(user_id);
+CREATE INDEX idx_trust_score_logs_booking_id ON trust_score_logs(booking_id);
+```
+
+**Delta rules (mặc định):**
+
+| Reason | Delta | Trigger |
+|--------|-------|---------|
+| `NO_SHOW` | `-10` | Booking auto-cancel do no-show |
+| `DAMAGE_CONFIRMED` | `-20` | Check-out ghi nhận damage mới |
+| `DISPUTE_LOST` | `-15` | Dispute resolved favor PROVIDER |
+| `BOOKING_STREAK` | `+5` | Mỗi 5 booking completed liên tiếp không incident |
+| `ADMIN_ADJUSTMENT` | tuỳ | Admin điều chỉnh thủ công |
+
+---
+
+### 3.21 `cafe_closures`
+
+> Ngày đóng cửa đặc biệt của chi nhánh — hiển thị trên web, block booking cho ngày đó.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, FK → cafes(id) | |
+| `closed_date` | `date` | NOT NULL | Ngày đóng cửa (chỉ ngày, không có giờ) |
+| `reason` | `varchar(255)` | NULL | VD: "Nghỉ Tết Nguyên Đán", "Bảo trì sân" |
+| `created_by` | `uuid` | NOT NULL, FK → users(id) | PROVIDER hoặc ADMIN |
+| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
+
+**Indexes:**
+```sql
+CREATE UNIQUE INDEX idx_cafe_closures_date ON cafe_closures(cafe_id, closed_date);
+CREATE INDEX idx_cafe_closures_cafe_id ON cafe_closures(cafe_id);
+```
+
+---
+
+### 3.22 `promotions`
+
+> Mã khuyến mãi / discount code — áp dụng khi tạo booking.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `code` | `varchar(50)` | NOT NULL, UNIQUE | Mã nhập vào (VD: `RCFIELD2026`) |
+| `description` | `text` | NULL | Mô tả hiển thị cho khách |
+| `discount_type` | `enum('PERCENT','FIXED')` | NOT NULL | % hoặc số tiền cố định |
+| `discount_value` | `numeric(15,2)` | NOT NULL | VD: `20` (20%) hoặc `50000` (50k VNĐ) |
+| `max_discount_amount` | `numeric(15,2)` | NULL | Trần giảm tối đa (cho PERCENT). NULL = không giới hạn |
+| `min_order_amount` | `numeric(15,2)` | NULL | Đơn tối thiểu để áp dụng. NULL = không giới hạn |
+| `max_uses` | `integer` | NULL | Tổng số lần dùng tối đa. NULL = không giới hạn |
+| `max_uses_per_user` | `integer` | NOT NULL, DEFAULT 1 | Mỗi user dùng tối đa bao nhiêu lần |
+| `uses_count` | `integer` | NOT NULL, DEFAULT 0 | Số lần đã dùng (cache, đồng bộ với promotion_usages) |
+| `applicable_to` | `enum('ALL','RENTAL','BYOC')` | NOT NULL, DEFAULT 'ALL' | Áp dụng cho loại booking nào |
+| `cafe_id` | `uuid` | NULL, FK → cafes(id) | NULL = áp dụng tất cả chi nhánh |
+| `starts_at` | `timestamptz` | NOT NULL | Bắt đầu hiệu lực |
+| `expires_at` | `timestamptz` | NULL | Hết hạn. NULL = không hết hạn |
+| `is_active` | `boolean` | NOT NULL, DEFAULT true | |
+| `created_by` | `uuid` | NOT NULL, FK → users(id) | PROVIDER hoặc ADMIN |
+| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
+| `updated_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
+
+**Indexes:**
+```sql
+CREATE UNIQUE INDEX idx_promotions_code ON promotions(code) WHERE is_active = true;
+CREATE INDEX idx_promotions_cafe_id ON promotions(cafe_id);
+CREATE INDEX idx_promotions_expires_at ON promotions(expires_at) WHERE is_active = true;
+```
+
+---
+
+### 3.23 `promotion_usages`
+
+> Log mỗi lần một promotion được dùng trong booking — immutable.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `promotion_id` | `uuid` | NOT NULL, FK → promotions(id) | |
+| `booking_id` | `uuid` | NOT NULL, UNIQUE, FK → bookings(id) | 1 booking chỉ dùng 1 mã |
+| `user_id` | `uuid` | NOT NULL, FK → users(id) | |
+| `discount_amount` | `numeric(15,2)` | NOT NULL | Số tiền thực tế được giảm |
+| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
+
+**Indexes:**
+```sql
+CREATE UNIQUE INDEX idx_promotion_usages_booking ON promotion_usages(booking_id);
+CREATE INDEX idx_promotion_usages_promotion_id ON promotion_usages(promotion_id);
+CREATE INDEX idx_promotion_usages_user_id ON promotion_usages(user_id);
+```
+
+---
+
+### 3.24 `vehicle_maintenance_logs`
+
+> Lịch sử bảo trì / sửa chữa từng xe trong fleet.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `vehicle_id` | `uuid` | NOT NULL, FK → vehicles(id) | |
+| `type` | `enum('SCHEDULED','REPAIR','INSPECTION')` | NOT NULL | Loại công việc |
+| `description` | `text` | NOT NULL | Mô tả công việc đã làm |
+| `cost` | `numeric(15,2)` | NULL | Chi phí (nếu có) |
+| `performed_by` | `uuid` | NULL, FK → users(id) | Staff thực hiện. NULL nếu gửi ngoài |
+| `performed_at` | `timestamptz` | NOT NULL | Thời điểm thực hiện |
+| `next_scheduled_at` | `timestamptz` | NULL | Lịch bảo trì tiếp theo |
+| `related_booking_id` | `uuid` | NULL, FK → bookings(id) | Nếu phát sinh từ damage trong booking |
+| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
+
+**Indexes:**
+```sql
+CREATE INDEX idx_vehicle_maintenance_vehicle_id ON vehicle_maintenance_logs(vehicle_id);
+CREATE INDEX idx_vehicle_maintenance_performed_at ON vehicle_maintenance_logs(vehicle_id, performed_at DESC);
+```
+
+---
+
+### 3.25 `reviews`
+
+> Đánh giá của customer sau khi hoàn thành buổi chơi. 1 booking = tối đa 1 review.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `booking_id` | `uuid` | NOT NULL, UNIQUE, FK → bookings(id) | 1 booking 1 review |
+| `cafe_id` | `uuid` | NOT NULL, FK → cafes(id) | Denormalized để query nhanh |
+| `customer_id` | `uuid` | NOT NULL, FK → users(id) | |
+| `rating` | `integer` | NOT NULL, CHECK rating BETWEEN 1 AND 5 | Số sao |
+| `comment` | `text` | NULL | Nhận xét |
+| `is_visible` | `boolean` | NOT NULL, DEFAULT true | Provider/Admin có thể ẩn review vi phạm |
+| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
+
+**Indexes:**
+```sql
+CREATE UNIQUE INDEX idx_reviews_booking_id ON reviews(booking_id);
+CREATE INDEX idx_reviews_cafe_id ON reviews(cafe_id, is_visible, created_at DESC);
+```
+
+---
+
+### 3.26 `cafe_announcements`
+
+> Thông báo của chi nhánh hiển thị trên web (banner, tin tức, sự kiện).
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, FK → cafes(id) | |
+| `title` | `varchar(255)` | NOT NULL | Tiêu đề thông báo |
+| `content` | `text` | NULL | Nội dung chi tiết |
+| `image_url` | `text` | NULL | Ảnh banner (Cloudinary URL) |
+| `starts_at` | `timestamptz` | NOT NULL, DEFAULT now() | Bắt đầu hiển thị |
+| `ends_at` | `timestamptz` | NULL | Hết hiển thị. NULL = hiển thị mãi |
+| `is_active` | `boolean` | NOT NULL, DEFAULT true | |
+| `created_by` | `uuid` | NOT NULL, FK → users(id) | PROVIDER hoặc STAFF |
+| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
+| `updated_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
+
+**Indexes:**
+```sql
+CREATE INDEX idx_cafe_announcements_cafe_id ON cafe_announcements(cafe_id, is_active, starts_at DESC);
+```
+
+---
+
 ## 4. Tổng hợp bảng
 
 | # | Bảng | Mô tả |
@@ -614,6 +811,7 @@ INSERT INTO feature_flags (feature_key, display_name, is_enabled) VALUES
 | 17 | `fnb_order_items` | Line items của đơn F&B |
 | 18 | `notification_logs` | Lịch sử notification đã gửi |
 | 19 | `feature_flags` | Bật/tắt tính năng — ADMIN quản lý (kể cả AI features) |
+| 20 | `trust_score_logs` | Lịch sử thay đổi trust_score — immutable audit trail |
 
 ---
 
@@ -628,4 +826,4 @@ INSERT INTO feature_flags (feature_key, display_name, is_enabled) VALUES
 
 ---
 
-*Last updated: 2026-05-13 · 19 tables*
+*Last updated: 2026-05-14 · 20 tables*

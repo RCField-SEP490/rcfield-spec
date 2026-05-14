@@ -1,6 +1,6 @@
 # BR-Fleet — Quy tắc nghiệp vụ: Quản lý Đội xe
 
-**Last updated**: 2026-05-13  
+**Last updated**: 2026-05-14  
 **Status**: Active
 
 ---
@@ -48,14 +48,21 @@ THEN: Không thể tạo booking. Không thể chuyển về AVAILABLE. Chỉ d�
 
 ## 3. Track compatibility
 
-**BR-FL-010** — Xe gắn với track cụ thể  
+> Track types hợp lệ: **DRIFT** · **CIRCUIT** · **OFFROAD**
+
+**BR-FL-010** — Xe RENTAL gắn với sân cụ thể  
 IF: `vehicle.compatible_track_types` không rỗng (VD: `['DRIFT']`)  
 THEN: Xe đó chỉ available để book khi customer chọn đúng track type đó  
-NOTE: Dùng cho xe chuyên dụng (VD: xe drift không thể dùng trên sân obstacle)
+NOTE: Dùng cho xe chuyên dụng — xe drift chỉ ra sân DRIFT, không dùng sân CIRCUIT hay OFFROAD
 
-**BR-FL-011** — Xe dùng được mọi track  
+**BR-FL-011** — Xe RENTAL dùng được mọi sân  
 IF: `vehicle.compatible_track_types` rỗng (`[]`)  
 THEN: Xe đó available cho tất cả track type mà chi nhánh có
+
+**BR-FL-012** — BYOC không bị giới hạn track  
+IF: `booking.mode = BYOC`  
+THEN: Customer chọn bất kỳ sân nào của chi nhánh — hệ thống không kiểm tra tính tương thích  
+NOTE: Customer tự chịu trách nhiệm về xe cá nhân có phù hợp sân không
 
 ---
 

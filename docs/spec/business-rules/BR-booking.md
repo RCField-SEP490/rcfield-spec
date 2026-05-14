@@ -1,6 +1,6 @@
 # BR-Booking — Quy tắc nghiệp vụ: Đặt lịch
 
-**Last updated**: 2026-05-13  
+**Last updated**: 2026-05-14  
 **Status**: Active
 
 ---
@@ -23,16 +23,18 @@ slot_start = 10:00, slot_count = 2 → slot_end = 12:00
 Hệ thống check tất cả N slots liên tiếp đều available trước khi cho đặt.
 
 **BR-BK-000-C** — Availability check RENTAL  
-IF: Customer muốn đặt xe X trong khung giờ T  
+IF: Customer muốn đặt xe X cho sân T trong khung giờ T  
 THEN: Xe X available khi:
 1. `vehicle.status = AVAILABLE`
 2. Không có booking nào của xe X với `status NOT IN ('CANCELLED')` overlap khung giờ T
-3. `vehicle.compatible_track_types` chứa track type customer chọn (nếu có chọn)
+3. `vehicle.compatible_track_types` rỗng **HOẶC** chứa `booking.track_type` customer chọn
 
 **BR-BK-000-D** — Availability check BYOC  
 IF: Customer muốn đặt BYOC trong khung giờ T  
 THEN: BYOC available khi:
 1. Số BYOC booking trong khung giờ T có `status NOT IN ('CANCELLED')` < `cafe.byoc_capacity`
+2. `booking.track_type` phải thuộc `cafe.track_types` (sân đó phải tồn tại tại chi nhánh)  
+NOTE: Hệ thống KHÔNG kiểm tra xe của customer có phù hợp sân không — customer tự chịu trách nhiệm
 
 **BR-BK-000-E** — Nhiều khách cùng slot  
 Nhiều customer có thể book cùng 1 khung giờ nếu mỗi người đặt xe khác nhau (RENTAL) hoặc còn chỗ BYOC:
@@ -44,11 +46,11 @@ Slot 10:00–11:00:
   Khách D → xe Traxxas Slash   ❌ (xe đã bị A đặt)
 ```
 
-**BR-BK-000-F** — Xe gắn với track  
-IF: `vehicle.compatible_track_types` không rỗng  
-THEN: Xe đó chỉ có thể book khi cafe có track type tương ứng  
-IF: `vehicle.compatible_track_types` rỗng  
-THEN: Xe chạy được tất cả track của chi nhánh
+**BR-BK-000-F** — Track type selection  
+Customer chọn loại sân (`DRIFT` / `CIRCUIT` / `OFFROAD`) trước khi chọn xe:
+- Sân phải thuộc `cafe.track_types`
+- RENTAL: hệ thống chỉ hiển thị xe có `compatible_track_types` rỗng hoặc chứa sân đã chọn
+- BYOC: hiển thị tất cả sân của cafe, customer tự quyết định
 
 ---
 
