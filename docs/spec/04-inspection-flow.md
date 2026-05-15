@@ -14,10 +14,14 @@ Không có inspection record hợp lệ → không có cơ sở tính damage_cha
 
 ## CHECK-IN Flow
 
+> **THAY ĐỔI:** Check-in giờ tạo một `Session` mới (không làm booking chuyển ACTIVE).
+> Inspection gắn với session, có thể inspect từng xe riêng qua `inspection.session_vehicle_id`.
+
 ### RENTAL mode
 ```
 1. Staff mở app → chọn booking → bắt đầu Check-in
-2. Staff lấy xe từ fleet (vehicle.status → IN_USE)
+2. System tạo Session (status = CHECKED_IN)
+3. Staff lấy xe từ fleet (vehicle.status → IN_USE)
 3. Staff chụp ảnh 4 góc: FRONT, BACK, LEFT, RIGHT
    - Mỗi ảnh upload lên S3, nhận URL
    - Tất cả 4 ảnh bắt buộc — không thể bỏ qua
@@ -27,12 +31,13 @@ Không có inspection record hợp lệ → không có cơ sở tính damage_cha
    - missing_parts: string
    - notes: string (tự do)
 5. Nếu có hư hỏng có sẵn → bật pre_existing_flag = true
-6. System tạo InspectionRecord (type: CHECK_IN)
-7. Push notification đến Customer app
-8. Customer xem ảnh + checklist → bấm "Xác nhận"
+6. System tạo Inspection (type: CHECK_IN) gắn với session
+7. Staff gắn inspection vào từng session_vehicle (multi-vehicle support)
+8. Push notification đến Customer app
+9. Customer xem ảnh + checklist → bấm "Xác nhận"
    - customer_confirmed = true, customer_confirmed_at = now()
    - Timeout: 15 phút. Nếu không confirm → auto-confirm (log lại)
-9. Booking transition: CONFIRMED → ACTIVE
+10. Session transition: CHECKED_IN → ACTIVE
 ```
 
 ### BYOC mode
@@ -54,10 +59,10 @@ Bước 1-4 tương tự nhưng:
 ## CHECK-OUT Flow
 
 ```
-1. Staff mở app → chọn booking đang ACTIVE → bắt đầu Check-out
-2. Booking transition: ACTIVE → CHECKING_OUT
-3. Staff chụp lại 4 góc (cùng góc với check-in)
-4. Staff hoàn thành checklist (giống check-in format)
+1. Staff mở app → chọn booking → chọn session đang ACTIVE → bắt đầu Check-out
+2. Session transition: ACTIVE → CHECKING_OUT
+3. Staff chụp lại 4 góc (cùng góc với check-in) cho từng xe
+4. Staff hoàn thành checklist (giống check-in format) cho từng xe
 5. System so sánh tự động:
    - So sánh photos (staff review, không phải AI tự động trong MVP)
    - So sánh checklist: highlight điểm mới so với check-in
@@ -72,9 +77,10 @@ Bước 1-4 tương tự nhưng:
    - Push notification đến Customer để confirm check-out
    - Timeout: 2h. Im lặng = auto-confirm
 9. Sau confirm (hoặc auto-confirm):
-   - Booking transition: CHECKING_OUT → COMPLETED (nếu không dispute)
-   - PaymentEngine.settle(bookingId) được gọi
+   - Session transition: CHECKING_OUT → COMPLETED (nếu không dispute)
+   - PaymentEngine.settle(sessionId) được gọi
    - vehicle.status → AVAILABLE (RENTAL mode)
+   - Nếu tất cả sessions của booking đã COMPLETED → booking.status → COMPLETED
 ```
 
 ---

@@ -1,9 +1,10 @@
 # BR-Dispute — Quy tắc nghiệp vụ: Xử lý Tranh chấp
 
-**Last updated**: 2026-05-13  
+**Last updated**: 2026-05-15
 **Status**: Active
 
----
+> **THAY ĐỔI:** Dispute giờ gắn với `Session` (không phải `Booking`).
+> Hỗ trợ dispute từ incident. Thêm dispute_type để phân loại.
 
 ## 1. Mở dispute
 
@@ -11,16 +12,16 @@
 - Customer: mở dispute khi không đồng ý với damage charge tại check-out  
 - Customer hoặc Staff: mở dispute bất kỳ lúc nào booking đang ACTIVE (sự cố trong khi chơi)
 
-**BR-DI-002** — Không thể mở dispute sau COMPLETED  
-IF: `booking.status = COMPLETED`  
+**BR-DI-002** — Không thể mở dispute sau session COMPLETED
+IF: `session.status = COMPLETED`
 THEN: Không thể mở dispute — window đã đóng
 
-**BR-DI-003** — Chỉ 1 dispute per booking  
-Mỗi booking chỉ có tối đa 1 Dispute record
+**BR-DI-003** — Chỉ 1 dispute per session (trừ dispute từ incident khác)
+Mỗi session có thể có nhiều dispute nếu có nhiều incident độc lập, nhưng tối đa 1 dispute per incident.
 
-**BR-DI-004** — Dispute chuyển trạng thái booking  
-IF: Dispute được mở  
-THEN: `booking.status → DISPUTED`
+**BR-DI-004** — Dispute chuyển trạng thái session
+IF: Dispute được mở
+THEN: `session.status → DISPUTED`
 
 ---
 

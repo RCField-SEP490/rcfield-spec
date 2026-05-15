@@ -1,9 +1,11 @@
 # BR-Payment — Quy tắc nghiệp vụ: Thanh toán
 
-**Last updated**: 2026-05-13  
+**Last updated**: 2026-05-15
 **Status**: Active
 
----
+> **THAY ĐỔI:** Settlement giờ trigger bởi `session.COMPLETED` (không phải `booking.COMPLETED`).
+> Mỗi session settle riêng. Booking chỉ xác nhận đã thanh toán xong khi tất cả sessions settled.
+> Multi-vehicle: mỗi xe có RENTAL_FEE + SECURITY_DEPOSIT riêng.
 
 ## 1. Nguyên tắc cốt lõi
 
@@ -24,12 +26,12 @@ Mỗi PaymentComponent có vòng đời độc lập (PENDING → HELD → DISBU
 IF: Booking chuyển sang CONFIRMED (thanh toán thành công)  
 THEN: Tạo các components sau:
 - `SLOT_FEE` (HELD) — luôn tạo
-- `RENTAL_FEE` (HELD) — chỉ tạo nếu `mode = RENTAL`
-- `SECURITY_DEPOSIT` (HELD) — chỉ tạo nếu `mode = RENTAL`
+- `RENTAL_FEE` (HELD) — tạo cho mỗi xe thuê trong `booking_vehicles`
+- `SECURITY_DEPOSIT` (HELD) — tạo cho mỗi xe thuê trong `booking_vehicles`
 
-**BR-PM-005** — Extension fee component  
-IF: Extension được approve  
-THEN: Tạo `EXTENSION_FEE` (HELD), cộng dồn vào tổng extension đã tích lũy
+**BR-PM-004a** — FB_PREORDER component
+IF: Booking có F&B pre-order
+THEN: Tạo `FB_PREORDER` (HELD) component, gộp vào 1 lần thanh toán
 
 **BR-PM-006** — Damage charge component  
 IF: Check-out có damage và customer confirm (hoặc auto-confirm)  
@@ -39,15 +41,15 @@ THEN: Tạo `DAMAGE_CHARGE` (HELD → DISBURSED)
 
 ## 3. Settlement khi COMPLETED
 
-**BR-PM-007** — Disburse về Provider  
-Khi booking COMPLETED, disburse các components sau về Provider:
+**BR-PM-007** — Disburse về Provider (khi session COMPLETED)
+Khi session COMPLETED, disburse các components sau về Provider cho session đó:
 - `SLOT_FEE` (toàn bộ hoặc pro-rata nếu early checkout)
-- `RENTAL_FEE`
+- `RENTAL_FEE` (từng xe)
 - `EXTENSION_FEE`
 - `DAMAGE_CHARGE` (nếu có)
 
-**BR-PM-008** — Hoàn deposit về Customer  
-Khi booking COMPLETED:
+**BR-PM-008** — Hoàn deposit về Customer (khi session COMPLETED)
+Khi session COMPLETED:
 - Nếu không có damage: hoàn 100% `SECURITY_DEPOSIT` về Customer
 - Nếu có damage: hoàn phần còn lại sau khi trừ `DAMAGE_CHARGE`
 

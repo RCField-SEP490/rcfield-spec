@@ -1,9 +1,10 @@
 # BR-FnB — Quy tắc nghiệp vụ: F&B
 
-**Last updated**: 2026-05-13  
+**Last updated**: 2026-05-15
 **Status**: Active
 
----
+> **THAY ĐỔI:** On-site order giờ gắn với `Session` (không phải `Booking`).
+> Pre-order vẫn gắn với Booking (thanh toán 1 lần).
 
 ## 1. F&B Pre-order (đặt trước khi đến)
 

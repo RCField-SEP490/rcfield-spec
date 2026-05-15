@@ -28,13 +28,13 @@ THEN: `hourly_rate` và `security_deposit` là config riêng của chi nhánh đ
 IF: `vehicle.status ≠ AVAILABLE`  
 THEN: Không thể tạo booking RENTAL cho xe đó
 
-**BR-FL-004** — Xe chuyển sang IN_USE khi check-in  
-IF: Staff hoàn thành check-in cho booking RENTAL  
-THEN: `vehicle.status → IN_USE`
+**BR-FL-004** — Xe chuyển sang IN_USE khi check-in (session)
+IF: Staff check-in thành công → tạo session
+THEN: Với mỗi session_vehicle có `vehicle_source = 'RENTAL'`, `vehicle.status → IN_USE`
 
-**BR-FL-005** — Xe trở về AVAILABLE sau check-out  
-IF: Booking hoàn thành (COMPLETED) hoặc bị huỷ sau khi đã IN_USE  
-THEN: `vehicle.status → AVAILABLE`
+**BR-FL-005** — Xe trở về AVAILABLE sau check-out (session)
+IF: Session COMPLETED (hoặc CANCELLED sau khi đã IN_USE)
+THEN: Với mỗi session_vehicle có `vehicle_source = 'RENTAL'`, `vehicle.status → AVAILABLE`
 
 **BR-FL-006** — Xe MAINTENANCE không cho thuê  
 IF: Provider/Staff đánh dấu xe cần bảo trì (`status = MAINTENANCE`)  

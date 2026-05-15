@@ -1,6 +1,6 @@
 # BR-Promotions — Quy tắc nghiệp vụ: Mã giảm giá
 
-**Last updated**: 2026-05-14  
+**Last updated**: 2026-05-15  
 **Status**: Active
 
 ---

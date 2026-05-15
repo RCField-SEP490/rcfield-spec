@@ -1,6 +1,6 @@
 # 00 — Project Overview
 
-**Last updated**: 2026-05-13  
+**Last updated**: 2026-05-15  
 **Status**: Active
 
 ---
@@ -25,6 +25,12 @@ Hai nhóm khách:
 
 - **RENTAL customers**: vãng lai, thuê xe của quán, không cần mang xe riêng
 - **BYOC customers** (Bring Your Own Car): hobbyist, mang xe cá nhân đến luyện tập / giao lưu
+
+Ngoài ra còn **MIXED mode**: Nhóm khách vừa thuê xe quán vừa mang xe cá nhân (VD: 1 người thuê, 1 người BYOC trong cùng 1 booking).
+
+**Kiến trúc dữ liệu mới:**
+- `Booking` = đơn đặt lịch (dự kiến). Không chứa dữ liệu vận hành.
+- `Session` = phiên chơi thực tế (tạo khi check-in). Chứa inspection, extension, incident, dispute.
 
 **Pain points hiện tại:**
 
@@ -67,23 +73,35 @@ RCField là **B2B SaaS** cho chuỗi sân xe RC, kết hợp:
 
 ### Trong scope (MVP)
 - Venue listing & discovery
-- Booking lifecycle (RENTAL + BYOC)
+- Booking lifecycle (RENTAL + BYOC + MIXED)
 - Multi-channel booking (app / link chia sẻ / thủ công)
+- Multi-vehicle booking (thuê nhiều xe 1 lúc)
+- Guest participant management (không cần app)
+- BYOC vehicle registry
+- Session management (check-in/out thực tế)
 - Asset Risk Tier classification
-- Check-in / Check-out inspection với photo evidence
+- Check-in / Check-out inspection với photo evidence (per-vehicle)
 - Slot extension proposal + notification khi gần hết giờ
-- F&B management: pre-order khi đặt lịch + ghi order tại quán
+- Incident management (sự cố trong session)
+- F&B management: pre-order khi đặt lịch + ghi order tại quán (gắn session)
 - Component-based payment (gateway TBD)
-- Dispute resolution
-- Provider analytics dashboard (xe + F&B)
+- Dispute resolution (mở rộng: multi-party, nhiều loại dispute)
+- Provider analytics dashboard (xe + F&B + sessions)
 - Full test suite + deployment
 
 ### Ngoài scope (Phase 2)
-- Tournament management
+- Packages (gói cước)
+- Subscriptions (lịch định kỳ)
+- Contest / Tournament management (giải đua)
 - Marketplace (mua bán xe, phụ kiện)
 - Loyalty program
 - Dynamic pricing
 - Mobile app native
+
+### Ngoài scope (Phase 2+) — tùy chọn
+- Vehicle handling logs (audit staff thao tác với xe)
+- Vehicle accessories management (phụ kiện đi kèm xe)
+- Facility incidents (sự cố cơ sở vật chất)
 
 ---
 

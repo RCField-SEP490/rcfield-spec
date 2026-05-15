@@ -1,13 +1,14 @@
 # BR-Booking — Quy tắc nghiệp vụ: Đặt lịch
 
-**Last updated**: 2026-05-14  
+**Last updated**: 2026-05-15
 **Status**: Active
 
----
+> **Lưu ý:** Booking giờ chỉ quản lý đơn đặt lịch dự kiến.
+> Các quy tắc vận hành (check-in, extension, settlement) chuyển sang session. Xem `02-state-machine.md`.
 
 ## 1. Slot system
 
-**BR-BK-000-A** — Fixed slots  
+**BR-BK-000-A** — Fixed slots
 Hệ thống generate sẵn các khung giờ theo `cafe.slot_duration_minutes`:
 ```
 slot_duration = 60 phút → slots: 09:00, 10:00, 11:00, ..., 21:00
@@ -46,8 +47,24 @@ Slot 10:00–11:00:
   Khách D → xe Traxxas Slash   ❌ (xe đã bị A đặt)
 ```
 
-**BR-BK-000-F** — Track type selection  
+**BR-BK-000-F** — Track type selection
 Customer chọn loại sân (`DRIFT` / `CIRCUIT` / `OFFROAD`) trước khi chọn xe:
+
+**BR-BK-000-G** — Multi-vehicle booking (RENTAL)
+IF: Customer muốn thuê nhiều xe trong 1 booking (mode = MIXED hoặc 2+ RENTAL vehicles)
+THEN: Tất cả xe đều phải available trong cùng khung giờ. Mỗi xe tạo 1 row trong `booking_vehicles`.
+NOTE: Mỗi xe có rental_fee + security_deposit riêng. Xử lý refund/damage per-vehicle độc lập.
+
+**BR-BK-000-H** — Guest participants (không có app)
+IF: Customer booking cho người khác không có app
+THEN: Tạo `booking_participant` với `participant_type = WALK_IN_GUEST`, điền tên + SĐT.
+NOTE: Người đặt chính (`is_primary_responsible = true`) vẫn chịu trách nhiệm tài chính.
+
+**BR-BK-000-I** — MIXED mode booking
+IF: `play_mode = MIXED`
+THEN: booking_vehicles chứa cả RENTAL và BYOC vehicles cùng lúc.
+RENTAL vehicles: kiểm tra availability, tính rental_fee + deposit.
+BYOC vehicles: kiểm tra byoc_capacity, không tính rental_fee/deposit.
 - Sân phải thuộc `cafe.track_types`
 - RENTAL: hệ thống chỉ hiển thị xe có `compatible_track_types` rỗng hoặc chứa sân đã chọn
 - BYOC: hiển thị tất cả sân của cafe, customer tự quyết định

@@ -1,6 +1,6 @@
 # 03 — Payment Engine
 
-**Last updated**: 2026-05  
+**Last updated**: 2026-05-15
 **Status**: Active
 
 > ⚠️ CRITICAL SPEC. Đọc toàn bộ trước khi viết bất kỳ dòng code nào liên quan đến tiền.
@@ -15,6 +15,7 @@
 3. **Immutable ledger**: Không update amount đã tạo — tạo component mới nếu cần điều chỉnh
 4. **Platform fee chỉ tính trên consummated**: Nếu refund → platform fee cũng refund theo
 5. **Race condition**: Dùng DB transaction + row lock khi update component status
+6. **Settlement theo session**: Không phải booking — mỗi session khi COMPLETED sẽ trigger settle riêng
 
 ---
 
@@ -24,26 +25,34 @@
 
 ```
 Khi booking CONFIRMED:
-  → tạo: SLOT_FEE (HELD)
-  → tạo: RENTAL_FEE (HELD)        ← chỉ nếu mode = RENTAL
-  → tạo: SECURITY_DEPOSIT (HELD)  ← chỉ nếu mode = RENTAL
+  → tạo: SLOT_FEE (HELD)                      ← luôn tạo
+  → tạo: RENTAL_FEE (HELD) per vehicle        ← mỗi xe thuê trong booking_vehicles
+  → tạo: SECURITY_DEPOSIT (HELD) per vehicle   ← mỗi xe thuê trong booking_vehicles
+  → tạo: FB_PREORDER (HELD)                   ← nếu có pre-order F&B
 
-Khi extension APPROVED:
+Khi extension APPROVED (theo session):
   → tạo: EXTENSION_FEE (HELD)
+  → liên kết với session_id
   → cộng dồn nếu đã có (tổng không vượt 50% security_deposit)
 
-Khi CHECK_OUT + có damage:
+Khi CHECK_OUT + có damage (theo session):
   → tạo: DAMAGE_CHARGE (PENDING → HELD sau customer confirm)
 
-Khi COMPLETED:
+Khi SESSION COMPLETED:
   → disburse: SLOT_FEE → Provider
-  → disburse: RENTAL_FEE → Provider
-  → disburse: EXTENSION_FEE → Provider (phần đã dùng)
+  → disburse: RENTAL_FEE → Provider (từng xe)
+  → disburse: EXTENSION_FEE → Provider
   → refund: SECURITY_DEPOSIT → Customer (trừ damage nếu có)
   → disburse: DAMAGE_CHARGE → Provider (nếu có)
   → tính platform_fee (15%) trên tổng disbursed về Provider
 ```
 
+### Lưu ý multi-vehicle
+
+```
+Mỗi xe thuê trong booking_vehicles tạo một cặp RENTAL_FEE + SECURITY_DEPOSIT riêng.
+Khi settle, deposit được refund/full cho tất cả xe không damage.
+Chỉ xe bị damage mới bị trừ deposit tương ứng.
 ---
 
 ## Refund Rules

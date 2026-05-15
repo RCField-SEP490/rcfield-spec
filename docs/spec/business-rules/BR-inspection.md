@@ -1,9 +1,10 @@
 # BR-Inspection — Quy tắc nghiệp vụ: Check-in / Check-out
 
-**Last updated**: 2026-05-13  
+**Last updated**: 2026-05-15
 **Status**: Active
 
----
+> **THAY ĐỔI:** Inspection giờ gắn với `Session` và `SessionVehicle`.
+> Có thể inspect từng xe riêng (multi-vehicle). Không còn `inspection_records` — thay bằng `inspections`.
 
 ## 1. Nguyên tắc
 
@@ -33,12 +34,11 @@ Cả 3 điều kiện phải đúng:
 
 ## 3. Check-in
 
-**BR-IN-004** — Chỉ 1 check-in per booking  
-Mỗi booking chỉ được có đúng 1 `InspectionRecord` loại `CHECK_IN`
+**BR-IN-004** — Chỉ 1 check-in per session
+Mỗi session chỉ được có đúng 1 `Inspection` loại `CHECK_IN`
 
 **BR-IN-005** — Staff phải thuộc chi nhánh  
-IF: Staff không được assign vào chi nhánh của booking đó  
-THEN: Không thể thực hiện check-in
+IF: Staff không được assign vào chi nhánh của session đó
 
 **BR-IN-006** — RENTAL check-in: lấy xe từ fleet  
 IF: `mode = RENTAL`  
