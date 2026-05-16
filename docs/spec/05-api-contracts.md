@@ -1,6 +1,6 @@
 # 05 — API Contracts
 
-**Last updated**: 2026-05-15
+**Last updated**: 2026-05-16
 > Convention: tất cả response đều wrap trong `{ data, meta?, error? }`
 > Auth header: `Authorization: Bearer <jwt_token>`
 
@@ -69,12 +69,7 @@
   ],
   "vehicles": [
     {
-      "source": "RENTAL",
       "vehicle_id": "uuid"
-    },
-    {
-      "source": "BYOC",
-      "customer_vehicle_id": "uuid"
     }
   ],
   "fnb_preorder": [
@@ -109,7 +104,8 @@
 | GET | `/sessions/:id/inspections` | Auth | Lấy inspections của session |
 | POST | `/sessions/:id/inspections/checkin/confirm` | CUSTOMER | Confirm check-in |
 | POST | `/sessions/:id/inspections/checkout/confirm` | CUSTOMER | Confirm check-out |
-| POST | `/sessions/:id/inspections/checkout/dispute-damage` | CUSTOMER | Mở dispute về damage |
+| POST | `/sessions/:id/inspections/checkout/report-damage` | STAFF | Ghi nhận damage charge Phase 1 |
+| POST | `/sessions/:id/inspections/checkout/raise-incident` | CUSTOMER/STAFF | Ghi nhận incident để xử lý theo policy |
 
 **POST /checkin body (multipart/form-data):**
 ```
@@ -144,31 +140,14 @@ pre_existing_flag: boolean
 
 ---
 
-## Incidents
-
-> **NEW** — Quản lý sự cố trong session.
+## Incidents & Policy Resolution
 
 | Method | Endpoint | Actor | Mô tả |
 |--------|----------|-------|-------|
 | GET | `/sessions/:id/incidents` | Auth | List incidents của session |
 | POST | `/sessions/:id/incidents` | STAFF | Ghi nhận incident mới |
-| PATCH | `/incidents/:id` | STAFF/ADMIN | Update incident |
-| POST | `/incidents/:id/escalate` | ADMIN | Escalate incident thành dispute |
-
----
-
-## Disputes
-
-> **THAY ĐỔI:** Dispute giờ qua session, hỗ trợ incident reference.
-
-| Method | Endpoint | Actor | Mô tả |
-|--------|----------|-------|-------|
-| GET | `/sessions/:id/disputes` | Auth | List disputes của session |
-| POST | `/sessions/:id/disputes` | CUSTOMER/STAFF | Mở dispute |
-| GET | `/disputes` | ADMIN | List disputes (filter: status) |
-| GET | `/disputes/:id` | Auth | Chi tiết dispute + evidence |
-| POST | `/disputes/:id/resolve` | ADMIN | Giải quyết dispute |
-| POST | `/disputes/:id/evidence` | Auth | Upload evidence (photo/video) |
+| PATCH | `/incidents/:id` | STAFF/ADMIN | Update incident note/status |
+| POST | `/incidents/:id/resolve` | STAFF/ADMIN | Áp policy, ghi responsible_party/final_amount/resolution_note |
 
 ---
 
@@ -176,25 +155,35 @@ pre_existing_flag: boolean
 
 | Method | Endpoint | Actor | Mô tả |
 |--------|----------|-------|-------|
-| GET | `/cafes/:cafeId/menu` | Public | Xem menu của chi nhánh |
+| GET | `/cafes/:cafeId/menu` | Public | Xem menu chi nhánh |
 | POST | `/cafes/:cafeId/menu` | PROVIDER/STAFF | Thêm item menu |
 | PATCH | `/cafes/:cafeId/menu/:id` | PROVIDER/STAFF | Update item menu |
-| GET | `/bookings/:id/fnb-orders` | Auth | List order F&B của booking |
-| POST | `/bookings/:id/fnb-orders` | CUSTOMER | Tạo pre-order F&B (kèm booking) |
-| POST | `/sessions/:id/fnb-orders` | STAFF | Tạo on-site order (gắn vào session) |
-| POST | `/fnb-orders/:id/confirm` | STAFF | Confirm order / bắt đầu prepare |
-| PATCH | `/fnb-orders/:id/status` | STAFF | Update order status (preparing → delivered → cancelled) |
+| GET | `/bookings/:id/fnb-orders` | Auth | List F&B orders của booking |
+| POST | `/bookings/:id/fnb-orders` | CUSTOMER | Tạo pre-order F&B |
+| POST | `/sessions/:id/fnb-orders` | STAFF | Tạo on-site order |
+| POST | `/fnb-orders/:id/confirm` | STAFF | Confirm order |
+| PATCH | `/fnb-orders/:id/status` | STAFF | Update order status |
 
 ---
 
-## Analytics (Provider)
+## Packages, Subscriptions, Contests
 
 | Method | Endpoint | Actor | Mô tả |
 |--------|----------|-------|-------|
-| GET | `/cafes/:id/analytics/revenue` | PROVIDER | Doanh thu theo ngày/tuần/tháng |
-| GET | `/cafes/:id/analytics/fleet` | PROVIDER | Fleet utilization |
-| GET | `/cafes/:id/analytics/vehicles/:vehicleId` | PROVIDER | Revenue theo xe |
-| GET | `/cafes/:id/analytics/sessions` | PROVIDER | Session stats (avg duration, no-show rate)
+| GET | `/cafes/:cafeId/packages` | Public | List packages |
+| POST | `/cafes/:cafeId/packages` | PROVIDER | Tạo package |
+| POST | `/packages/:id/purchase` | CUSTOMER | Mua package |
+| GET | `/me/packages` | CUSTOMER | Gói đã mua |
+| POST | `/subscriptions` | CUSTOMER/STAFF | Tạo lịch định kỳ |
+| GET | `/cafes/:cafeId/contests` | Public | List contests |
+| POST | `/cafes/:cafeId/contests` | PROVIDER/STAFF | Tạo contest |
+| POST | `/contests/:id/register` | CUSTOMER | Đăng ký contest |
+
+---
+
+## Phase 2 APIs
+
+Các nhóm API sau không thuộc Phase 1: staff/cafe assignment nâng cao, cafe closures/announcements, dispute workflow nhiều bên, SaaS tenant admin, AI jobs, analytics nâng cao, loyalty/dynamic pricing.
 
 ## Response Format
 

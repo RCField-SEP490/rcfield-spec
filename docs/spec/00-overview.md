@@ -1,14 +1,14 @@
 # 00 — Project Overview
 
-**Last updated**: 2026-05-15  
+**Last updated**: 2026-05-16  
 **Status**: Active
 
 ---
 
 ## Tên đề tài
 
-- **English**: RCField – RC Car Field Operations & Booking Platform  
-- **Vietnamese**: Nền tảng Số hóa Vận hành và Đặt lịch Sân Xe RC  
+- **English**: RCField – RC Car Field Operations & Booking Platform
+- **Vietnamese**: Nền tảng Số hóa Vận hành và Đặt lịch Sân Xe RC
 - **Mã**: SU26SE098 | **GVHD**: Nguyễn Minh Sang
 
 ---
@@ -17,20 +17,21 @@
 
 Sân xe RC (Radio-Controlled Car) là mô hình giải trí trải nghiệm đang nổi tại Việt Nam. Các địa điểm này thường được gọi là "cafe xe RC" theo tên thông dụng.
 
-**RCField** là phần mềm B2B bán cho **1 doanh nghiệp** vận hành chuỗi sân xe RC. Doanh nghiệp đó có nhiều **chi nhánh** (branches) ở các địa điểm khác nhau — mỗi chi nhánh có config riêng (giá, đội xe, menu F&B) nhưng dùng chung 1 hệ thống. Không phải marketplace nhiều thương hiệu — giống mô hình chuỗi hơn là sàn thương mại điện tử.
+**RCField** là phần mềm B2B cho **1 doanh nghiệp/chuỗi vận hành sân xe RC**. Doanh nghiệp có nhiều chi nhánh, mỗi chi nhánh có cấu hình riêng về giá, đội xe, giờ hoạt động và sức chứa, nhưng dùng chung một hệ thống.
 
-RCField số hóa toàn bộ vận hành: đặt lịch, thuê xe, bàn giao tài sản có bằng chứng, thanh toán, và quản lý F&B.
+RCField Phase 1 tập trung vào vận hành thực tế của cafe xe RC, bao gồm booking/session, đội xe, BYOC, F&B, package, subscription, contest, promotion, inspection, incident policy resolution và audit thanh toán/trust score. Phase 2 dành cho AI nâng cao, SaaS tenant/billing, staff assignment chi tiết, cafe announcement/closure và dispute workflow nhiều bên.
 
-Hai nhóm khách:
+Hai nhóm khách chính:
 
-- **RENTAL customers**: vãng lai, thuê xe của quán, không cần mang xe riêng
-- **BYOC customers** (Bring Your Own Car): hobbyist, mang xe cá nhân đến luyện tập / giao lưu
+- **RENTAL customers**: thuê xe của quán.
+- **BYOC customers** (Bring Your Own Car): mang xe cá nhân đến chơi.
+- **MIXED mode**: một nhóm vừa thuê xe quán vừa mang xe cá nhân.
 
-Ngoài ra còn **MIXED mode**: Nhóm khách vừa thuê xe quán vừa mang xe cá nhân (VD: 1 người thuê, 1 người BYOC trong cùng 1 booking).
+**Kiến trúc dữ liệu cốt lõi:**
 
-**Kiến trúc dữ liệu mới:**
-- `Booking` = đơn đặt lịch (dự kiến). Không chứa dữ liệu vận hành.
-- `Session` = phiên chơi thực tế (tạo khi check-in). Chứa inspection, extension, incident, dispute.
+- `Booking` = đơn đặt lịch dự kiến.
+- `Session` = phiên chơi thực tế tạo khi check-in.
+- Planned data (`booking_participants`, `booking_vehicles`) tách khỏi actual data (`session_participants`, `session_vehicles`).
 
 **Pain points hiện tại:**
 
@@ -45,63 +46,92 @@ Ngoài ra còn **MIXED mode**: Nhóm khách vừa thuê xe quán vừa mang xe c
 
 ## Giải pháp
 
-RCField là **B2B SaaS** cho chuỗi sân xe RC, kết hợp:
-1. **Multi-branch management** — 1 Provider quản lý nhiều chi nhánh, mỗi chi nhánh config độc lập
-2. **Operations digitalization** — booking, fleet, inspection, payment, F&B
-3. **Evidence-based handover** — ảnh 4 góc + checklist tại mọi điểm bàn giao tài sản
-4. **Dispute resolution** — admin xét xử dựa trên digital evidence
+RCField là hệ thống vận hành cho chuỗi sân xe RC, kết hợp:
 
-**Booking channels** — khách có thể đặt lịch qua:
-- App trực tiếp (Customer tự đặt)
-- Link chia sẻ (Provider paste lên Zalo/FB → khách bấm vào đặt)
-- Thủ công (Staff tạo booking trên app cho khách walk-in / gọi điện)
+1. **Multi-branch management** — 1 Provider quản lý nhiều chi nhánh.
+2. **Operational Core** — booking, session, fleet, BYOC, F&B, package, subscription, contest, inspection, payment.
+3. **Evidence-based handover** — ảnh + checklist tại điểm bàn giao tài sản.
+4. **Audit-first payment & trust** — payment component, transaction log, trust score log.
+
+**Booking channels:**
+
+- App trực tiếp: Customer tự đặt.
+- Link chia sẻ: Provider/Staff gửi link cho khách.
+- Thủ công: Staff tạo booking cho khách walk-in/gọi điện.
 
 ---
 
 ## Actors
 
 | Actor | Mô tả | App |
-|-------|-------|-----|
-| **Customer** | Đặt lịch, chọn F&B pre-order, thanh toán, xác nhận check-in/out, đánh giá | Web (mobile-first) |
-| **Provider** | Chủ quán: quản lý hồ sơ, đội xe, menu F&B, xem doanh thu | Web |
-| **Staff** | Nhân viên quán: check-in/out, ghi F&B order, đề xuất gia hạn | Web (mobile-first) |
-| **Admin** | Platform: duyệt quán, xử lý dispute, monitor | Web |
+|-------|------|-----|
+| **Customer** | Đặt lịch, thanh toán, xác nhận check-in/out, đánh giá | Web mobile-first |
+| **Provider** | Quản lý chi nhánh, đội xe, giá, doanh thu | Web |
+| **Staff** | Check-in/out, inspection, ghi nhận người/xe thực tế, đề xuất gia hạn | Web mobile-first |
+| **Admin** | Quản trị nền tảng, người dùng, cấu hình hệ thống | Web |
 
 ---
 
-## Scope (In / Out)
+## Scope
 
-### Trong scope (MVP)
-- Venue listing & discovery
-- Booking lifecycle (RENTAL + BYOC + MIXED)
-- Multi-channel booking (app / link chia sẻ / thủ công)
-- Multi-vehicle booking (thuê nhiều xe 1 lúc)
-- Guest participant management (không cần app)
-- BYOC vehicle registry
-- Session management (check-in/out thực tế)
-- Asset Risk Tier classification
-- Check-in / Check-out inspection với photo evidence (per-vehicle)
-- Slot extension proposal + notification khi gần hết giờ
-- Incident management (sự cố trong session)
-- F&B management: pre-order khi đặt lịch + ghi order tại quán (gắn session)
-- Component-based payment (gateway TBD)
-- Dispute resolution (mở rộng: multi-party, nhiều loại dispute)
-- Provider analytics dashboard (xe + F&B + sessions)
-- Full test suite + deployment
+### Phase 1 — Operational Core, bắt buộc
 
-### Ngoài scope (Phase 2)
-- Packages (gói cước)
-- Subscriptions (lịch định kỳ)
-- Contest / Tournament management (giải đua)
-- Marketplace (mua bán xe, phụ kiện)
-- Loyalty program
-- Dynamic pricing
-- Mobile app native
+Phase 1 giữ các nghiệp vụ chính của hệ thống. Đây không chỉ là MVP tối giản mà là core vận hành của cafe xe RC.
 
-### Ngoài scope (Phase 2+) — tùy chọn
-- Vehicle handling logs (audit staff thao tác với xe)
-- Vehicle accessories management (phụ kiện đi kèm xe)
-- Facility incidents (sự cố cơ sở vật chất)
+- Auth, refresh token, reset password.
+- Cafe/branch management cơ bản.
+- Vehicle fleet management cơ bản.
+- BYOC vehicle registry.
+- Booking lifecycle cho `RENTAL`, `BYOC`, `MIXED`.
+- Multi-vehicle booking qua `booking_vehicles`.
+- Planned participants và actual participants.
+- Multiple sessions per booking.
+- Actual vehicles qua `session_vehicles`, hỗ trợ đổi xe khi chơi.
+- Check-in/check-out inspection với ảnh và checklist.
+- Slot extension proposal.
+- Component-based payment và gateway transaction log.
+- F&B: menu, pre-order khi đặt lịch, on-site order trong session.
+- Packages/gói chơi và lịch sử sử dụng gói.
+- Subscriptions/lịch chơi định kỳ sinh booking.
+- Contests/tournament và đăng ký tham gia.
+- Promotions cơ bản và usage audit.
+- Incident logging + policy-based resolution để xử lý hư hỏng/va chạm ở mức Phase 1.
+- Vehicle maintenance logs để theo dõi bảo trì/sửa chữa xe.
+- Reviews.
+- Notification logs cơ bản.
+- Trust score hiện tại trên `users` và audit qua `trust_score_logs`.
+- Feature flags có `config` để bật/tắt module và chuẩn bị AI/SaaS Phase 2.
+
+**Phase 1 database target:** khoảng 37 bảng vận hành. F&B, package, subscription, contest và maintenance vẫn là core; dispute workflow nhiều bên chuyển sang Phase 2.
+
+### Phase 2 — Business Expansion + AI/SaaS
+
+Các module sau không thuộc Phase 1:
+
+- SaaS tenant tables và tenant-level feature flags.
+- Staff assignment theo cafe/ca làm việc: `staff_cafe_assignments`.
+- Cafe closures/announcements nâng cao: `cafe_closures`, `cafe_announcements`.
+- Dispute workflow nhiều bên: `incident_participants`, `disputes`, `dispute_evidences`, `dispute_parties`.
+- AI jobs, AI damage detection, AI recommendations.
+- Analytics dashboard nâng cao.
+- Dynamic pricing, loyalty, native mobile app.
+
+---
+
+## Operational Core Data Rules
+
+1. Không lưu `vehicle_id` trực tiếp trong `bookings`.
+2. Một booking có thể có nhiều `booking_vehicles`.
+3. Một booking có thể có nhiều `sessions`.
+4. Planned data và actual data phải tách riêng.
+5. Session có thể dùng cả rental vehicle và BYOC vehicle.
+6. Booking phải lưu snapshot giá/policy.
+7. Payment phải dùng component-based ledger.
+8. Inspection phải có ảnh và checklist.
+9. Trust score phải có audit log.
+10. Package/subscription/contest/F&B/maintenance là Phase 1 core.
+11. Tranh chấp Phase 1 xử lý bằng policy rõ ràng và log kết quả trên incident; dispute workflow nhiều bên là Phase 2.
+12. Phase 2 AI/SaaS phải mở rộng được mà không redesign Phase 1 core.
 
 ---
 
@@ -109,8 +139,8 @@ RCField là **B2B SaaS** cho chuỗi sân xe RC, kết hợp:
 
 | Giai đoạn | Thời gian | Nội dung |
 |-----------|-----------|---------|
-| TP-1 Core Platform | Tháng 1-2 | Auth, booking lifecycle, fleet, state machine |
-| TP-2 Inspection & Payment | Tháng 2-3 | Check-in/out, payment engine, dispute |
-| TP-3 Analytics & Testing | Tháng 3-4 | Dashboard, testing, deployment, docs |
+| TP-1 Core Platform | Tháng 1-2 | Auth, cafe, fleet, BYOC, booking/session core |
+| TP-2 Operations & Commerce | Tháng 2-3 | Inspection, payment, F&B, packages, subscriptions, contests, promotions |
+| TP-3 Risk, Testing & Docs | Tháng 3-4 | Incident policy resolution, maintenance logs, trust score, testing, deployment, docs |
 
-**Tổng**: 04/2026 → 08/2026
+**Tổng**: 04/2026 -> 08/2026

@@ -1,6 +1,6 @@
 # Architecture: System Overview
 
-**Last updated**: 2026-05-12
+**Last updated**: 2026-05-16
 **Status**: Draft — đang hoàn thiện dần
 
 > Tài liệu này mô tả kiến trúc tổng thể của RCField ở mức system level.
@@ -20,7 +20,7 @@ C4Context
     Person(customer, "Customer", "Đặt lịch, pre-order F&B, thanh toán, xác nhận check-in/out")
     Person(staff, "Staff", "Check-in/out, ghi F&B order, đề xuất gia hạn, upload ảnh")
     Person(provider, "Provider", "Quản lý sân, đội xe, menu F&B, xem doanh thu")
-    Person(admin, "Admin", "Duyệt sân, xử lý dispute, monitor platform")
+    Person(admin, "Admin", "Duyệt sân, giám sát incident policy, monitor platform")
 
     System(rcfield, "RCField Platform", "Web SaaS: booking, fleet, inspection, payment, F&B management cho sân xe RC")
 
@@ -30,7 +30,7 @@ C4Context
     Rel(customer, rcfield, "Đặt lịch, pre-order F&B, thanh toán, xác nhận")
     Rel(staff, rcfield, "Check-in/out, ghi order, gia hạn, upload ảnh")
     Rel(provider, rcfield, "Quản lý fleet + menu, xem doanh thu")
-    Rel(admin, rcfield, "Duyệt sân, xử lý dispute")
+    Rel(admin, rcfield, "Duyệt sân, giám sát incident policy")
     Rel(rcfield, payment, "Tạo payment URL, verify callback (booking + F&B pre-order)")
     Rel(rcfield, s3, "Upload ảnh inspection, lấy URL về lưu DB")
 ```
@@ -47,7 +47,7 @@ C4Context
 | Admin | ADMIN | Team RCField — bên bán phần mềm | Web (admin portal) | Desktop |
 
 > Tất cả 4 actor dùng chung 1 React web app — routing và UI render dựa trên `UserRole` từ JWT.
-> Provider xem aggregate toàn chuỗi + drill-down từng chi nhánh. Staff chỉ thấy chi nhánh được assign.
+> Provider xem aggregate toàn chuỗi + drill-down từng chi nhánh. Phase 1 kiểm soát Staff bằng account/provider policy; bảng `staff_cafe_assignments` chuyển sang Phase 2.
 
 ---
 
@@ -62,8 +62,8 @@ C4Container
     Container_Boundary(rcfield, "RCField Platform") {
         Container(web, "Web App", "ReactJS + TypeScript + Tailwind", "SPA mobile-first. Role-based UI routing.")
         Container(api, "API Server", "Node.js 20 + Express + TypeScript", "REST API. JWT auth. Business logic. State machine.")
-        ContainerDb(db, "PostgreSQL", "TypeORM", "Tất cả entity: User, Cafe, Booking, Payment, Inspection, Dispute, FbOrder")
-        Container(scheduler, "Scheduler", "Node.js cron jobs", "Timeout rules: PENDING 30m, no-show 30m, checkout 2h/24h, dispute 72h")
+        ContainerDb(db, "PostgreSQL", "TypeORM", "Operational Core: User, Cafe, Booking, Session, Payment, Inspection, Incident, F&B")
+        Container(scheduler, "Scheduler", "Node.js cron jobs", "Timeout rules: PENDING 30m, no-show 30m, checkout 2h/24h")
     }
 
     System_Ext(vnpay, "VNPay", "Payment gateway")
@@ -97,7 +97,7 @@ graph TD
         FLEET["Fleet\n/cafes/:id/vehicles\nVehicle CRUD, tier, status"]
         INSPECTION["Inspection\n/bookings/:id/inspections\nCheck-in/out, photos, checklist"]
         EXTENSION["Extension\n/bookings/:id/extensions\nPropose, approve, reject + notify"]
-        DISPUTE["Dispute\n/bookings/:id/disputes\nOpen, resolve (Admin)"]
+        INCIDENT["Incident Policy\n/incidents\nLog, resolve/waive"]
         FNB["F&B\n/cafes/:id/menu + /bookings/:id/fnb-orders\nMenu mgmt, pre-order, on-site order"]
     end
 
@@ -109,7 +109,7 @@ graph TD
     BOOKING --> PAYMENT
     BOOKING --> INSPECTION
     BOOKING --> EXTENSION
-    BOOKING --> DISPUTE
+    BOOKING --> INCIDENT
     BOOKING --> FNB
     CAFE --> FLEET
     CAFE --> FNB
@@ -133,7 +133,7 @@ graph TD
 | Validation | zod | Schema reusable, type inference — bắt buộc trên mọi request body |
 | Payment | Gateway TBD (VNPay / MoMo / VietQR) | Verify server-side signature |
 | Storage | Cloudinary | Upload ảnh inspection — lưu URL về DB |
-| Jobs | node-cron | Timeout rules (PENDING 30m, no-show, dispute 72h) |
+| Jobs | node-cron | Timeout rules (PENDING 30m, no-show, checkout auto-confirm) |
 
 ### Frontend (`rcfield-app/apps/web`)
 
@@ -166,7 +166,7 @@ flowchart TD
     I -->|No damage| J[Customer confirm / 2h auto]
     I -->|Có damage| K{Customer quyết định}
     K -->|Xác nhận| J
-    K -->|Dispute| L[Admin xét xử\ndựa trên evidence ảnh]
+    K -->|Phản đối| L[Incident policy resolution\ndựa trên evidence ảnh]
     L --> J
     J --> M([COMPLETED\nSettle: Disburse booking → Provider\nDisburse F&B pre-order → Provider 100%\nRefund deposit → Customer])
 ```
@@ -233,8 +233,8 @@ F&B on-site (thêm tại quán):        Tiền mặt / chuyển khoản thẳng 
 | Component-based payment | Mỗi khoản tiền có vòng đời độc lập → dễ audit, refund từng phần | `03-payment-engine.md` |
 | Immutable ledger | Không edit amount component đã tạo — tạo component mới | `03-payment-engine.md` |
 | Single state machine | Mọi booking state change đều qua `BookingService.transition()` | `02-state-machine.md` |
-| Evidence-based handover | 4 ảnh + checklist tại mỗi điểm bàn giao → dispute có bằng chứng số | `04-inspection-flow.md` |
-| Express.js thay NestJS | Team 4 người chưa dùng NestJS, timeline 4 tháng — Express an toàn hơn | `docs/adr/002-backend-framework-express.md` |
+| Evidence-based handover | 4 ảnh + checklist tại mỗi điểm bàn giao → incident có bằng chứng số | `04-inspection-flow.md` |
+| Express.js cho backend | Team 4 người, timeline 4 tháng — Express đủ đơn giản và an toàn triển khai | `docs/adr/002-backend-framework-express.md` |
 | Role-based routing (FE) | 1 app cho 4 actor — đơn giản hóa deployment | — |
 | F&B pre-order gộp 1 payment | Customer không muốn trả 2 lần — gộp booking + F&B vào 1 transaction | — |
 | F&B on-site tách riêng | Tiền chạy thẳng Provider, Platform không thể làm trung gian cho F&B at-venue | — |
@@ -269,8 +269,8 @@ F&B on-site (thêm tại quán):        Tiền mặt / chuyển khoản thẳng 
 - `docs/spec/04-inspection-flow.md` — Check-in/out protocol
 - `docs/spec/05-api-contracts.md` — REST API endpoints
 - `docs/diagrams/sequence/sequence-flow-booking-lifecycle.md` — End-to-end sequence diagram
-- `docs/adr/001-why-nestjs.md` — Framework decision record
+- `docs/adr/002-backend-framework-express.md` — Framework decision record
 
 ---
 
-*Last updated: 2026-05-12 · Status: Draft*
+*Last updated: 2026-05-16 · Status: Draft*
