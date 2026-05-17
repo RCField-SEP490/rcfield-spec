@@ -86,8 +86,8 @@ erDiagram
 
 Phase 1 chỉ tạo schema/migration cho **41 bảng vận hành cốt lõi** dưới đây.
 
-> Không cộng thêm bảng Phase 2 vào scope này. Các bảng staff assignment, cafe closures/announcements,
-> dispute workflow nhiều bên, SaaS, AI và analytics nâng cao **không được tạo trong Phase 1**.
+> Không cộng thêm bảng Phase 2 vào scope này. Chỉ các bảng multi-party dispute workflow nâng cao
+> (`dispute_evidences`, `dispute_parties`), SaaS, AI và analytics nâng cao **không được tạo trong Phase 1**.
 
 | # | Bảng | Mô tả |
 |---|------|-------|
