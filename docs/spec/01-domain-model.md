@@ -373,13 +373,12 @@ ExtensionProposal
 - `Contest`: giải đua/sự kiện theo cafe.
 - `ContestRegistration`: customer đăng ký contest bằng rental vehicle hoặc BYOC vehicle.
 
-### Incident Policy Resolution
-
-Phase 1 không tạo workflow dispute nhiều bảng. Hệ thống ghi nhận sự cố vào `incidents`, áp dụng policy bồi thường rõ ràng và lưu kết quả xử lý ngay trên incident:
+### Incident Policy Resolution & Disputes
 
 - `Incident`: sự cố vận hành trong session, có `status`, `resolution_note`, `resolved_by`, `resolved_at`, `final_amount`.
-- Evidence dùng lại `inspections`, `inspection_photos`, `inspection_checklists`.
-- Nếu cần tranh chấp nhiều bên, evidence upload riêng, arbitration workflow, tách sang Phase 2.
+- `Dispute`: tranh chấp chính thức khi customer không đồng ý — 1 booking tối đa 1 dispute, do Admin xét xử dựa trên digital evidence từ inspection.
+- Evidence dùng `inspections`, `inspection_photos`, `inspection_checklists`.
+- Multi-party arbitration workflow nâng cao tách sang Phase 2.
 
 ### Promotion & PromotionUsage
 
@@ -457,8 +456,7 @@ enum PromoApplicableTo { ALL, RENTAL, BYOC, MIXED }
 
 Các entity sau không thuộc Phase 1:
 
-- Staff/cafe operations: `staff_cafe_assignments`, `cafe_closures`, `cafe_announcements`
-- Advanced dispute workflow: `incident_participants`, `disputes`, `dispute_evidences`, `dispute_parties`
+- Multi-party dispute workflow nâng cao: `dispute_evidences`, `dispute_parties`, `incident_participants`
 - SaaS: `tenants`, `tenant_members`, `saas_plans`, `tenant_subscriptions`
 - AI: `ai_analysis_jobs`, `ai_damage_detections`, `ai_recommendations`
 

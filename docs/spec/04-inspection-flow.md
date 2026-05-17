@@ -73,13 +73,13 @@ Bước 1-4 tương tự nhưng:
    - Push notification đến Customer
    - Customer xem evidence → Xác nhận hoặc phản đối kết quả
      * Timeout: 24h. Im lặng = auto-confirm damage
-     * Nếu phản đối: tạo/cập nhật `incidents` và xử lý theo policy Phase 1
+     * Nếu phản đối: tạo `incidents` (policy-based) hoặc mở `disputes` (Admin xét xử)
 8. Nếu không có damage:
    - Push notification đến Customer để confirm check-out
    - Timeout: 2h. Im lặng = auto-confirm
 9. Sau confirm (hoặc auto-confirm):
    - Session transition: CHECKING_OUT → COMPLETED sau khi damage được xác nhận
-     hoặc incident được resolve/waive theo policy
+     hoặc incident/dispute được resolve/waive
    - PaymentEngine.settle(sessionId) được gọi
    - vehicle.status → AVAILABLE (RENTAL mode)
    - Nếu tất cả sessions của booking đã COMPLETED → booking.status → COMPLETED
@@ -94,7 +94,7 @@ Bước 1-4 tương tự nhưng:
 | **4 ảnh bắt buộc** | Thiếu 1 trong 4 góc → không thể submit inspection |
 | **Checklist đầy đủ** | Tất cả fields required (string rỗng = "none", không được null) |
 | **pre_existing_flag chỉ có giá trị khi** | 4 ảnh + checklist đầy đủ + customer confirmed |
-| **Staff phải đúng phạm vi vận hành cafe** | Phase 1 kiểm tra bằng account/provider policy; bảng `staff_cafe_assignments` chuyển sang Phase 2 |
+| **Staff phải được assign vào cafe** | Kiểm tra qua `staff_cafe_assignments` — không thể check-in booking của cafe khác |
 | **Không thể check-in 2 lần** | Mỗi session chỉ có 1 CHECK_IN inspection |
 
 ---
@@ -113,7 +113,8 @@ Folder convention trên Cloudinary:
   inspections/{session_id}/{session_vehicle_id}/{check_in|check_out}/{angle}
 
 Retention: tối thiểu 90 ngày sau booking COMPLETED
-           nếu có incident damage: giữ đến 30 ngày sau incident RESOLVED/WAIVED
+           nếu có incident: giữ đến 30 ngày sau incident RESOLVED/WAIVED
+           nếu có dispute: giữ đến 30 ngày sau dispute RESOLVED
 ```
 
 ---
@@ -125,5 +126,5 @@ Khi xét damage charge hoặc incident:
 - Check-out photos + checklist là **current state** (trạng thái khi trả)
 - `pre_existing_flag` + `customer_confirmed` → hư hỏng có sẵn, Provider không được tính
 - Nếu Provider thiếu ảnh hoặc checklist → **mất quyền tính damage**
-- Phase 1 dùng `incidents` để ghi log sự cố, policy áp dụng, kết quả xử lý và trạng thái đã done hay chưa
-- Dispute workflow nhiều bên chuyển sang Phase 2
+- Phase 1 có 2 lớp xử lý: `incidents` (policy-based, Staff/Admin áp rule) và `disputes` (tranh chấp chính thức, Admin xét xử)
+- Multi-party arbitration workflow nâng cao chuyển sang Phase 2

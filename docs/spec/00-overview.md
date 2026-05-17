@@ -19,7 +19,7 @@ Sân xe RC (Radio-Controlled Car) là mô hình giải trí trải nghiệm đan
 
 **RCField** là phần mềm B2B cho **1 doanh nghiệp/chuỗi vận hành sân xe RC**. Doanh nghiệp có nhiều chi nhánh, mỗi chi nhánh có cấu hình riêng về giá, đội xe, giờ hoạt động và sức chứa, nhưng dùng chung một hệ thống.
 
-RCField Phase 1 tập trung vào vận hành thực tế của cafe xe RC, bao gồm booking/session, đội xe, BYOC, F&B, package, subscription, contest, promotion, inspection, incident policy resolution và audit thanh toán/trust score. Phase 2 dành cho AI nâng cao, SaaS tenant/billing, staff assignment chi tiết, cafe announcement/closure và dispute workflow nhiều bên.
+RCField Phase 1 tập trung vào vận hành thực tế của cafe xe RC, bao gồm booking/session, đội xe, BYOC, F&B, package, subscription, contest, promotion, inspection, dispute resolution, staff assignment, cafe operations và audit thanh toán/trust score. Phase 2 dành cho AI nâng cao, SaaS tenant/billing và multi-party dispute workflow nâng cao.
 
 Hai nhóm khách chính:
 
@@ -102,16 +102,14 @@ Phase 1 giữ các nghiệp vụ chính của hệ thống. Đây không chỉ l
 - Trust score hiện tại trên `users` và audit qua `trust_score_logs`.
 - Feature flags có `config` để bật/tắt module và chuẩn bị AI/SaaS Phase 2.
 
-**Phase 1 database target:** khoảng 37 bảng vận hành. F&B, package, subscription, contest và maintenance vẫn là core; dispute workflow nhiều bên chuyển sang Phase 2.
+**Phase 1 database target:** 41 bảng vận hành. Bao gồm staff assignment, cafe closures/announcements và dispute cơ bản. Multi-party dispute workflow nâng cao chuyển sang Phase 2.
 
 ### Phase 2 — Business Expansion + AI/SaaS
 
 Các module sau không thuộc Phase 1:
 
 - SaaS tenant tables và tenant-level feature flags.
-- Staff assignment theo cafe/ca làm việc: `staff_cafe_assignments`.
-- Cafe closures/announcements nâng cao: `cafe_closures`, `cafe_announcements`.
-- Dispute workflow nhiều bên: `incident_participants`, `disputes`, `dispute_evidences`, `dispute_parties`.
+- Multi-party dispute workflow nâng cao: `dispute_evidences`, `dispute_parties`, `incident_participants`.
 - AI jobs, AI damage detection, AI recommendations.
 - Analytics dashboard nâng cao.
 - Dynamic pricing, loyalty, native mobile app.
@@ -130,7 +128,7 @@ Các module sau không thuộc Phase 1:
 8. Inspection phải có ảnh và checklist.
 9. Trust score phải có audit log.
 10. Package/subscription/contest/F&B/maintenance là Phase 1 core.
-11. Tranh chấp Phase 1 xử lý bằng policy rõ ràng và log kết quả trên incident; dispute workflow nhiều bên là Phase 2.
+11. Tranh chấp Phase 1 dùng bảng `disputes` + evidence từ inspection. Multi-party dispute workflow nâng cao là Phase 2.
 12. Phase 2 AI/SaaS phải mở rộng được mà không redesign Phase 1 core.
 
 ---

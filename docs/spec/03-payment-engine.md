@@ -53,6 +53,8 @@ Khi SESSION COMPLETED:
 Mỗi xe thuê trong booking_vehicles tạo một cặp RENTAL_FEE + SECURITY_DEPOSIT riêng.
 Khi settle, deposit được refund/full cho tất cả xe không damage.
 Chỉ xe bị damage mới bị trừ deposit tương ứng.
+```
+
 ---
 
 ## Refund Rules

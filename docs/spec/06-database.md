@@ -82,9 +82,9 @@ erDiagram
 
 ---
 
-## 3. Phase 1 Schema Scope — 37 Tables Only
+## 3. Phase 1 Schema Scope — 41 Tables Only
 
-Phase 1 chỉ tạo schema/migration cho **37 bảng vận hành cốt lõi** dưới đây.
+Phase 1 chỉ tạo schema/migration cho **41 bảng vận hành cốt lõi** dưới đây.
 
 > Không cộng thêm bảng Phase 2 vào scope này. Các bảng staff assignment, cafe closures/announcements,
 > dispute workflow nhiều bên, SaaS, AI và analytics nâng cao **không được tạo trong Phase 1**.
@@ -128,12 +128,13 @@ Phase 1 chỉ tạo schema/migration cho **37 bảng vận hành cốt lõi** d�
 | 35 | `notification_logs` | Log thông báo |
 | 36 | `trust_score_logs` | Audit trust score |
 | 37 | `feature_flags` | Bật/tắt module, config Phase 2 |
+| 38 | `staff_cafe_assignments` | Staff assign vào chi nhánh |
+| 39 | `disputes` | Tranh chấp booking |
+| 40 | `cafe_closures` | Ngày đóng cửa đặc biệt |
+| 41 | `cafe_announcements` | Thông báo/banner chi nhánh |
 
 Các nghiệp vụ bị loại khỏi schema Phase 1:
 
-- Staff assignment theo cafe/ca làm việc chi tiết.
-- Cafe closures/announcements nâng cao.
-- Dispute workflow nhiều bên.
 - SaaS tenant/billing.
 - AI job/detail tables.
 - Analytics nâng cao, dynamic pricing, loyalty và native mobile app.
@@ -749,11 +750,96 @@ Các bảng dưới đây chỉ là backlog thiết kế cho Phase 2. Không t�
 | Advanced analytics | analytics aggregate/cache tables nếu cần |
 | Loyalty/dynamic pricing | loyalty points, price rules, campaign optimization |
 
-Phase 1 xử lý thay thế như sau:
+---
 
-- Staff scope: kiểm soát bằng role/account policy, chưa dùng bảng `staff_cafe_assignments`.
-- Cafe closures/announcements: xử lý thủ công ngoài hệ thống hoặc bổ sung sau.
-- Tranh chấp: dùng bảng `incidents` để ghi sự cố, policy áp dụng và kết quả xử lý (`RESOLVED`/`WAIVED`).
+### 5.12 Staff, Disputes & Cafe Operations
+
+#### `staff_cafe_assignments`
+
+> 1 Staff chỉ thuộc đúng 1 chi nhánh tại một thời điểm.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `staff_id` | `uuid` | NOT NULL, UNIQUE, FK -> users(id) | UNIQUE enforce 1 staff → 1 cafe |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) | |
+| `assigned_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
+| `assigned_by` | `uuid` | NOT NULL, FK -> users(id) | PROVIDER hoặc ADMIN |
+
+**Indexes:**
+```sql
+CREATE UNIQUE INDEX idx_staff_cafe_staff_id ON staff_cafe_assignments(staff_id);
+CREATE INDEX idx_staff_cafe_cafe_id ON staff_cafe_assignments(cafe_id);
+```
+
+---
+
+#### `disputes`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `booking_id` | `uuid` | NOT NULL, UNIQUE, FK -> bookings(id) | Mỗi booking max 1 dispute |
+| `opened_by` | `uuid` | NOT NULL, FK -> users(id) | Customer hoặc Staff |
+| `reason` | `text` | NOT NULL | |
+| `evidence_photos` | `text[]` | NOT NULL, DEFAULT '{}' | Cloudinary URLs |
+| `status` | `DisputeStatus` | NOT NULL, DEFAULT `OPEN` | |
+| `resolution` | `text` | NULL | Admin ghi quyết định |
+| `resolution_favor` | `varchar(20)` | NULL | `CUSTOMER` hoặc `PROVIDER` |
+| `resolved_by` | `uuid` | NULL, FK -> users(id) | Admin |
+| `resolved_at` | `timestamptz` | NULL | |
+| `created_at`, `updated_at` | `timestamptz` | NOT NULL | |
+
+**Indexes:**
+```sql
+CREATE UNIQUE INDEX idx_disputes_booking_id ON disputes(booking_id);
+CREATE INDEX idx_disputes_status ON disputes(status);
+```
+
+---
+
+#### `cafe_closures`
+
+> Ngày đóng cửa đặc biệt — block booking cho ngày đó.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) | |
+| `closed_date` | `date` | NOT NULL | Chỉ ngày, không có giờ |
+| `reason` | `varchar(255)` | NULL | VD: "Nghỉ Tết", "Bảo trì sân" |
+| `created_by` | `uuid` | NOT NULL, FK -> users(id) | PROVIDER hoặc ADMIN |
+| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
+
+**Indexes:**
+```sql
+CREATE UNIQUE INDEX idx_cafe_closures_date ON cafe_closures(cafe_id, closed_date);
+CREATE INDEX idx_cafe_closures_cafe_id ON cafe_closures(cafe_id);
+```
+
+---
+
+#### `cafe_announcements`
+
+> Thông báo/banner hiển thị trên web của chi nhánh.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) | |
+| `title` | `varchar(255)` | NOT NULL | |
+| `content` | `text` | NULL | |
+| `image_url` | `text` | NULL | Cloudinary URL |
+| `starts_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
+| `ends_at` | `timestamptz` | NULL | NULL = hiển thị mãi |
+| `is_active` | `boolean` | NOT NULL, DEFAULT true | |
+| `created_by` | `uuid` | NOT NULL, FK -> users(id) | PROVIDER hoặc STAFF |
+| `created_at`, `updated_at` | `timestamptz` | NOT NULL | |
+
+**Indexes:**
+```sql
+CREATE INDEX idx_cafe_announcements_cafe_id ON cafe_announcements(cafe_id, is_active, starts_at DESC);
+```
 
 ---
 
@@ -767,4 +853,4 @@ Phase 1 xử lý thay thế như sau:
 
 ---
 
-*Last updated: 2026-05-16 · 37 Phase 1 tables*
+*Last updated: 2026-05-17 · 41 Phase 1 tables*
