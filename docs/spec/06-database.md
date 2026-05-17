@@ -1,11 +1,9 @@
 # 06 — Database Specification
 
-**Last updated**: 2026-05-13  
-**Status**: Active  
-**Database**: PostgreSQL · ORM: TypeORM · Migration-first
+**Last updated**: 2026-05-16
 
 > Đọc `01-domain-model.md` để hiểu entity relationships trước khi đọc file này.  
-> File này là nguồn sự thật cho schema — khi thay đổi schema phải update file này cùng PR.
+> File này là nguồn sự thật cho schema Phase 1 Operational Core.
 
 ---
 
@@ -16,195 +14,757 @@
 | Tên bảng | `snake_case`, số nhiều (`users`, `bookings`) |
 | Primary key | `id uuid DEFAULT gen_random_uuid()` |
 | Foreign key | `{entity}_id uuid` |
-| Timestamps | Mọi bảng có `created_at`, `updated_at`. Soft delete dùng `deleted_at`. |
-| Tiền tệ | `numeric(15,2)` — không dùng `float` |
-| Enum | Khai báo PostgreSQL ENUM type, dùng trong TypeORM `@Column({ type: 'enum' })` |
-| JSON | `jsonb` — hỗ trợ index và query |
-| Timezone | `timestamptz` — lưu UTC, hiển thị theo timezone client |
-| Soft delete | `deleted_at timestamptz` — NULL = active, NOT NULL = deleted |
+| Timestamps | Bảng nghiệp vụ có `created_at`, `updated_at`; audit/log có thể chỉ có `created_at` |
+| Tiền tệ | `numeric(15,2)`, không dùng `float` |
+| JSON | `jsonb` cho snapshot/config/payload linh hoạt |
+| Timezone | `timestamptz`, lưu UTC |
+| Soft delete | `deleted_at timestamptz`, NULL = active |
 
 ---
 
-## 2. ERD Tổng quan
+## 2. ERD Tổng Quan — Operational Core
 
 ```mermaid
 erDiagram
     users ||--o{ cafes : "provider owns"
     users ||--o{ bookings : "customer makes"
-    users ||--o| staff_cafe_assignments : "staff assigned to 1 cafe"
-    cafes ||--o{ staff_cafe_assignments : "has staff"
-    cafes ||--o{ cafe_images : "has images"
-    cafes ||--o{ vehicles : "has fleet"
-    cafes ||--o{ menu_items : "has menu"
-    vehicles ||--o{ vehicle_images : "has images"
-    vehicles ||--o{ bookings : "rented in"
-    bookings ||--o{ payment_components : "has components"
-    bookings ||--o{ payment_transactions : "has gateway logs"
-    bookings ||--o{ inspection_records : "has inspections"
-    bookings ||--o| disputes : "may have dispute"
-    bookings ||--o{ extension_proposals : "may extend"
-    bookings ||--o| fnb_orders : "has 1 pre-order"
-    bookings ||--o{ fnb_orders : "has on-site orders"
-    fnb_orders ||--o{ fnb_order_items : "has items"
-    menu_items ||--o{ fnb_order_items : "referenced by"
-    users ||--o{ refresh_tokens : "has sessions"
-    users ||--o{ password_reset_tokens : "resets via"
-    users ||--o{ notification_logs : "receives notifications"
-    users ||--o{ trust_score_logs : "score history"
+    users ||--o{ customer_vehicles : "owns BYOC"
+    cafes ||--o{ cafe_images : "images"
+    cafes ||--o{ vehicles : "fleet"
+    cafes ||--o{ menu_items : "menu"
+    cafes ||--o{ packages : "offers"
+    cafes ||--o{ subscriptions : "supports"
+    cafes ||--o{ contests : "organizes"
+    cafes ||--o{ bookings : "receives"
+    cafes ||--o{ sessions : "runs"
+
+    vehicles ||--o{ vehicle_images : "images"
+    vehicles ||--o{ vehicle_maintenance_logs : "maintenance"
+    vehicles ||--o{ booking_vehicles : "planned"
+    vehicles ||--o{ session_vehicles : "actual use"
+    customer_vehicles ||--o{ session_vehicles : "BYOC use"
+
+    bookings ||--o{ booking_participants : "planned people"
+    bookings ||--o{ booking_vehicles : "planned rental vehicles"
+    bookings ||--o{ sessions : "actual sessions"
+    bookings ||--o{ payment_components : "payment ledger"
+    bookings ||--o{ payment_transactions : "gateway logs"
+    bookings ||--o{ fnb_orders : "food orders"
+    bookings ||--o{ package_usages : "package usage"
+    bookings ||--o{ reviews : "review"
+
+    sessions ||--o{ session_participants : "actual people"
+    sessions ||--o{ session_vehicles : "actual vehicles"
+    sessions ||--o{ inspections : "inspections"
+    sessions ||--o{ extension_proposals : "extensions"
+    sessions ||--o{ incidents : "incidents"
+
+    inspections ||--o{ inspection_photos : "photos"
+    inspections ||--o{ inspection_checklists : "checklists"
+    fnb_orders ||--o{ fnb_order_items : "items"
+    menu_items ||--o{ fnb_order_items : "menu item"
+    packages ||--o{ customer_packages : "purchased"
+    customer_packages ||--o{ package_usages : "usage history"
+    subscriptions ||--o{ bookings : "generates"
+    contests ||--o{ contest_registrations : "registrations"
+
+    cafes ||--o{ promotions : "promotions"
+    promotions ||--o{ promotion_usages : "usage history"
+    bookings ||--o| promotion_usages : "applies promo"
+
+    users ||--o{ refresh_tokens : "sessions"
+    users ||--o{ password_reset_tokens : "resets"
+    users ||--o{ notification_logs : "notifications"
+    users ||--o{ trust_score_logs : "trust audit"
     bookings ||--o{ trust_score_logs : "triggered by"
-    cafes ||--o{ cafe_closures : "has closures"
-    cafes ||--o{ promotions : "may offer"
-    cafes ||--o{ cafe_announcements : "announces"
-    promotions ||--o{ promotion_usages : "applied in"
-    bookings ||--o| promotion_usages : "uses promo"
-    bookings ||--o| reviews : "reviewed after"
-    vehicles ||--o{ vehicle_maintenance_logs : "maintenance history"
+    sessions ||--o{ trust_score_logs : "triggered by"
 ```
 
 ---
 
-## 3. Bảng chi tiết
+## 3. Phase 1 Schema Scope — 41 Tables Only
+
+Phase 1 chỉ tạo schema/migration cho **41 bảng vận hành cốt lõi** dưới đây.
+
+> Không cộng thêm bảng Phase 2 vào scope này. Các bảng staff assignment, cafe closures/announcements,
+> dispute workflow nhiều bên, SaaS, AI và analytics nâng cao **không được tạo trong Phase 1**.
+
+| # | Bảng | Mô tả |
+|---|------|-------|
+| 1 | `users` | Tài khoản và role |
+| 2 | `refresh_tokens` | Refresh token sessions |
+| 3 | `password_reset_tokens` | Reset password tokens |
+| 4 | `cafes` | Chi nhánh/sân RC |
+| 5 | `cafe_images` | Gallery ảnh chi nhánh |
+| 6 | `vehicles` | Xe thuê của quán |
+| 7 | `vehicle_images` | Ảnh xe thuê |
+| 8 | `vehicle_maintenance_logs` | Lịch sử bảo trì/sửa chữa xe |
+| 9 | `customer_vehicles` | Xe BYOC của khách |
+| 10 | `bookings` | Đơn đặt lịch dự kiến |
+| 11 | `booking_participants` | Người chơi dự kiến |
+| 12 | `booking_vehicles` | Xe thuê dự kiến |
+| 13 | `sessions` | Phiên chơi thực tế |
+| 14 | `session_participants` | Người chơi thực tế |
+| 15 | `session_vehicles` | Xe thực tế dùng trong session |
+| 16 | `payment_components` | Ledger thanh toán |
+| 17 | `payment_transactions` | Log gateway |
+| 18 | `inspections` | Biên bản kiểm tra |
+| 19 | `inspection_photos` | Ảnh inspection |
+| 20 | `inspection_checklists` | Checklist inspection |
+| 21 | `extension_proposals` | Đề xuất gia hạn |
+| 22 | `incidents` | Sự cố + log xử lý theo policy |
+| 23 | `menu_items` | Menu F&B |
+| 24 | `fnb_orders` | Đơn F&B |
+| 25 | `fnb_order_items` | Line items F&B |
+| 26 | `packages` | Định nghĩa gói chơi |
+| 27 | `customer_packages` | Gói khách đã mua |
+| 28 | `package_usages` | Audit sử dụng gói |
+| 29 | `subscriptions` | Lịch chơi định kỳ |
+| 30 | `contests` | Giải đua/sự kiện |
+| 31 | `contest_registrations` | Đăng ký giải đua |
+| 32 | `promotions` | Mã khuyến mãi |
+| 33 | `promotion_usages` | Audit dùng mã |
+| 34 | `reviews` | Đánh giá |
+| 35 | `notification_logs` | Log thông báo |
+| 36 | `trust_score_logs` | Audit trust score |
+| 37 | `feature_flags` | Bật/tắt module, config Phase 2 |
+| 38 | `staff_cafe_assignments` | Staff assign vào chi nhánh |
+| 39 | `disputes` | Tranh chấp booking |
+| 40 | `cafe_closures` | Ngày đóng cửa đặc biệt |
+| 41 | `cafe_announcements` | Thông báo/banner chi nhánh |
+
+Các nghiệp vụ bị loại khỏi schema Phase 1:
+
+- SaaS tenant/billing.
+- AI job/detail tables.
+- Analytics nâng cao, dynamic pricing, loyalty và native mobile app.
 
 ---
 
-### 3.1 `users`
+## 4. Enum Chuẩn
+
+```typescript
+enum UserRole { CUSTOMER, PROVIDER, STAFF, ADMIN }
+enum AuthProvider { LOCAL, GOOGLE }
+
+enum CafeStatus { PENDING, ACTIVE, SUSPENDED }
+enum TrackType { DRIFT, CIRCUIT, OFFROAD }
+
+enum VehicleTier { STANDARD, PREMIUM, RESTRICTED }
+enum VehicleStatus { AVAILABLE, IN_USE, MAINTENANCE, RETIRED }
+enum VehicleSource { RENTAL, BYOC }
+enum SessionVehicleStatus { ASSIGNED, IN_USE, RETURNED, DAMAGED }
+
+enum BookingMode { SINGLE, PACKAGE, SUBSCRIPTION }
+enum PlayMode { RENTAL, BYOC, MIXED }
+enum BookingSource { APP, STAFF_MANUAL, SYSTEM_SUBSCRIPTION }
+enum BookingStatus { PENDING, CONFIRMED, CANCELLED, NO_SHOW, COMPLETED }
+enum SessionStatus { CHECKED_IN, ACTIVE, EXTENDING, CHECKING_OUT, COMPLETED, CANCELLED }
+
+enum ParticipantType { BOOKER, REGISTERED_USER, WALK_IN_GUEST }
+enum ParticipantRole { DRIVER, PLAYER, SPECTATOR, GUARDIAN }
+
+enum PaymentComponentType {
+  SLOT_FEE, RENTAL_FEE, SECURITY_DEPOSIT, EXTENSION_FEE,
+  DAMAGE_CHARGE, FNB_PREORDER, FNB_ON_SITE, PACKAGE_PURCHASE, CONTEST_ENTRY
+}
+enum PaymentComponentStatus { PENDING, HELD, DISBURSED, REFUNDED, PARTIALLY_REFUNDED, CAPTURED }
+enum PaymentTransactionType { PAYMENT, REFUND, CAPTURE, VOID }
+
+enum InspectionType { CHECK_IN, CHECK_OUT, STAFF_HANDOVER }
+enum InspectionSubjectType { RENTAL_VEHICLE, BYOC_VEHICLE }
+enum InspectionItemStatus { OK, SCRATCHED, BROKEN, MISSING, DIRTY, NEEDS_REVIEW }
+enum PhotoAngle { FRONT, BACK, LEFT, RIGHT, TOP, BOTTOM, DETAIL, OTHER }
+
+enum ExtensionProposalStatus { PENDING, APPROVED, REJECTED, EXPIRED, CANCELLED }
+enum IncidentType { RENTAL_DAMAGE, BYOC_DAMAGE, COLLISION, LOST_ACCESSORY, STAFF_HANDLING, FACILITY, OTHER }
+enum IncidentStatus { RECORDED, REVIEWED, RESOLVED, WAIVED }
+enum ResponsibleParty { CUSTOMER, PROVIDER, STAFF, SHARED, UNKNOWN }
+enum FnbOrderType { PRE_ORDER, ON_SITE }
+enum FnbOrderStatus { PENDING, CONFIRMED, PREPARING, DELIVERED, CANCELLED }
+enum PackageStatus { ACTIVE, INACTIVE, ARCHIVED }
+enum CustomerPackageStatus { ACTIVE, EXPIRED, DEPLETED, CANCELLED }
+enum SubscriptionStatus { ACTIVE, PAUSED, CANCELLED, EXPIRED }
+enum ContestStatus { DRAFT, OPEN, CLOSED, RUNNING, COMPLETED, CANCELLED }
+enum ContestRegistrationStatus { PENDING, CONFIRMED, CANCELLED, CHECKED_IN }
+enum DiscountType { PERCENT, FIXED }
+enum PromoApplicableTo { ALL, RENTAL, BYOC, MIXED }
+enum NotificationChannel { PUSH, SMS, EMAIL }
+enum NotificationStatus { PENDING, SENT, FAILED }
+enum TrustScoreReason { NO_SHOW, DAMAGE_CONFIRMED, BOOKING_STREAK, ADMIN_ADJUSTMENT }
+```
+
+---
+
+## 5. Bảng Chi Tiết
+
+### 5.1 Identity
+
+#### `users`
 
 | Column | Type | Constraints | Ghi chú |
 |--------|------|-------------|---------|
-| `id` | `uuid` | PK, DEFAULT gen_random_uuid() | |
+| `id` | `uuid` | PK | |
 | `email` | `varchar(255)` | NOT NULL, UNIQUE | |
 | `phone` | `varchar(20)` | NULL | |
 | `full_name` | `varchar(255)` | NOT NULL | |
-| `password_hash` | `text` | NULL | NULL nếu đăng nhập Google |
-| `auth_provider` | `enum('LOCAL','GOOGLE')` | NOT NULL, DEFAULT 'LOCAL' | |
-| `role` | `enum('CUSTOMER','PROVIDER','STAFF','ADMIN')` | NOT NULL | |
-| `trust_score` | `numeric(5,2)` | NOT NULL, DEFAULT 100.00 | Chỉ có nghĩa với CUSTOMER (0–100) |
-| `is_active` | `boolean` | NOT NULL, DEFAULT true | |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-| `updated_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-| `deleted_at` | `timestamptz` | NULL | Soft delete |
+| `password_hash` | `text` | NULL | NULL nếu OAuth |
+| `auth_provider` | `AuthProvider` | NOT NULL, DEFAULT `LOCAL` | |
+| `role` | `UserRole` | NOT NULL | |
+| `trust_score` | `numeric(5,2)` | NOT NULL, DEFAULT `100.00` | CUSTOMER |
+| `is_active` | `boolean` | NOT NULL, DEFAULT `true` | |
+| `created_at`, `updated_at`, `deleted_at` | `timestamptz` | | |
 
-**Indexes:**
 ```sql
 CREATE UNIQUE INDEX idx_users_email ON users(email) WHERE deleted_at IS NULL;
 CREATE INDEX idx_users_role ON users(role);
 ```
 
----
-
-### 3.2 `refresh_tokens`
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `user_id` | `uuid` | NOT NULL, FK → users(id) ON DELETE CASCADE | |
-| `token` | `text` | NOT NULL, UNIQUE | Hashed token |
-| `expires_at` | `timestamptz` | NOT NULL | 7 ngày |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-
-**Indexes:**
-```sql
-CREATE INDEX idx_refresh_tokens_user_id ON refresh_tokens(user_id);
-CREATE UNIQUE INDEX idx_refresh_tokens_token ON refresh_tokens(token);
-```
-
----
-
-### 3.3 `password_reset_tokens`
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `user_id` | `uuid` | NOT NULL, FK → users(id) ON DELETE CASCADE | |
-| `token` | `text` | NOT NULL, UNIQUE | UUID random |
-| `expires_at` | `timestamptz` | NOT NULL | 15 phút |
-| `used_at` | `timestamptz` | NULL | NULL = chưa dùng, NOT NULL = đã dùng |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-
----
-
-### 3.4 `cafes`
-
-> Mỗi row = 1 chi nhánh = 1 bộ config độc lập.  
-> Fleet (`vehicles`) và menu (`menu_items`) tự động per-branch qua `cafe_id`.
-
-**Thông tin cơ bản:**
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `provider_id` | `uuid` | NOT NULL, FK → users(id) | PROVIDER role |
-| `name` | `varchar(255)` | NOT NULL | Tên chi nhánh VD: "RCField Quận 7" |
-| `slug` | `varchar(100)` | NOT NULL, UNIQUE | URL path VD: `rcfield-quan-7` → `rcfield.com/rcfield-quan-7/` |
-| `description` | `text` | NULL | Mô tả chi nhánh |
-| `phone` | `varchar(20)` | NULL | SĐT liên hệ |
-| `status` | `enum('PENDING','ACTIVE','SUSPENDED')` | NOT NULL, DEFAULT 'PENDING' | |
-| `cover_image_url` | `text` | NULL | Ảnh đại diện (lấy từ cafe_images) |
-
-**Địa chỉ & vị trí:**
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `address` | `text` | NOT NULL | Địa chỉ đầy đủ |
-| `district` | `varchar(100)` | NOT NULL | Quận/Huyện |
-| `city` | `varchar(100)` | NOT NULL | Thành phố |
-| `latitude` | `numeric(10,7)` | NULL | Toạ độ — tính khoảng cách "gần nhất" |
-| `longitude` | `numeric(10,7)` | NULL | |
-
-**Config vận hành (per-branch):**
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `operating_hours` | `jsonb` | NOT NULL | `{ mon: {open:"09:00", close:"22:00"}, ... }` |
-| `track_types` | `text[]` | NOT NULL, DEFAULT '{}' | Các loại sân của chi nhánh. Giá trị hợp lệ: `DRIFT`, `CIRCUIT`, `OFFROAD`. VD: `['DRIFT','CIRCUIT']` |
-| `slot_duration_minutes` | `integer` | NOT NULL, DEFAULT 60 | Đơn vị slot (phút) |
-| `slot_fee_rate` | `numeric(15,2)` | NOT NULL | Giá mỗi slot (VNĐ) — hiển thị, tính tiền dùng snapshot |
-| `max_concurrent_bookings` | `integer` | NOT NULL, DEFAULT 10 | Số lượng booking đồng thời tối đa |
-| `min_booking_notice_minutes` | `integer` | NOT NULL, DEFAULT 60 | Phải đặt trước tối thiểu bao nhiêu phút |
-| `byoc_capacity` | `integer` | NOT NULL, DEFAULT 5 | Số lượng BYOC tối đa cùng 1 slot |
-
-**Timestamps:**
+#### `refresh_tokens`
 
 | Column | Type | Constraints |
 |--------|------|-------------|
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() |
-| `updated_at` | `timestamptz` | NOT NULL, DEFAULT now() |
+| `id` | `uuid` | PK |
+| `user_id` | `uuid` | NOT NULL, FK -> users(id) ON DELETE CASCADE |
+| `token` | `text` | NOT NULL, UNIQUE |
+| `expires_at` | `timestamptz` | NOT NULL |
+| `created_at` | `timestamptz` | NOT NULL |
 
-**Indexes:**
+#### `password_reset_tokens`
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `uuid` | PK |
+| `user_id` | `uuid` | NOT NULL, FK -> users(id) ON DELETE CASCADE |
+| `token` | `text` | NOT NULL, UNIQUE |
+| `expires_at` | `timestamptz` | NOT NULL |
+| `used_at` | `timestamptz` | NULL |
+| `created_at` | `timestamptz` | NOT NULL |
+
+---
+
+### 5.2 Cafe
+
+#### `cafes`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `provider_id` | `uuid` | NOT NULL, FK -> users(id) | PROVIDER |
+| `name` | `varchar(255)` | NOT NULL | |
+| `slug` | `varchar(100)` | NOT NULL, UNIQUE | |
+| `description` | `text` | NULL | |
+| `phone` | `varchar(20)` | NULL | |
+| `status` | `CafeStatus` | NOT NULL, DEFAULT `PENDING` | |
+| `cover_image_url` | `text` | NULL | |
+| `address` | `text` | NOT NULL | |
+| `district` | `varchar(100)` | NOT NULL | |
+| `city` | `varchar(100)` | NOT NULL | |
+| `latitude`, `longitude` | `numeric(10,7)` | NULL | |
+| `operating_hours` | `jsonb` | NOT NULL | |
+| `track_types` | `text[]` | NOT NULL, DEFAULT `{}` | |
+| `slot_duration_minutes` | `integer` | NOT NULL, DEFAULT `60` | |
+| `slot_fee_rate` | `numeric(15,2)` | NOT NULL | Booking dùng snapshot |
+| `max_concurrent_bookings` | `integer` | NOT NULL, DEFAULT `10` | |
+| `byoc_capacity` | `integer` | NOT NULL, DEFAULT `5` | |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+#### `cafe_images`
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `uuid` | PK |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) ON DELETE CASCADE |
+| `url` | `text` | NOT NULL |
+| `sort_order` | `integer` | NOT NULL, DEFAULT `0` |
+| `created_at` | `timestamptz` | NOT NULL |
+
+---
+
+### 5.3 Fleet & BYOC
+
+#### `vehicles`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) | |
+| `name` | `varchar(255)` | NOT NULL | |
+| `description` | `text` | NULL | |
+| `tier` | `VehicleTier` | NOT NULL | |
+| `status` | `VehicleStatus` | NOT NULL, DEFAULT `AVAILABLE` | |
+| `hourly_rate` | `numeric(15,2)` | NOT NULL | |
+| `security_deposit` | `numeric(15,2)` | NOT NULL | |
+| `damage_multiplier` | `numeric(4,2)` | NOT NULL, DEFAULT `1.00` | |
+| `compatible_track_types` | `text[]` | NOT NULL, DEFAULT `{}` | |
+| `cover_image_url` | `text` | NULL | |
+| `last_maintenance_at` | `timestamptz` | NULL | |
+| `created_at`, `updated_at`, `deleted_at` | `timestamptz` | | |
+
+#### `vehicle_images`
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `uuid` | PK |
+| `vehicle_id` | `uuid` | NOT NULL, FK -> vehicles(id) ON DELETE CASCADE |
+| `url` | `text` | NOT NULL |
+| `sort_order` | `integer` | NOT NULL, DEFAULT `0` |
+| `created_at` | `timestamptz` | NOT NULL |
+
+#### `customer_vehicles`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `customer_id` | `uuid` | NOT NULL, FK -> users(id) | |
+| `brand` | `varchar(100)` | NULL | |
+| `model` | `varchar(100)` | NULL | |
+| `serial_number` | `varchar(100)` | NULL | |
+| `description` | `text` | NULL | |
+| `notes` | `text` | NULL | |
+| `created_at`, `updated_at`, `deleted_at` | `timestamptz` | | |
+
+#### `vehicle_maintenance_logs`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `vehicle_id` | `uuid` | NOT NULL, FK -> vehicles(id) | |
+| `type` | `varchar(50)` | NOT NULL | `SCHEDULED`, `REPAIR`, `INSPECTION` |
+| `description` | `text` | NOT NULL | |
+| `cost` | `numeric(15,2)` | NULL | |
+| `performed_by` | `uuid` | NULL, FK -> users(id) | Staff hoặc NULL nếu gửi ngoài |
+| `performed_at` | `timestamptz` | NOT NULL | |
+| `next_scheduled_at` | `timestamptz` | NULL | |
+| `related_session_id` | `uuid` | NULL, FK -> sessions(id) | Nếu phát sinh từ session |
+| `created_at` | `timestamptz` | NOT NULL | |
+
+---
+
+### 5.4 Booking Layer
+
+#### `bookings`
+
+> Không lưu `vehicle_id` trực tiếp trong `bookings`.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `customer_id` | `uuid` | NOT NULL, FK -> users(id) | |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) | |
+| `subscription_id` | `uuid` | NULL, FK -> subscriptions(id) | Nếu sinh từ lịch định kỳ |
+| `booking_mode` | `BookingMode` | NOT NULL, DEFAULT `SINGLE` | |
+| `play_mode` | `PlayMode` | NOT NULL | RENTAL/BYOC/MIXED |
+| `source` | `BookingSource` | NOT NULL, DEFAULT `APP` | |
+| `track_type` | `varchar(50)` | NOT NULL | |
+| `status` | `BookingStatus` | NOT NULL, DEFAULT `PENDING` | |
+| `slot_start`, `slot_end` | `timestamptz` | NOT NULL | Dự kiến |
+| `slot_count` | `integer` | NOT NULL, DEFAULT `1` | |
+| `payment_expires_at` | `timestamptz` | NOT NULL | |
+| `snapshot` | `jsonb` | NOT NULL | Giá/policy bất biến |
+| `promotion_id` | `uuid` | NULL, FK -> promotions(id) | |
+| `discount_amount` | `numeric(15,2)` | NULL | |
+| `notes` | `text` | NULL | |
+| `cancelled_by` | `uuid` | NULL, FK -> users(id) | |
+| `cancelled_at` | `timestamptz` | NULL | |
+| `cancellation_reason` | `text` | NULL | |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
 ```sql
-CREATE UNIQUE INDEX idx_cafes_slug ON cafes(slug);
-CREATE INDEX idx_cafes_provider_id ON cafes(provider_id);
-CREATE INDEX idx_cafes_status ON cafes(status);
-CREATE INDEX idx_cafes_city_district ON cafes(city, district);
-CREATE INDEX idx_cafes_location ON cafes(latitude, longitude);
+CREATE INDEX idx_bookings_customer_id ON bookings(customer_id);
+CREATE INDEX idx_bookings_cafe_slot ON bookings(cafe_id, track_type, slot_start, slot_end);
+CREATE INDEX idx_bookings_status ON bookings(status);
+CREATE INDEX idx_bookings_payment_expires ON bookings(payment_expires_at)
+  WHERE status = 'PENDING';
 ```
 
-**`operating_hours` JSON structure:**
-```jsonc
-{
-  "mon": { "open": "09:00", "close": "22:00", "is_closed": false },
-  "tue": { "open": "09:00", "close": "22:00", "is_closed": false },
-  "wed": { "open": "09:00", "close": "22:00", "is_closed": false },
-  "thu": { "open": "09:00", "close": "22:00", "is_closed": false },
-  "fri": { "open": "09:00", "close": "23:00", "is_closed": false },
-  "sat": { "open": "08:00", "close": "23:00", "is_closed": false },
-  "sun": { "open": "08:00", "close": "22:00", "is_closed": false }
-}
+#### `booking_participants`
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `uuid` | PK |
+| `booking_id` | `uuid` | NOT NULL, FK -> bookings(id) ON DELETE CASCADE |
+| `user_id` | `uuid` | NULL, FK -> users(id) |
+| `participant_type` | `ParticipantType` | NOT NULL |
+| `display_name` | `varchar(255)` | NULL |
+| `phone` | `varchar(20)` | NULL |
+| `is_primary_responsible` | `boolean` | NOT NULL, DEFAULT `false` |
+| `created_at`, `updated_at` | `timestamptz` | |
+
+#### `booking_vehicles`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `booking_id` | `uuid` | NOT NULL, FK -> bookings(id) ON DELETE CASCADE | |
+| `vehicle_id` | `uuid` | NOT NULL, FK -> vehicles(id) | |
+| `assigned_to_participant_id` | `uuid` | NULL, FK -> booking_participants(id) | |
+| `hourly_rate_snapshot` | `numeric(15,2)` | NOT NULL | |
+| `security_deposit_snapshot` | `numeric(15,2)` | NOT NULL | |
+| `damage_multiplier_snapshot` | `numeric(4,2)` | NOT NULL | |
+| `created_at` | `timestamptz` | NOT NULL | |
+
+```sql
+CREATE UNIQUE INDEX idx_booking_vehicles_unique ON booking_vehicles(booking_id, vehicle_id);
 ```
 
 ---
 
-### 3.5 `staff_cafe_assignments`
+### 5.5 Session Layer
+
+#### `sessions`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `booking_id` | `uuid` | NOT NULL, FK -> bookings(id) | |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) | |
+| `status` | `SessionStatus` | NOT NULL, DEFAULT `CHECKED_IN` | |
+| `checked_in_by` | `uuid` | NOT NULL, FK -> users(id) | Staff |
+| `checked_out_by` | `uuid` | NULL, FK -> users(id) | Staff |
+| `actual_start_at` | `timestamptz` | NOT NULL | |
+| `actual_end_at` | `timestamptz` | NULL | |
+| `planned_end_at` | `timestamptz` | NOT NULL | |
+| `actual_total_amount` | `numeric(15,2)` | NOT NULL, DEFAULT `0` | |
+| `notes` | `text` | NULL | |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+#### `session_participants`
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `uuid` | PK |
+| `session_id` | `uuid` | NOT NULL, FK -> sessions(id) ON DELETE CASCADE |
+| `booking_participant_id` | `uuid` | NULL, FK -> booking_participants(id) |
+| `user_id` | `uuid` | NULL, FK -> users(id) |
+| `display_name` | `varchar(255)` | NULL |
+| `phone` | `varchar(20)` | NULL |
+| `role` | `ParticipantRole` | NOT NULL |
+| `is_primary_responsible` | `boolean` | NOT NULL, DEFAULT `false` |
+| `checked_in_at` | `timestamptz` | NOT NULL |
+| `created_at`, `updated_at` | `timestamptz` | |
+
+#### `session_vehicles`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `session_id` | `uuid` | NOT NULL, FK -> sessions(id) ON DELETE CASCADE | |
+| `booking_vehicle_id` | `uuid` | NULL, FK -> booking_vehicles(id) | |
+| `vehicle_source` | `VehicleSource` | NOT NULL | RENTAL/BYOC |
+| `vehicle_id` | `uuid` | NULL, FK -> vehicles(id) | Required khi RENTAL |
+| `customer_vehicle_id` | `uuid` | NULL, FK -> customer_vehicles(id) | Required khi BYOC |
+| `assigned_to_participant_id` | `uuid` | NULL, FK -> session_participants(id) | |
+| `status` | `SessionVehicleStatus` | NOT NULL, DEFAULT `ASSIGNED` | |
+| `started_at`, `returned_at` | `timestamptz` | NULL | |
+| `notes` | `text` | NULL | |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+---
+
+### 5.6 Payment
+
+#### `payment_components`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `booking_id` | `uuid` | NOT NULL, FK -> bookings(id) | |
+| `session_id` | `uuid` | NULL, FK -> sessions(id) | |
+| `type` | `PaymentComponentType` | NOT NULL | |
+| `amount` | `numeric(15,2)` | NOT NULL | Immutable |
+| `status` | `PaymentComponentStatus` | NOT NULL, DEFAULT `PENDING` | |
+| `disbursed_to` | `uuid` | NULL, FK -> users(id) | |
+| `disbursed_at`, `refunded_at` | `timestamptz` | NULL | |
+| `refunded_amount` | `numeric(15,2)` | NULL | |
+| `note` | `text` | NULL | |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+#### `payment_transactions`
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `uuid` | PK |
+| `booking_id` | `uuid` | NOT NULL, FK -> bookings(id) |
+| `session_id` | `uuid` | NULL, FK -> sessions(id) |
+| `gateway` | `varchar(50)` | NOT NULL |
+| `gateway_transaction_id` | `varchar(255)` | NULL |
+| `type` | `PaymentTransactionType` | NOT NULL |
+| `amount` | `numeric(15,2)` | NOT NULL |
+| `status` | `varchar(50)` | NOT NULL |
+| `raw_request`, `raw_response` | `jsonb` | NULL |
+| `created_at` | `timestamptz` | NOT NULL |
+
+---
+
+### 5.7 Inspection
+
+#### `inspections`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `session_id` | `uuid` | NOT NULL, FK -> sessions(id) | |
+| `session_vehicle_id` | `uuid` | NULL, FK -> session_vehicles(id) | |
+| `type` | `InspectionType` | NOT NULL | |
+| `subject_type` | `InspectionSubjectType` | NOT NULL | |
+| `performed_by` | `uuid` | NOT NULL, FK -> users(id) | Staff |
+| `pre_existing_flag` | `boolean` | NOT NULL, DEFAULT `false` | |
+| `damage_noted` | `boolean` | NOT NULL, DEFAULT `false` | |
+| `damage_description` | `text` | NULL | |
+| `damage_cost_estimate` | `numeric(15,2)` | NULL | |
+| `ai_analysis_json` | `jsonb` | NULL | Phase 2 hook |
+| `customer_confirmed` | `boolean` | NOT NULL, DEFAULT `false` | |
+| `customer_confirmed_at` | `timestamptz` | NULL | |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+#### `inspection_photos`
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `uuid` | PK |
+| `inspection_id` | `uuid` | NOT NULL, FK -> inspections(id) ON DELETE CASCADE |
+| `angle` | `PhotoAngle` | NOT NULL |
+| `url` | `text` | NOT NULL |
+| `uploaded_by` | `uuid` | NOT NULL, FK -> users(id) |
+| `metadata` | `jsonb` | NULL |
+| `created_at` | `timestamptz` | NOT NULL |
+
+#### `inspection_checklists`
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `uuid` | PK |
+| `inspection_id` | `uuid` | NOT NULL, FK -> inspections(id) ON DELETE CASCADE |
+| `item_key` | `varchar(100)` | NOT NULL |
+| `item_label` | `varchar(255)` | NOT NULL |
+| `status` | `InspectionItemStatus` | NOT NULL |
+| `note` | `text` | NULL |
+| `created_at`, `updated_at` | `timestamptz` | |
+
+---
+
+### 5.8 Extension, Promotion, Audit
+
+#### `extension_proposals`
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `uuid` | PK |
+| `session_id` | `uuid` | NOT NULL, FK -> sessions(id) |
+| `proposed_by` | `uuid` | NOT NULL, FK -> users(id) |
+| `duration_minutes` | `integer` | NOT NULL |
+| `fee_amount` | `numeric(15,2)` | NOT NULL |
+| `status` | `ExtensionProposalStatus` | NOT NULL, DEFAULT `PENDING` |
+| `responded_by` | `uuid` | NULL, FK -> users(id) |
+| `responded_at` | `timestamptz` | NULL |
+| `created_at`, `updated_at` | `timestamptz` | |
+
+#### `promotions`
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `uuid` | PK |
+| `cafe_id` | `uuid` | NULL, FK -> cafes(id) |
+| `code` | `varchar(50)` | NOT NULL, UNIQUE |
+| `discount_type` | `DiscountType` | NOT NULL |
+| `discount_value` | `numeric(15,2)` | NOT NULL |
+| `max_discount_amount` | `numeric(15,2)` | NULL |
+| `min_order_amount` | `numeric(15,2)` | NULL |
+| `max_uses` | `integer` | NULL |
+| `max_uses_per_user` | `integer` | NOT NULL, DEFAULT `1` |
+| `uses_count` | `integer` | NOT NULL, DEFAULT `0` |
+| `applicable_to` | `PromoApplicableTo` | NOT NULL, DEFAULT `ALL` |
+| `starts_at` | `timestamptz` | NOT NULL |
+| `expires_at` | `timestamptz` | NULL |
+| `is_active` | `boolean` | NOT NULL, DEFAULT `true` |
+| `created_by` | `uuid` | NOT NULL, FK -> users(id) |
+| `created_at`, `updated_at` | `timestamptz` | |
+
+#### `promotion_usages`
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `uuid` | PK |
+| `promotion_id` | `uuid` | NOT NULL, FK -> promotions(id) |
+| `booking_id` | `uuid` | NOT NULL, UNIQUE, FK -> bookings(id) |
+| `user_id` | `uuid` | NOT NULL, FK -> users(id) |
+| `discount_amount` | `numeric(15,2)` | NOT NULL |
+| `created_at` | `timestamptz` | NOT NULL |
+
+#### `reviews`
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `uuid` | PK |
+| `booking_id` | `uuid` | NOT NULL, UNIQUE, FK -> bookings(id) |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) |
+| `customer_id` | `uuid` | NOT NULL, FK -> users(id) |
+| `rating` | `integer` | NOT NULL |
+| `comment` | `text` | NULL |
+| `is_visible` | `boolean` | NOT NULL, DEFAULT `true` |
+| `created_at` | `timestamptz` | NOT NULL |
+
+#### `notification_logs`
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `uuid` | PK |
+| `user_id` | `uuid` | NOT NULL, FK -> users(id) |
+| `booking_id` | `uuid` | NULL, FK -> bookings(id) |
+| `session_id` | `uuid` | NULL, FK -> sessions(id) |
+| `type` | `varchar(100)` | NOT NULL |
+| `channel` | `NotificationChannel` | NOT NULL |
+| `title` | `varchar(255)` | NOT NULL |
+| `body` | `text` | NOT NULL |
+| `status` | `NotificationStatus` | NOT NULL, DEFAULT `PENDING` |
+| `error` | `text` | NULL |
+| `sent_at` | `timestamptz` | NULL |
+| `created_at` | `timestamptz` | NOT NULL |
+
+#### `trust_score_logs`
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | `uuid` | PK |
+| `user_id` | `uuid` | NOT NULL, FK -> users(id) |
+| `booking_id` | `uuid` | NULL, FK -> bookings(id) |
+| `session_id` | `uuid` | NULL, FK -> sessions(id) |
+| `delta` | `numeric(5,2)` | NOT NULL |
+| `score_before` | `numeric(5,2)` | NOT NULL |
+| `score_after` | `numeric(5,2)` | NOT NULL |
+| `reason` | `TrustScoreReason` | NOT NULL |
+| `note` | `text` | NULL |
+| `created_by` | `uuid` | NULL, FK -> users(id) |
+| `created_at` | `timestamptz` | NOT NULL |
+
+#### `feature_flags`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `key` | `varchar(100)` | NOT NULL, UNIQUE | |
+| `description` | `text` | NULL | |
+| `is_enabled` | `boolean` | NOT NULL, DEFAULT `false` | |
+| `config` | `jsonb` | NOT NULL, DEFAULT `{}` | Phase 2/SaaS-ready |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+---
+
+### 5.9 F&B
+
+| Bảng | Cột chính | Ghi chú |
+|------|----------|---------|
+| `menu_items` | `cafe_id`, `name`, `description`, `price`, `category`, `image_url`, `is_available`, `deleted_at` | Menu theo chi nhánh |
+| `fnb_orders` | `booking_id`, `session_id`, `order_type`, `status`, `total_amount`, `created_by`, `confirmed_by`, `confirmed_at`, `notes` | `PRE_ORDER` hoặc `ON_SITE` |
+| `fnb_order_items` | `order_id`, `menu_item_id`, `quantity`, `unit_price`, `item_name_snapshot`, `created_at` | Snapshot giá/tên món |
+
+Rules:
+
+- `PRE_ORDER` gắn với booking và có thể `session_id = NULL`.
+- `ON_SITE` nên gắn với session.
+- Một booking chỉ có tối đa một pre-order chưa cancel.
+
+### 5.10 Packages, Subscriptions & Contests
+
+| Bảng | Cột chính | Ghi chú |
+|------|----------|---------|
+| `packages` | `cafe_id`, `name`, `description`, `slot_count`, `price`, `valid_days`, `applicable_play_modes`, `status`, `deleted_at` | Định nghĩa gói chơi |
+| `customer_packages` | `package_id`, `customer_id`, `remaining_slots`, `purchased_at`, `expires_at`, `status` | Gói khách đã mua |
+| `package_usages` | `customer_package_id`, `booking_id`, `used_slots`, `created_at` | Audit trừ slot |
+| `subscriptions` | `cafe_id`, `customer_id`, `play_mode`, `track_type`, `frequency_rule`, `slot_count`, `starts_at`, `ends_at`, `status` | Lịch định kỳ sinh booking |
+| `contests` | `cafe_id`, `name`, `description`, `track_type`, `vehicle_rule`, `starts_at`, `ends_at`, `capacity`, `entry_fee`, `status`, `created_by` | Giải đua/sự kiện |
+| `contest_registrations` | `contest_id`, `user_id`, `vehicle_source`, `vehicle_id`, `customer_vehicle_id`, `status` | Một user đăng ký một lần cho một contest |
+
+Rules:
+
+- `Booking.booking_mode = PACKAGE` phải có `package_usages`.
+- `Booking.booking_mode = SUBSCRIPTION` phải có `subscription_id`.
+- Contest registration hỗ trợ cả `RENTAL` và `BYOC`.
+
+### 5.11 Incidents & Policy Resolution
+
+| Bảng | Cột chính | Ghi chú |
+|------|----------|---------|
+| `incidents` | `session_id`, `reported_by`, `type`, `status`, `occurred_at`, `description`, `estimated_amount`, `responsible_party`, `final_amount`, `resolution_note`, `resolved_by`, `resolved_at` | Sự cố + log kết quả xử lý theo policy |
+
+Rules:
+
+- Incident là log sự cố và kết quả xử lý theo policy.
+- Phase 1 không tách dispute thành nhiều bảng. Nếu khách phản đối, staff/admin cập nhật `incidents.status`, `resolution_note`, `responsible_party`, `final_amount`.
+- Evidence dùng lại `inspections`, `inspection_photos`, `inspection_checklists`. Upload evidence riêng và dispute nhiều bên là Phase 2.
+
+---
+
+## 6. Redis — Slot Locking
+
+Redis chỉ giữ slot tạm trong checkout. DB là nguồn sự thật sau khi booking được tạo.
+
+### RENTAL / MIXED
+
+Mỗi xe thuê trong `booking_vehicles` cần một lock riêng:
+
+```text
+Key:   slot:rental:{cafeId}:{vehicleId}:{date}:{slotStart}
+Value: {userId}:{checkoutSessionId}
+TTL:   1800s
+Cmd:   SET NX EX
+```
+
+Nếu thuê nhiều xe, phải acquire đủ lock. Nếu một lock fail, rollback các lock đã acquire.
+
+### BYOC / MIXED
+
+```text
+Key:   slot:byoc:{cafeId}:{trackType}:{date}:{slotStart}
+Value: counter
+TTL:   1800s
+Cmd:   INCR -> check <= byoc_capacity, nếu vượt thì DECR + từ chối
+```
+
+### DB conflict query
+
+Kiểm tra xe thuê qua `booking_vehicles`, không qua cột xe trực tiếp trên `bookings`:
+
+```sql
+SELECT 1
+FROM booking_vehicles bv
+JOIN bookings b ON b.id = bv.booking_id
+WHERE bv.vehicle_id = :vehicle_id
+  AND b.status IN ('PENDING', 'CONFIRMED')
+  AND tstzrange(b.slot_start, b.slot_end, '[)') && tstzrange(:slot_start, :slot_end, '[)');
+```
+
+---
+
+## 7. Phase 2 Backlog — Not Part Of Phase 1 Schema
+
+Các bảng dưới đây chỉ là backlog thiết kế cho Phase 2. Không tạo migration, entity hoặc API bắt buộc cho các bảng này trong Phase 1.
+
+| Nhóm | Bảng |
+|------|------|
+| Staff/cafe ops | `staff_cafe_assignments`, `cafe_closures`, `cafe_announcements` |
+| Advanced dispute | `incident_participants`, `disputes`, `dispute_evidences`, `dispute_parties` |
+| SaaS | `tenants`, `tenant_members`, `saas_plans`, `tenant_subscriptions` |
+| AI | `ai_analysis_jobs`, `ai_damage_detections`, `ai_recommendations` |
+| Advanced analytics | analytics aggregate/cache tables nếu cần |
+| Loyalty/dynamic pricing | loyalty points, price rules, campaign optimization |
+
+---
+
+### 5.12 Staff, Disputes & Cafe Operations
+
+#### `staff_cafe_assignments`
 
 > 1 Staff chỉ thuộc đúng 1 chi nhánh tại một thời điểm.
 
 | Column | Type | Constraints | Ghi chú |
 |--------|------|-------------|---------|
 | `id` | `uuid` | PK | |
-| `staff_id` | `uuid` | NOT NULL, UNIQUE, FK → users(id) | STAFF role — UNIQUE enforce 1 staff → 1 cafe |
-| `cafe_id` | `uuid` | NOT NULL, FK → cafes(id) | |
+| `staff_id` | `uuid` | NOT NULL, UNIQUE, FK -> users(id) | UNIQUE enforce 1 staff → 1 cafe |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) | |
 | `assigned_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-| `assigned_by` | `uuid` | NOT NULL, FK → users(id) | PROVIDER hoặc ADMIN |
+| `assigned_by` | `uuid` | NOT NULL, FK -> users(id) | PROVIDER hoặc ADMIN |
 
 **Indexes:**
 ```sql
@@ -214,201 +774,21 @@ CREATE INDEX idx_staff_cafe_cafe_id ON staff_cafe_assignments(cafe_id);
 
 ---
 
-### 3.6 `vehicles`
+#### `disputes`
 
 | Column | Type | Constraints | Ghi chú |
 |--------|------|-------------|---------|
 | `id` | `uuid` | PK | |
-| `cafe_id` | `uuid` | NOT NULL, FK → cafes(id) | Thuộc chi nhánh nào |
-| `name` | `varchar(255)` | NOT NULL | VD: "Traxxas Slash 4x4" |
-| `description` | `text` | NULL | |
-| `tier` | `enum('STANDARD','PREMIUM','RESTRICTED')` | NOT NULL | |
-| `status` | `enum('AVAILABLE','IN_USE','MAINTENANCE','RETIRED')` | NOT NULL, DEFAULT 'AVAILABLE' | |
-| `hourly_rate` | `numeric(15,2)` | NOT NULL | Giá thuê / giờ |
-| `security_deposit` | `numeric(15,2)` | NOT NULL | Tiền đặt cọc |
-| `damage_multiplier` | `numeric(4,2)` | NOT NULL, DEFAULT 1.00 | 1.0 / 1.5 / 2.0 |
-| `compatible_track_types` | `text[]` | NOT NULL, DEFAULT '{}' | Sân xe này chạy được. Giá trị hợp lệ: `DRIFT`, `CIRCUIT`, `OFFROAD`. Rỗng = chạy được tất cả sân của chi nhánh. Chỉ áp dụng với RENTAL — BYOC không bị ràng buộc |
-| `cover_image_url` | `text` | NULL | Ảnh đại diện (lấy từ vehicle_images) |
-| `last_maintenance_at` | `timestamptz` | NULL | |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-| `updated_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-| `deleted_at` | `timestamptz` | NULL | Soft delete |
-
-**Indexes:**
-```sql
-CREATE INDEX idx_vehicles_cafe_id ON vehicles(cafe_id);
-CREATE INDEX idx_vehicles_status ON vehicles(status);
-CREATE INDEX idx_vehicles_tier ON vehicles(tier);
-```
-
----
-
-### 3.7 `bookings`
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `customer_id` | `uuid` | NOT NULL, FK → users(id) | Luôn có account — guest điền thông tin thì system tạo account trước |
-| `cafe_id` | `uuid` | NOT NULL, FK → cafes(id) | |
-| `vehicle_id` | `uuid` | NULL, FK → vehicles(id) | NULL nếu BYOC |
-| `mode` | `enum('RENTAL','BYOC')` | NOT NULL | |
-| `source` | `enum('APP','STAFF_MANUAL')` | NOT NULL, DEFAULT 'APP' | Kênh tạo booking |
-| `track_type` | `varchar(50)` | NOT NULL | Sân customer chọn: `DRIFT`, `CIRCUIT`, hoặc `OFFROAD`. Backend tự fill nếu cafe chỉ có 1 loại sân. BYOC customer chọn thoải mái bất kỳ sân nào của cafe |
-| `status` | `enum('PENDING','CONFIRMED','ACTIVE','EXTENDING','CHECKING_OUT','DISPUTED','COMPLETED','CANCELLED')` | NOT NULL, DEFAULT 'PENDING' | |
-| `slot_start` | `timestamptz` | NOT NULL | Phải trùng với boundary của fixed slot |
-| `slot_end` | `timestamptz` | NOT NULL | Cập nhật khi gia hạn |
-| `slot_count` | `integer` | NOT NULL, DEFAULT 1 | Số slot đặt liên tiếp (VD: 2 = 2 tiếng) |
-| `payment_expires_at` | `timestamptz` | NOT NULL | `created_at + 30 phút` — cron job auto-cancel khi quá hạn |
-| `snapshot` | `jsonb` | NOT NULL | BookingSnapshot — bất biến sau khi tạo |
-| `promotion_id` | `uuid` | NULL, FK → promotions(id) | Mã khuyến mãi áp dụng (nếu có) |
-| `discount_amount` | `numeric(15,2)` | NULL | Số tiền được giảm — snapshot tại thời điểm tạo |
-| `notes` | `text` | NULL | Ghi chú của customer |
-| `cancelled_by` | `uuid` | NULL, FK → users(id) | Ai huỷ |
-| `cancelled_at` | `timestamptz` | NULL | |
-| `cancellation_reason` | `text` | NULL | |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-| `updated_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-
-**Indexes:**
-```sql
-CREATE INDEX idx_bookings_customer_id ON bookings(customer_id);
-CREATE INDEX idx_bookings_cafe_id ON bookings(cafe_id);
-CREATE INDEX idx_bookings_vehicle_id ON bookings(vehicle_id);
-CREATE INDEX idx_bookings_status ON bookings(status);
-CREATE INDEX idx_bookings_slot_start ON bookings(slot_start);
-CREATE INDEX idx_bookings_track_type ON bookings(cafe_id, track_type);
--- Cron job auto-cancel PENDING bookings
-CREATE INDEX idx_bookings_payment_expires ON bookings(payment_expires_at)
-  WHERE status = 'PENDING';
--- Tránh double-booking
-CREATE INDEX idx_bookings_vehicle_slot ON bookings(vehicle_id, slot_start, slot_end)
-  WHERE status NOT IN ('CANCELLED');
-```
-
-**`snapshot` JSON structure:**
-```jsonc
-{
-  "slot_fee_rate": 150000,          // VNĐ/slot
-  "slot_count": 2,                  // Số slot đặt
-  "slot_duration_minutes": 60,      // Phút/slot
-  "total_slot_fee": 300000,         // slot_fee_rate × slot_count
-  "rental_fee": 50000,              // VNĐ (0 nếu BYOC)
-  "security_deposit": 500000,       // VNĐ (0 nếu BYOC)
-  "damage_multiplier": 1.5,
-  "platform_fee_pct": 0.15,
-  "refund_rule": "R1",
-  "track_type": "DRIFT",
-  "vehicle_name": "Traxxas Slash 4x4",
-  "vehicle_tier": "PREMIUM",
-  "cafe_name": "RCField Q7",
-  "cafe_slug": "rcfield-quan-7",
-  // Promo — null nếu không dùng mã
-  "promo": {
-    "code": "SUMMER20",
-    "discount_type": "PERCENT",     // hoặc "FIXED"
-    "discount_value": 20,
-    "max_discount_amount": 100000   // null = không giới hạn
-  },
-  // Calculated tại thời điểm tạo — dùng cho mọi tính toán tiếp theo
-  "calculated": {
-    "subtotal": 350000,             // total_slot_fee + rental_fee
-    "discount_amount": 70000,       // 0 nếu không có promo
-    "total_charge": 280000          // subtotal - discount_amount (customer trả cái này + deposit)
-  }
-}
-```
-
----
-
-### 3.8 `payment_components`
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `booking_id` | `uuid` | NOT NULL, FK → bookings(id) | |
-| `type` | `enum('SLOT_FEE','RENTAL_FEE','SECURITY_DEPOSIT','EXTENSION_FEE','DAMAGE_CHARGE','FB_PREORDER')` | NOT NULL | |
-| `amount` | `numeric(15,2)` | NOT NULL | Bất biến sau khi tạo |
-| `status` | `enum('PENDING','HELD','DISBURSED','REFUNDED','PARTIALLY_REFUNDED')` | NOT NULL, DEFAULT 'PENDING' | |
-| `disbursed_to` | `uuid` | NULL, FK → users(id) | provider_id khi disburse |
-| `disbursed_at` | `timestamptz` | NULL | |
-| `refunded_at` | `timestamptz` | NULL | |
-| `refunded_amount` | `numeric(15,2)` | NULL | Dùng khi PARTIALLY_REFUNDED |
-| `note` | `text` | NULL | Lý do adjustment |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-| `updated_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-
-**Indexes:**
-```sql
-CREATE INDEX idx_payment_components_booking_id ON payment_components(booking_id);
-CREATE INDEX idx_payment_components_status ON payment_components(status);
-```
-
----
-
-### 3.9 `inspection_records`
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `booking_id` | `uuid` | NOT NULL, FK → bookings(id) | |
-| `type` | `enum('CHECK_IN','CHECK_OUT')` | NOT NULL | |
-| `performed_by` | `uuid` | NOT NULL, FK → users(id) | Staff |
-| `photos` | `jsonb` | NOT NULL | `{ front, back, left, right }` — 4 S3 URLs |
-| `checklist` | `jsonb` | NOT NULL | `{ scratches, cracks, missing_parts, notes }` |
-| `pre_existing_flag` | `boolean` | NOT NULL, DEFAULT false | Hư hỏng có sẵn (check-in) |
-| `damage_noted` | `boolean` | NOT NULL, DEFAULT false | Damage mới (check-out) |
-| `damage_description` | `text` | NULL | Mô tả damage (check-out) |
-| `damage_cost_estimate` | `numeric(15,2)` | NULL | Staff ước tính |
-| `customer_confirmed` | `boolean` | NOT NULL, DEFAULT false | |
-| `customer_confirmed_at` | `timestamptz` | NULL | |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-
-**Indexes:**
-```sql
-CREATE INDEX idx_inspection_records_booking_id ON inspection_records(booking_id);
--- Đảm bảo mỗi booking chỉ có 1 check-in và 1 check-out
-CREATE UNIQUE INDEX idx_inspection_booking_type ON inspection_records(booking_id, type);
-```
-
----
-
-### 3.10 `extension_proposals`
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `booking_id` | `uuid` | NOT NULL, FK → bookings(id) | |
-| `proposed_by` | `uuid` | NOT NULL, FK → users(id) | Staff |
-| `duration_minutes` | `integer` | NOT NULL | Số phút gia hạn |
-| `fee_amount` | `numeric(15,2)` | NOT NULL | Phí gia hạn |
-| `status` | `enum('PENDING','APPROVED','REJECTED','EXPIRED')` | NOT NULL, DEFAULT 'PENDING' | |
-| `responded_by` | `uuid` | NULL, FK → users(id) | Customer |
-| `responded_at` | `timestamptz` | NULL | |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-
-**Indexes:**
-```sql
-CREATE INDEX idx_extension_proposals_booking_id ON extension_proposals(booking_id);
-```
-
----
-
-### 3.11 `disputes`
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `booking_id` | `uuid` | NOT NULL, UNIQUE, FK → bookings(id) | Mỗi booking max 1 dispute |
-| `opened_by` | `uuid` | NOT NULL, FK → users(id) | Customer hoặc Staff |
+| `booking_id` | `uuid` | NOT NULL, UNIQUE, FK -> bookings(id) | Mỗi booking max 1 dispute |
+| `opened_by` | `uuid` | NOT NULL, FK -> users(id) | Customer hoặc Staff |
 | `reason` | `text` | NOT NULL | |
-| `evidence_photos` | `text[]` | NOT NULL, DEFAULT '{}' | S3 URLs thêm từ customer |
-| `status` | `enum('OPEN','UNDER_REVIEW','RESOLVED')` | NOT NULL, DEFAULT 'OPEN' | |
+| `evidence_photos` | `text[]` | NOT NULL, DEFAULT '{}' | Cloudinary URLs |
+| `status` | `DisputeStatus` | NOT NULL, DEFAULT `OPEN` | |
 | `resolution` | `text` | NULL | Admin ghi quyết định |
-| `resolution_favor` | `enum('CUSTOMER','PROVIDER')` | NULL | Admin phán quyết |
-| `resolved_by` | `uuid` | NULL, FK → users(id) | Admin |
+| `resolution_favor` | `varchar(20)` | NULL | `CUSTOMER` hoặc `PROVIDER` |
+| `resolved_by` | `uuid` | NULL, FK -> users(id) | Admin |
 | `resolved_at` | `timestamptz` | NULL | |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-| `updated_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
+| `created_at`, `updated_at` | `timestamptz` | NOT NULL | |
 
 **Indexes:**
 ```sql
@@ -418,257 +798,17 @@ CREATE INDEX idx_disputes_status ON disputes(status);
 
 ---
 
-### 3.12 `menu_items`
+#### `cafe_closures`
+
+> Ngày đóng cửa đặc biệt — block booking cho ngày đó.
 
 | Column | Type | Constraints | Ghi chú |
 |--------|------|-------------|---------|
 | `id` | `uuid` | PK | |
-| `cafe_id` | `uuid` | NOT NULL, FK → cafes(id) | |
-| `name` | `varchar(255)` | NOT NULL | |
-| `description` | `text` | NULL | |
-| `price` | `numeric(15,2)` | NOT NULL | |
-| `category` | `varchar(100)` | NULL | VD: "Nước uống", "Đồ ăn" |
-| `image_url` | `text` | NULL | |
-| `is_available` | `boolean` | NOT NULL, DEFAULT true | Tạm ẩn khi hết hàng |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-| `updated_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-| `deleted_at` | `timestamptz` | NULL | Soft delete |
-
-**Indexes:**
-```sql
-CREATE INDEX idx_menu_items_cafe_id ON menu_items(cafe_id);
-CREATE INDEX idx_menu_items_available ON menu_items(cafe_id, is_available) WHERE deleted_at IS NULL;
-```
-
----
-
-### 3.13 `fnb_orders`
-
-> PRE_ORDER: 1 booking chỉ có đúng 1 đơn pre-order (tạo khi đặt lịch, Staff có thể chỉnh khi check-in).  
-> ON_SITE: Có thể có nhiều đơn on-site trong 1 booking (gọi thêm nhiều lần).
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `booking_id` | `uuid` | NOT NULL, FK → bookings(id) | |
-| `type` | `enum('PRE_ORDER','ON_SITE')` | NOT NULL | |
-| `status` | `enum('PENDING','CONFIRMED','DELIVERED','CANCELLED')` | NOT NULL, DEFAULT 'PENDING' | |
-| `total_amount` | `numeric(15,2)` | NOT NULL, DEFAULT 0 | |
-| `created_by` | `uuid` | NOT NULL, FK → users(id) | Customer (pre-order) hoặc Staff (on-site) |
-| `confirmed_by` | `uuid` | NULL, FK → users(id) | Staff confirm |
-| `confirmed_at` | `timestamptz` | NULL | |
-| `notes` | `text` | NULL | |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-| `updated_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-
-**Indexes:**
-```sql
-CREATE INDEX idx_fnb_orders_booking_id ON fnb_orders(booking_id);
--- Enforce 1 PRE_ORDER per booking
-CREATE UNIQUE INDEX idx_fnb_orders_preorder ON fnb_orders(booking_id)
-  WHERE type = 'PRE_ORDER' AND status != 'CANCELLED';
-```
-
----
-
-### 3.14 `fnb_order_items`
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `order_id` | `uuid` | NOT NULL, FK → fnb_orders(id) | |
-| `menu_item_id` | `uuid` | NOT NULL, FK → menu_items(id) | |
-| `quantity` | `integer` | NOT NULL, CHECK quantity > 0 | |
-| `unit_price` | `numeric(15,2)` | NOT NULL | Snapshot giá tại thời điểm order |
-| `item_name_snapshot` | `varchar(255)` | NOT NULL | Snapshot tên item |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-
-**Indexes:**
-```sql
-CREATE INDEX idx_fnb_order_items_order_id ON fnb_order_items(order_id);
-```
-
----
-
----
-
-### 3.15 `cafe_images`
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `cafe_id` | `uuid` | NOT NULL, FK → cafes(id) ON DELETE CASCADE | |
-| `url` | `text` | NOT NULL | Cloudinary URL |
-| `sort_order` | `integer` | NOT NULL, DEFAULT 0 | Thứ tự hiển thị |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-
-**Indexes:**
-```sql
-CREATE INDEX idx_cafe_images_cafe_id ON cafe_images(cafe_id);
-```
-
----
-
-### 3.16 `vehicle_images`
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `vehicle_id` | `uuid` | NOT NULL, FK → vehicles(id) ON DELETE CASCADE | |
-| `url` | `text` | NOT NULL | Cloudinary URL |
-| `sort_order` | `integer` | NOT NULL, DEFAULT 0 | Thứ tự hiển thị |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-
-**Indexes:**
-```sql
-CREATE INDEX idx_vehicle_images_vehicle_id ON vehicle_images(vehicle_id);
-```
-
----
-
-### 3.17 `payment_transactions`
-
-> Lưu raw response từ payment gateway — dùng cho debug, reconcile, dispute với gateway.
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `booking_id` | `uuid` | NOT NULL, FK → bookings(id) | |
-| `gateway` | `varchar(50)` | NOT NULL | VD: 'VNPAY', 'MOMO', 'VIETQR' |
-| `gateway_transaction_id` | `varchar(255)` | NULL | Transaction ID từ gateway |
-| `type` | `enum('PAYMENT','REFUND')` | NOT NULL | |
-| `amount` | `numeric(15,2)` | NOT NULL | |
-| `status` | `varchar(50)` | NOT NULL | Raw status code từ gateway |
-| `raw_request` | `jsonb` | NULL | Payload gửi đi |
-| `raw_response` | `jsonb` | NULL | Response nhận về |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-
-**Indexes:**
-```sql
-CREATE INDEX idx_payment_transactions_booking_id ON payment_transactions(booking_id);
-CREATE INDEX idx_payment_transactions_gateway_txn ON payment_transactions(gateway_transaction_id);
-```
-
----
-
-### 3.18 `notification_logs`
-
-> Lưu lịch sử notification đã gửi — dùng để debug, tránh gửi trùng, và audit.
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `user_id` | `uuid` | NOT NULL, FK → users(id) | Người nhận |
-| `booking_id` | `uuid` | NULL, FK → bookings(id) | Booking liên quan (nếu có) |
-| `type` | `varchar(100)` | NOT NULL | VD: 'BOOKING_CONFIRMED', 'EXTENSION_PROPOSED', 'CHECKOUT_REMINDER' |
-| `channel` | `enum('PUSH','SMS','EMAIL')` | NOT NULL | Kênh gửi |
-| `title` | `varchar(255)` | NOT NULL | |
-| `body` | `text` | NOT NULL | Nội dung notification |
-| `status` | `enum('SENT','FAILED','PENDING')` | NOT NULL, DEFAULT 'PENDING' | |
-| `error` | `text` | NULL | Lỗi nếu gửi thất bại |
-| `sent_at` | `timestamptz` | NULL | |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-
-**Indexes:**
-```sql
-CREATE INDEX idx_notification_logs_user_id ON notification_logs(user_id);
-CREATE INDEX idx_notification_logs_booking_id ON notification_logs(booking_id);
-```
-
----
-
-### 3.19 `feature_flags`
-
-> Bật/tắt tính năng cho toàn hệ thống — ADMIN (team RCField) quản lý.  
-> Dùng cho cả tính năng thường và tính năng AI (Phase 2).  
-> Hệ thống chỉ có 1 tenant nên không cần per-tenant flag.
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `feature_key` | `varchar(100)` | NOT NULL, UNIQUE | VD: `'AI_DAMAGE_DETECTION'`, `'AI_CHATBOT'`, `'AI_ANALYTICS'` |
-| `display_name` | `varchar(255)` | NOT NULL | Tên hiển thị trên ADMIN dashboard |
-| `description` | `text` | NULL | Mô tả tính năng |
-| `is_enabled` | `boolean` | NOT NULL, DEFAULT false | Đang bật hay tắt |
-| `is_trial` | `boolean` | NOT NULL, DEFAULT false | Đang trong giai đoạn dùng thử |
-| `trial_ends_at` | `timestamptz` | NULL | Cron job tự tắt khi hết hạn thử |
-| `enabled_by` | `uuid` | NULL, FK → users(id) | ADMIN thực hiện bật/tắt |
-| `enabled_at` | `timestamptz` | NULL | Thời điểm bật gần nhất |
-| `note` | `text` | NULL | ADMIN ghi chú (VD: "Cho dùng thử đến 30/6") |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-| `updated_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-
-**Indexes:**
-```sql
-CREATE UNIQUE INDEX idx_feature_flags_key ON feature_flags(feature_key);
-CREATE INDEX idx_feature_flags_enabled ON feature_flags(is_enabled);
-```
-
-**Seed data (MVP — tất cả tắt mặc định):**
-```sql
-INSERT INTO feature_flags (feature_key, display_name, is_enabled) VALUES
-  ('FNB',                 'Quản lý F&B',                   true),
-  ('DISPUTE',             'Xử lý tranh chấp',               true),
-  ('EXTENSION',           'Gia hạn slot',                   true),
-  ('ANALYTICS',           'Báo cáo & Analytics',            true),
-  ('AI_DAMAGE_DETECTION', 'Phát hiện hư hỏng bằng AI',      false),
-  ('AI_CHATBOT',          'Chatbot hỗ trợ khách hàng (AI)', false),
-  ('AI_ANALYTICS',        'Phân tích dữ liệu bằng AI',      false);
-```
-
-**Cơ chế:**
-- **Bình thường**: ADMIN set `is_enabled = true` sau khi Provider đóng tiền tháng
-- **Dùng thử**: ADMIN set `is_trial = true` + `trial_ends_at` → cron job tự set `is_enabled = false` khi hết hạn
-- **Backend check**: Mọi API liên quan đến feature phải kiểm tra flag trước khi xử lý
-
----
-
-### 3.20 `trust_score_logs`
-
-> Lịch sử thay đổi trust_score của CUSTOMER. Mỗi sự kiện tạo 1 row immutable.
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `user_id` | `uuid` | NOT NULL, FK → users(id) | CUSTOMER bị ảnh hưởng |
-| `booking_id` | `uuid` | NULL, FK → bookings(id) | Booking liên quan (nếu có) |
-| `delta` | `numeric(5,2)` | NOT NULL | Dương = tăng, âm = giảm. VD: `-10.00`, `+5.00` |
-| `score_before` | `numeric(5,2)` | NOT NULL | trust_score trước khi thay đổi |
-| `score_after` | `numeric(5,2)` | NOT NULL | trust_score sau khi thay đổi |
-| `reason` | `enum('NO_SHOW','DAMAGE_CONFIRMED','DISPUTE_LOST','BOOKING_STREAK','ADMIN_ADJUSTMENT')` | NOT NULL | Lý do |
-| `note` | `text` | NULL | Mô tả thêm (Admin ghi khi ADMIN_ADJUSTMENT) |
-| `created_by` | `uuid` | NULL, FK → users(id) | NULL = system tự động, NOT NULL = Admin thao tác thủ công |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-
-**Indexes:**
-```sql
-CREATE INDEX idx_trust_score_logs_user_id ON trust_score_logs(user_id);
-CREATE INDEX idx_trust_score_logs_booking_id ON trust_score_logs(booking_id);
-```
-
-**Delta rules (mặc định):**
-
-| Reason | Delta | Trigger |
-|--------|-------|---------|
-| `NO_SHOW` | `-10` | Booking auto-cancel do no-show |
-| `DAMAGE_CONFIRMED` | `-20` | Check-out ghi nhận damage mới |
-| `DISPUTE_LOST` | `-15` | Dispute resolved favor PROVIDER |
-| `BOOKING_STREAK` | `+5` | Mỗi 5 booking completed liên tiếp không incident |
-| `ADMIN_ADJUSTMENT` | tuỳ | Admin điều chỉnh thủ công |
-
----
-
-### 3.21 `cafe_closures`
-
-> Ngày đóng cửa đặc biệt của chi nhánh — hiển thị trên web, block booking cho ngày đó.
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `cafe_id` | `uuid` | NOT NULL, FK → cafes(id) | |
-| `closed_date` | `date` | NOT NULL | Ngày đóng cửa (chỉ ngày, không có giờ) |
-| `reason` | `varchar(255)` | NULL | VD: "Nghỉ Tết Nguyên Đán", "Bảo trì sân" |
-| `created_by` | `uuid` | NOT NULL, FK → users(id) | PROVIDER hoặc ADMIN |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) | |
+| `closed_date` | `date` | NOT NULL | Chỉ ngày, không có giờ |
+| `reason` | `varchar(255)` | NULL | VD: "Nghỉ Tết", "Bảo trì sân" |
+| `created_by` | `uuid` | NOT NULL, FK -> users(id) | PROVIDER hoặc ADMIN |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
 
 **Indexes:**
@@ -679,129 +819,22 @@ CREATE INDEX idx_cafe_closures_cafe_id ON cafe_closures(cafe_id);
 
 ---
 
-### 3.22 `promotions`
+#### `cafe_announcements`
 
-> Mã khuyến mãi / discount code — áp dụng khi tạo booking.  
-> `cafe_id IS NULL` = global (toàn chuỗi). `cafe_id = X` = chỉ chi nhánh X.  
-> Xem `business-rules/BR-promotions.md` để biết logic validation và tính discount.
+> Thông báo/banner hiển thị trên web của chi nhánh.
 
 | Column | Type | Constraints | Ghi chú |
 |--------|------|-------------|---------|
 | `id` | `uuid` | PK | |
-| `code` | `varchar(50)` | NOT NULL, UNIQUE | Mã nhập vào (VD: `RCFIELD2026`) |
-| `description` | `text` | NULL | Mô tả hiển thị cho khách |
-| `discount_type` | `enum('PERCENT','FIXED')` | NOT NULL | % hoặc số tiền cố định |
-| `discount_value` | `numeric(15,2)` | NOT NULL | VD: `20` (20%) hoặc `50000` (50k VNĐ) |
-| `max_discount_amount` | `numeric(15,2)` | NULL | Trần giảm tối đa (cho PERCENT). NULL = không giới hạn |
-| `min_order_amount` | `numeric(15,2)` | NULL | Đơn tối thiểu để áp dụng. NULL = không giới hạn |
-| `max_uses` | `integer` | NULL | Tổng số lần dùng tối đa. NULL = không giới hạn |
-| `max_uses_per_user` | `integer` | NOT NULL, DEFAULT 1 | Mỗi user dùng tối đa bao nhiêu lần |
-| `uses_count` | `integer` | NOT NULL, DEFAULT 0 | Số lần đã dùng (cache, đồng bộ với promotion_usages) |
-| `applicable_to` | `enum('ALL','RENTAL','BYOC')` | NOT NULL, DEFAULT 'ALL' | Áp dụng cho loại booking nào |
-| `cafe_id` | `uuid` | NULL, FK → cafes(id) | NULL = áp dụng tất cả chi nhánh |
-| `starts_at` | `timestamptz` | NOT NULL | Bắt đầu hiệu lực |
-| `expires_at` | `timestamptz` | NULL | Hết hạn. NULL = không hết hạn |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) | |
+| `title` | `varchar(255)` | NOT NULL | |
+| `content` | `text` | NULL | |
+| `image_url` | `text` | NULL | Cloudinary URL |
+| `starts_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
+| `ends_at` | `timestamptz` | NULL | NULL = hiển thị mãi |
 | `is_active` | `boolean` | NOT NULL, DEFAULT true | |
-| `created_by` | `uuid` | NOT NULL, FK → users(id) | PROVIDER hoặc ADMIN |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-| `updated_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-
-**Indexes:**
-```sql
-CREATE UNIQUE INDEX idx_promotions_code ON promotions(code) WHERE is_active = true;
-CREATE INDEX idx_promotions_cafe_id ON promotions(cafe_id);
-CREATE INDEX idx_promotions_expires_at ON promotions(expires_at) WHERE is_active = true;
-```
-
----
-
-### 3.23 `promotion_usages`
-
-> Log mỗi lần một promotion được dùng trong booking — immutable.
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `promotion_id` | `uuid` | NOT NULL, FK → promotions(id) | |
-| `booking_id` | `uuid` | NOT NULL, UNIQUE, FK → bookings(id) | 1 booking chỉ dùng 1 mã |
-| `user_id` | `uuid` | NOT NULL, FK → users(id) | |
-| `discount_amount` | `numeric(15,2)` | NOT NULL | Số tiền thực tế được giảm |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-
-**Indexes:**
-```sql
-CREATE UNIQUE INDEX idx_promotion_usages_booking ON promotion_usages(booking_id);
-CREATE INDEX idx_promotion_usages_promotion_id ON promotion_usages(promotion_id);
-CREATE INDEX idx_promotion_usages_user_id ON promotion_usages(user_id);
-```
-
----
-
-### 3.24 `vehicle_maintenance_logs`
-
-> Lịch sử bảo trì / sửa chữa từng xe trong fleet.
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `vehicle_id` | `uuid` | NOT NULL, FK → vehicles(id) | |
-| `type` | `enum('SCHEDULED','REPAIR','INSPECTION')` | NOT NULL | Loại công việc |
-| `description` | `text` | NOT NULL | Mô tả công việc đã làm |
-| `cost` | `numeric(15,2)` | NULL | Chi phí (nếu có) |
-| `performed_by` | `uuid` | NULL, FK → users(id) | Staff thực hiện. NULL nếu gửi ngoài |
-| `performed_at` | `timestamptz` | NOT NULL | Thời điểm thực hiện |
-| `next_scheduled_at` | `timestamptz` | NULL | Lịch bảo trì tiếp theo |
-| `related_booking_id` | `uuid` | NULL, FK → bookings(id) | Nếu phát sinh từ damage trong booking |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-
-**Indexes:**
-```sql
-CREATE INDEX idx_vehicle_maintenance_vehicle_id ON vehicle_maintenance_logs(vehicle_id);
-CREATE INDEX idx_vehicle_maintenance_performed_at ON vehicle_maintenance_logs(vehicle_id, performed_at DESC);
-```
-
----
-
-### 3.25 `reviews`
-
-> Đánh giá của customer sau khi hoàn thành buổi chơi. 1 booking = tối đa 1 review.
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `booking_id` | `uuid` | NOT NULL, UNIQUE, FK → bookings(id) | 1 booking 1 review |
-| `cafe_id` | `uuid` | NOT NULL, FK → cafes(id) | Denormalized để query nhanh |
-| `customer_id` | `uuid` | NOT NULL, FK → users(id) | |
-| `rating` | `integer` | NOT NULL, CHECK rating BETWEEN 1 AND 5 | Số sao |
-| `comment` | `text` | NULL | Nhận xét |
-| `is_visible` | `boolean` | NOT NULL, DEFAULT true | Provider/Admin có thể ẩn review vi phạm |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-
-**Indexes:**
-```sql
-CREATE UNIQUE INDEX idx_reviews_booking_id ON reviews(booking_id);
-CREATE INDEX idx_reviews_cafe_id ON reviews(cafe_id, is_visible, created_at DESC);
-```
-
----
-
-### 3.26 `cafe_announcements`
-
-> Thông báo của chi nhánh hiển thị trên web (banner, tin tức, sự kiện).
-
-| Column | Type | Constraints | Ghi chú |
-|--------|------|-------------|---------|
-| `id` | `uuid` | PK | |
-| `cafe_id` | `uuid` | NOT NULL, FK → cafes(id) | |
-| `title` | `varchar(255)` | NOT NULL | Tiêu đề thông báo |
-| `content` | `text` | NULL | Nội dung chi tiết |
-| `image_url` | `text` | NULL | Ảnh banner (Cloudinary URL) |
-| `starts_at` | `timestamptz` | NOT NULL, DEFAULT now() | Bắt đầu hiển thị |
-| `ends_at` | `timestamptz` | NULL | Hết hiển thị. NULL = hiển thị mãi |
-| `is_active` | `boolean` | NOT NULL, DEFAULT true | |
-| `created_by` | `uuid` | NOT NULL, FK → users(id) | PROVIDER hoặc STAFF |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
-| `updated_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
+| `created_by` | `uuid` | NOT NULL, FK -> users(id) | PROVIDER hoặc STAFF |
+| `created_at`, `updated_at` | `timestamptz` | NOT NULL | |
 
 **Indexes:**
 ```sql
@@ -810,100 +843,14 @@ CREATE INDEX idx_cafe_announcements_cafe_id ON cafe_announcements(cafe_id, is_ac
 
 ---
 
-## 4. Tổng hợp bảng
-
-| # | Bảng | Mô tả |
-|---|------|-------|
-| 1 | `users` | Tất cả users (4 roles) |
-| 2 | `refresh_tokens` | JWT refresh token sessions |
-| 3 | `password_reset_tokens` | Reset password tokens (TTL 15 phút) |
-| 4 | `cafes` | Chi nhánh (branches) |
-| 5 | `cafe_images` | Gallery ảnh chi nhánh (Cloudinary URLs) |
-| 6 | `staff_cafe_assignments` | Staff assign vào 1 chi nhánh (UNIQUE per staff) |
-| 7 | `vehicles` | Fleet xe của từng chi nhánh |
-| 8 | `vehicle_images` | Gallery ảnh xe (Cloudinary URLs) |
-| 9 | `bookings` | Đơn đặt lịch |
-| 10 | `payment_components` | Ledger thanh toán (immutable) |
-| 11 | `payment_transactions` | Raw log từ payment gateway |
-| 12 | `inspection_records` | Check-in / check-out với ảnh + checklist |
-| 13 | `extension_proposals` | Đề xuất gia hạn slot |
-| 14 | `disputes` | Tranh chấp |
-| 15 | `menu_items` | Menu F&B per chi nhánh |
-| 16 | `fnb_orders` | Đơn F&B (1 pre-order + nhiều on-site per booking) |
-| 17 | `fnb_order_items` | Line items của đơn F&B |
-| 18 | `notification_logs` | Lịch sử notification đã gửi |
-| 19 | `feature_flags` | Bật/tắt tính năng — ADMIN quản lý (kể cả AI features) |
-| 20 | `trust_score_logs` | Lịch sử thay đổi trust_score — immutable audit trail |
-| 21 | `cafe_closures` | Ngày đóng cửa theo lịch (Tết, bảo trì) |
-| 22 | `promotions` | Mã khuyến mãi (PERCENT / FIXED) |
-| 23 | `promotion_usages` | Lịch sử áp dụng mã khuyến mãi per booking |
-| 24 | `vehicle_maintenance_logs` | Lịch sử bảo trì / sửa chữa xe |
-| 25 | `reviews` | Đánh giá sao của customer sau khi chơi |
-| 26 | `cafe_announcements` | Thông báo / banner của chi nhánh hiển thị trên web |
-
----
-
-## 5. Redis — Slot Locking
-
-> Redis dùng để ngăn double booking tại thời điểm checkout — không dùng cho promo.
-
-### Key schema
-
-**RENTAL** — lock 1 xe cụ thể trong 1 slot:
-```
-Key:   slot:rental:{cafeId}:{vehicleId}:{date}:{slotStart}
-Value: {userId}
-TTL:   1800s (30 phút)
-Cmd:   SET NX EX
-```
-
-**BYOC** — đếm số lượng người đặt cùng 1 slot (giới hạn theo `cafe.byoc_capacity`):
-```
-Key:   slot:byoc:{cafeId}:{trackType}:{date}:{slotStart}
-Value: counter (integer)
-TTL:   1800s (30 phút)
-Cmd:   INCR → check <= byoc_capacity, nếu vượt thì DECR + từ chối
-```
-
-### Flow
-
-```
-[Checkout] Customer xác nhận đặt
-  ↓
-RENTAL: SET NX slot:rental:...   → 0 = slot đang bị giữ → báo lỗi
-BYOC:   INCR slot:byoc:...       → counter > byoc_capacity → DECR + báo lỗi
-  ↓
-Tạo booking (status = PENDING) trong DB + lock promo (nếu có) trong DB transaction
-  ↓
-[Thanh toán thành công]
-  → booking.status = CONFIRMED
-  → DEL Redis key (slot được lock bởi DB booking, không cần Redis nữa)
-
-[Không thanh toán — hết TTL 30 phút]
-  → Redis key tự hết hạn → slot tự do
-  → Cron job (chạy mỗi 5 phút) scan PENDING bookings quá hạn:
-      - booking.status = CANCELLED
-      - Rollback promo usage (nếu có): uses_count - 1, xóa promotion_usages record
-```
-
-### Tại sao cron vẫn cần
-
-Redis TTL giải phóng slot (availability) tự động. Nhưng cần cron để:
-- Cập nhật `booking.status = CANCELLED` trong DB (audit trail)
-- Rollback `promotion_usages` + `promotions.uses_count`
-
-Cron không cần chạy nhanh — 5 phút/lần là đủ vì slot đã được Redis giải phóng rồi.
-
----
-
 ## Reference
 
+- `docs/spec/00-overview.md` — Scope và roadmap
 - `docs/spec/01-domain-model.md` — Entity definitions, enums
-- `docs/spec/02-state-machine.md` — Booking status transitions
+- `docs/spec/02-state-machine.md` — Booking/session status transitions
 - `docs/spec/03-payment-engine.md` — Payment component rules
 - `docs/spec/04-inspection-flow.md` — Inspection protocol
-- `docs/spec/business-rules/` — Business rules per domain
 
 ---
 
-*Last updated: 2026-05-14 · 26 tables*
+*Last updated: 2026-05-17 · 41 Phase 1 tables*

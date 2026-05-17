@@ -1,13 +1,14 @@
 # BR-Booking — Quy tắc nghiệp vụ: Đặt lịch
 
-**Last updated**: 2026-05-14  
+**Last updated**: 2026-05-15
 **Status**: Active
 
----
+> **Lưu ý:** Booking giờ chỉ quản lý đơn đặt lịch dự kiến.
+> Các quy tắc vận hành (check-in, extension, settlement) chuyển sang session. Xem `02-state-machine.md`.
 
 ## 1. Slot system
 
-**BR-BK-000-A** — Fixed slots  
+**BR-BK-000-A** — Fixed slots
 Hệ thống generate sẵn các khung giờ theo `cafe.slot_duration_minutes`:
 ```
 slot_duration = 60 phút → slots: 09:00, 10:00, 11:00, ..., 21:00
@@ -26,7 +27,7 @@ Hệ thống check tất cả N slots liên tiếp đều available trước khi
 IF: Customer muốn đặt xe X cho sân T trong khung giờ T  
 THEN: Xe X available khi:
 1. `vehicle.status = AVAILABLE`
-2. Không có booking nào của xe X với `status NOT IN ('CANCELLED')` overlap khung giờ T
+2. Không có `booking_vehicles` nào của xe X thuộc booking `PENDING` hoặc `CONFIRMED` overlap khung giờ T
 3. `vehicle.compatible_track_types` rỗng **HOẶC** chứa `booking.track_type` customer chọn
 
 **BR-BK-000-D** — Availability check BYOC  
@@ -46,8 +47,24 @@ Slot 10:00–11:00:
   Khách D → xe Traxxas Slash   ❌ (xe đã bị A đặt)
 ```
 
-**BR-BK-000-F** — Track type selection  
+**BR-BK-000-F** — Track type selection
 Customer chọn loại sân (`DRIFT` / `CIRCUIT` / `OFFROAD`) trước khi chọn xe:
+
+**BR-BK-000-G** — Multi-vehicle booking (RENTAL)
+IF: Customer muốn thuê nhiều xe trong 1 booking (`play_mode = MIXED` hoặc 2+ RENTAL vehicles)
+THEN: Tất cả xe đều phải available trong cùng khung giờ. Mỗi xe tạo 1 row trong `booking_vehicles`.
+NOTE: Mỗi xe có rental_fee + security_deposit riêng. Xử lý refund/damage per-vehicle độc lập.
+
+**BR-BK-000-H** — Guest participants (không có app)
+IF: Customer booking cho người khác không có app
+THEN: Tạo `booking_participant` với `participant_type = WALK_IN_GUEST`, điền tên + SĐT.
+NOTE: Người đặt chính (`is_primary_responsible = true`) vẫn chịu trách nhiệm tài chính.
+
+**BR-BK-000-I** — MIXED mode booking
+IF: `play_mode = MIXED`
+THEN: `booking_vehicles` chỉ chứa xe RENTAL dự kiến; xe BYOC được chốt khi check-in qua `session_vehicles.customer_vehicle_id`.
+RENTAL vehicles: kiểm tra availability, tính rental_fee + deposit.
+BYOC vehicles: kiểm tra byoc_capacity, không tính rental_fee/deposit.
 - Sân phải thuộc `cafe.track_types`
 - RENTAL: hệ thống chỉ hiển thị xe có `compatible_track_types` rỗng hoặc chứa sân đã chọn
 - BYOC: hiển thị tất cả sân của cafe, customer tự quyết định
@@ -63,16 +80,16 @@ NOTE: Mọi tính toán tiền SAU ĐÓ đều dùng snapshot — không dùng g
 
 **BR-BK-002** — Booking mode  
 IF: Customer chọn xe từ fleet của quán  
-THEN: `mode = RENTAL`, `vehicle_id` bắt buộc  
+THEN: `play_mode = RENTAL` hoặc `MIXED`, tạo một hoặc nhiều row trong `booking_vehicles`  
 IF: Customer mang xe cá nhân  
-THEN: `mode = BYOC`, `vehicle_id = null`
+THEN: `play_mode = BYOC` hoặc `MIXED`; không lưu xe BYOC trong `booking_vehicles`, chốt xe thực tế ở `session_vehicles`
 
 **BR-BK-003** — Cafe phải ACTIVE  
 IF: Cafe có `status ≠ ACTIVE`  
 THEN: Không cho phép tạo booking tại cafe đó
 
 **BR-BK-004** — Không được đặt trùng slot  
-IF: Xe đã có booking CONFIRMED hoặc ACTIVE trong khung giờ đó  
+IF: Xe đã có booking PENDING hoặc CONFIRMED trong khung giờ đó  
 THEN: Từ chối booking mới cho xe đó trong cùng khung giờ
 
 **BR-BK-005** — Booking channels  
@@ -127,9 +144,9 @@ THEN: Hoàn 0% SLOT_FEE + 100% RENTAL_FEE + 100% DEPOSIT
 IF: Provider hoặc Staff huỷ booking (bất kỳ thời điểm nào)  
 THEN: Hoàn 100% tất cả components. Platform KHÔNG thu phí
 
-**BR-BK-012** — Huỷ sau ACTIVE  
-IF: Booking đang ở trạng thái ACTIVE  
-THEN: Không thể huỷ — chỉ có thể check-out hoặc mở dispute
+**BR-BK-012** — Huỷ sau khi đã check-in  
+IF: Booking đã có session thực tế đang `ACTIVE`, `CHECKING_OUT` hoặc `COMPLETED`  
+THEN: Không thể huỷ booking; xử lý bằng check-out, payment settlement và incident policy nếu có sự cố
 
 ---
 

@@ -1,6 +1,6 @@
 # BR-Fleet — Quy tắc nghiệp vụ: Quản lý Đội xe
 
-**Last updated**: 2026-05-14  
+**Last updated**: 2026-05-16  
 **Status**: Active
 
 ---
@@ -28,13 +28,13 @@ THEN: `hourly_rate` và `security_deposit` là config riêng của chi nhánh đ
 IF: `vehicle.status ≠ AVAILABLE`  
 THEN: Không thể tạo booking RENTAL cho xe đó
 
-**BR-FL-004** — Xe chuyển sang IN_USE khi check-in  
-IF: Staff hoàn thành check-in cho booking RENTAL  
-THEN: `vehicle.status → IN_USE`
+**BR-FL-004** — Xe chuyển sang IN_USE khi check-in (session)
+IF: Staff check-in thành công → tạo session
+THEN: Với mỗi session_vehicle có `vehicle_source = 'RENTAL'`, `vehicle.status → IN_USE`
 
-**BR-FL-005** — Xe trở về AVAILABLE sau check-out  
-IF: Booking hoàn thành (COMPLETED) hoặc bị huỷ sau khi đã IN_USE  
-THEN: `vehicle.status → AVAILABLE`
+**BR-FL-005** — Xe trở về AVAILABLE sau check-out (session)
+IF: Session COMPLETED (hoặc CANCELLED sau khi đã IN_USE)
+THEN: Với mỗi session_vehicle có `vehicle_source = 'RENTAL'`, `vehicle.status → AVAILABLE`
 
 **BR-FL-006** — Xe MAINTENANCE không cho thuê  
 IF: Provider/Staff đánh dấu xe cần bảo trì (`status = MAINTENANCE`)  
@@ -60,7 +60,7 @@ IF: `vehicle.compatible_track_types` rỗng (`[]`)
 THEN: Xe đó available cho tất cả track type mà chi nhánh có
 
 **BR-FL-012** — BYOC không bị giới hạn track  
-IF: `booking.mode = BYOC`  
+IF: `bookings.play_mode = BYOC` hoặc `MIXED` có xe BYOC  
 THEN: Customer chọn bất kỳ sân nào của chi nhánh — hệ thống không kiểm tra tính tương thích  
 NOTE: Customer tự chịu trách nhiệm về xe cá nhân có phù hợp sân không
 
@@ -71,6 +71,7 @@ NOTE: Customer tự chịu trách nhiệm về xe cá nhân có phù hợp sân 
 **BR-FL-008** — Fleet thuộc về chi nhánh  
 Mỗi xe (`Vehicle`) thuộc về đúng 1 `Cafe` (chi nhánh). Xe không thể chia sẻ giữa các chi nhánh.
 
-**BR-FL-009** — Staff chỉ thao tác xe của chi nhánh mình  
-IF: Staff không được assign vào chi nhánh X  
-THEN: Staff không thể check-in/check-out xe của chi nhánh X
+**BR-FL-009** — Staff chỉ thao tác trong phạm vi vận hành được phép  
+IF: Staff không thuộc phạm vi vận hành cafe X theo account/provider policy Phase 1  
+THEN: Staff không thể check-in/check-out xe của cafe X  
+NOTE: Bảng `staff_cafe_assignments` chi tiết chuyển sang Phase 2.

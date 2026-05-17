@@ -1,6 +1,6 @@
 # BR-Promotions — Quy tắc nghiệp vụ: Mã giảm giá
 
-**Last updated**: 2026-05-14  
+**Last updated**: 2026-05-16  
 **Status**: Active
 
 ---
@@ -26,7 +26,7 @@ Khi customer nhập mã tại chi nhánh Y:
 |------|-----------|
 | ADMIN | Global (`cafe_id = NULL`) hoặc bất kỳ chi nhánh |
 | PROVIDER | Global (`cafe_id = NULL`) hoặc bất kỳ chi nhánh của chuỗi |
-| STAFF | Chỉ local cho chi nhánh mình được assign |
+| STAFF | Phase 1 chỉ khi provider/admin cấp quyền theo account policy; assignment chi tiết là Phase 2 |
 | CUSTOMER | Không được tạo |
 
 ---
@@ -40,7 +40,7 @@ Khi customer nhập mã tại chi nhánh Y:
 2. is_active = true
 3. starts_at ≤ now() ≤ expires_at  (nếu expires_at IS NULL thì bỏ qua bước này)
 4. cafe_id IS NULL  HOẶC  cafe_id = booking.cafe_id
-5. applicable_to = 'ALL'  HOẶC  applicable_to = booking.mode (RENTAL/BYOC)
+5. applicable_to = 'ALL'  HOẶC  applicable_to = booking.play_mode (RENTAL/BYOC/MIXED)
 6. booking_subtotal ≥ min_order_amount  (nếu min_order_amount IS NOT NULL)
 7. uses_count < max_uses  (nếu max_uses IS NOT NULL)  ← check với SELECT FOR UPDATE để tránh race
 8. Số lần user đã dùng mã này < max_uses_per_user

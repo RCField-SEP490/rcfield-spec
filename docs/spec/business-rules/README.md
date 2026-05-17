@@ -1,6 +1,6 @@
 # Business Rules — RCField
 
-**Last updated**: 2026-05-13  
+**Last updated**: 2026-05-16  
 **Status**: Active
 
 > Mỗi file trong thư mục này chứa business rules cho 1 domain.
@@ -18,7 +18,7 @@
 | [BR-inspection.md](./BR-inspection.md) | Check-in / check-out, bằng chứng | — |
 | [BR-extension.md](./BR-extension.md) | Gia hạn slot | — |
 | [BR-fnb.md](./BR-fnb.md) | F&B pre-order và on-site | — |
-| [BR-dispute.md](./BR-dispute.md) | Mở dispute, xét xử | — |
+| [BR-dispute.md](./BR-dispute.md) | Incident policy resolution Phase 1; dispute workflow nhiều bên Phase 2 | — |
 
 ---
 

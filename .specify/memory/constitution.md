@@ -1,18 +1,24 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: 1.0.0 → 1.1.0
-Bump rationale: MINOR — material update to Principle VI (NestJS-specific guidance replaced
-with Express middleware equivalents) and full rewrite of Tech Stack & Constraints section
-to reflect actual stack: TypeScript + Express (BE) + ReactJS/Vite (FE).
+Version change: 1.3.0 → 1.4.0
+Bump rationale: MINOR — Phase 1 scope refined to a 37-table Operational Core:
+packages, subscriptions, contests, F&B, vehicle maintenance, and incident policy resolution
+are core Phase 1 modules; staff/cafe ops and advanced dispute workflow move to Phase 2.
 
 Modified principles:
-  VI. RBAC Enforcement — implementation guidance updated:
-      "NestJS Guards + decorators" → "Express auth middleware at router level"
+  I. Snapshot-First Pricing — snapshot remains required but now references multi-vehicle
+      bookings via booking_vehicles and session_vehicles.
+  II. State Machine Gate — dispute branch removed from Phase 1 session lifecycle; incident
+      resolution is handled by incidents policy log.
+  III. Evidence-Based Handover — InspectionRecord replaced by inspections,
+      inspection_photos, and inspection_checklists.
+  IV. Payment Component Isolation — component list expanded for F&B, package, contest.
 
 Modified sections:
-  - Tech Stack & Constraints: NestJS 10 → Express.js; Next.js 14 → ReactJS (Vite);
-    class-validator → zod; DTO naming → Request/Response type naming
+  - Tech Stack & Constraints: table naming updated to inspections.
+  - Governance: docs/spec source now explicitly constrains Phase 1 to 37-table
+      Operational Core scope.
 
 Removed sections: none
 Added sections: none
@@ -23,8 +29,7 @@ Templates requiring updates:
   ⚠  .specify/templates/spec-template.md — principle-agnostic; no update needed
   ⚠  .specify/templates/tasks-template.md — principle-agnostic; no update needed
 
-Follow-up TODOs:
-  - TODO(RATIFICATION_DATE): using project start date 2026-05-11 (first spec commit)
+Follow-up TODOs: none
 -->
 
 <!-- AGENT INSTRUCTION: Before filling any placeholder, read ALL files in docs/spec/ (00-overview.md through the highest-numbered file present). Those files are the authoritative source of truth for business rules, domain model, state machine, payment engine, inspection flow, and API contracts. Do not infer principles from CLAUDE.md or README alone. -->
@@ -40,24 +45,33 @@ at booking creation time). Reading live prices from `Cafe` or `Vehicle` entities
 money calculation is FORBIDDEN, even if the snapshot value appears identical.
 
 - `booking.snapshot` contains: `slot_fee_rate`, `rental_fee`, `security_deposit`,
-  `damage_multiplier`, `platform_fee_pct`, `refund_rules`.
+  `damage_multiplier`, `platform_fee_pct`, `refund_rules`, and planned vehicle snapshots.
 - The snapshot is written once on `CONFIRMED` transition and MUST NOT be mutated afterward.
 - Any feature that computes a fee, refund, damage charge, or platform fee MUST reference
-  `booking.snapshot.*` fields, not `vehicle.hourly_rate` or `vehicle.security_deposit`.
+  `booking.snapshot.*` and/or `booking_vehicles.*_snapshot` fields, not live
+  `vehicle.hourly_rate` or `vehicle.security_deposit`.
 
 **Rationale**: Prices may change between booking creation and settlement. Using snapshot
 values ensures customers are charged exactly what was agreed at booking time and eliminates
 retroactive pricing disputes.
 
-### II. State Machine Gate
+### II. Booking/Session State Machine Gate
 
-All booking status transitions MUST go through `BookingService.transition(bookingId, event)`.
-Direct updates to `booking.status` via repository, query builder, or raw SQL are FORBIDDEN.
+All booking and session status transitions MUST go through explicit transition services.
+Direct updates to `bookings.status` or `sessions.status` via repository, query builder,
+or raw SQL are FORBIDDEN.
 
+- Booking transitions use `BookingService.transition(bookingId, event)`.
+- Session transitions use `SessionService.transition(sessionId, event)`.
 - Every transition is validated by `canTransition(currentStatus, event)` before applying.
 - Invalid transitions MUST throw `BadRequestException` with code `INVALID_BOOKING_STATE`.
-- The valid state graph is: PENDING → CONFIRMED → ACTIVE → EXTENDING → ACTIVE →
-  CHECKING_OUT → COMPLETED; with CANCELLED and DISPUTED as terminal/branch states.
+- Phase 1 booking graph is: PENDING → CONFIRMED → COMPLETED, with CANCELLED and
+  NO_SHOW as terminal states.
+- Phase 1 session graph is: CHECKED_IN → ACTIVE → EXTENDING → ACTIVE →
+  CHECKING_OUT → COMPLETED, with CANCELLED as terminal.
+- Damage disagreement in Phase 1 MUST be logged and resolved through `incidents`
+  (`status`, `responsible_party`, `final_amount`, `resolution_note`, `resolved_by`,
+  `resolved_at`), not through a separate dispute session state.
 - Timeout transitions (auto-cancel, auto-confirm) MUST also use the same `transition()` method.
 
 **Rationale**: A single entry point ensures audit logging, side-effect hooks (payment,
@@ -65,19 +79,20 @@ notifications), and guard logic execute consistently. Direct updates bypass thes
 
 ### III. Evidence-Based Handover (NON-NEGOTIABLE)
 
-Every asset handover MUST produce a valid `InspectionRecord` with 4 photos and a
-complete checklist. An incomplete inspection forfeits all damage claim rights.
+Every asset handover MUST produce a valid `inspection` with required `inspection_photos`
+and a complete `inspection_checklists` set. An incomplete inspection forfeits all damage
+claim rights.
 
 - **4 photos required**: FRONT, BACK, LEFT, RIGHT — all must be uploaded to S3 and
   have valid URLs before the record can be submitted.
 - **Checklist required**: `scratches`, `cracks`, `missing_parts`, `notes` — all fields
   MUST be present; empty string is acceptable, `null` is not.
-- `pre_existing_flag = true` is only legally valid when 4 photos + checklist are present
+- `pre_existing_flag = true` is only valid when required photos + checklist are present
   AND `customer_confirmed = true`.
 - If a Provider submits a damage charge without a valid check-in AND check-out record,
   the system MUST reject the charge.
-- Photo retention: minimum 90 days post-COMPLETED; extended to 30 days post-dispute
-  RESOLVED if a dispute existed.
+- Photo retention: minimum 90 days post-COMPLETED; extended to 30 days after incident
+  RESOLVED/WAIVED if a damage incident existed.
 
 **Rationale**: This is the core value proposition of RCField — eliminating damage disputes
 through structured digital evidence. Weakening this protocol invalidates the platform's
@@ -88,8 +103,9 @@ primary trust guarantee.
 Each `PaymentComponent` has an independent lifecycle. Component amounts are immutable
 after creation. Adjustments require creating a new component, never editing an existing one.
 
-- Valid component types: `SLOT_FEE | RENTAL_FEE | SECURITY_DEPOSIT | EXTENSION_FEE |
-  DAMAGE_CHARGE`.
+- Phase 1 valid component types: `SLOT_FEE | RENTAL_FEE | SECURITY_DEPOSIT |
+  EXTENSION_FEE | DAMAGE_CHARGE | FNB_PREORDER | FNB_ON_SITE | PACKAGE_PURCHASE |
+  CONTEST_ENTRY`.
 - Valid statuses: `PENDING → HELD → DISBURSED | REFUNDED | PARTIALLY_REFUNDED`.
 - `EXTENSION_FEE` cumulative total MUST NOT exceed `security_deposit × 0.50`.
 - Platform fee (15%) applies ONLY to components disbursed to Provider
@@ -130,8 +146,9 @@ never assumed — it must be explicitly granted.
   business-logic checks inside services as the sole access control is FORBIDDEN.
 - Each route file MUST apply `authenticate` (JWT verification) and `authorize(...roles)`
   (role check) middleware before the handler — never inside the handler.
-- Staff actions (check-in, check-out, extension proposal) MUST validate that the staff
-  member is assigned to the same cafe as the booking.
+- Staff actions (check-in, check-out, extension proposal) MUST validate cafe operating
+  scope. Phase 1 may enforce this through provider/admin-managed account policy; the
+  dedicated `staff_cafe_assignments` table is Phase 2.
 - Admin routes MUST be mounted under a dedicated router (e.g., `/admin/*`) with
   admin-only middleware, segregated from Provider/Customer routes.
 
@@ -158,8 +175,8 @@ router-per-domain architecture (`src/routes/`, `src/services/`, `src/models/`).
 validation MUST occur in the route/controller layer, not inside services.
 
 **Naming**:
-- Models/Entities: PascalCase singular (`Booking`, `Vehicle`).
-- Tables: snake_case plural (`bookings`, `vehicles`, `inspection_records`).
+- Models/Entities: PascalCase singular (`Booking`, `Vehicle`, `Inspection`).
+- Tables: snake_case plural (`bookings`, `vehicles`, `inspections`).
 - Request/Response types: `CreateBookingBody`, `BookingResponse` (no "Dto" suffix).
 - Enums: SCREAMING_SNAKE_CASE (`BookingStatus.PENDING`, `AssetTier.PREMIUM`).
 - Every entity MUST have `created_at`, `updated_at`, and `deleted_at` (soft delete).
@@ -180,6 +197,13 @@ validation MUST occur in the route/controller layer, not inside services.
 **Spec sync**: When any file in `docs/spec/` changes, re-run `/speckit-constitution` to
 keep this constitution aligned with the updated business rules.
 
+**Phase 1 scope**: Implementation MUST target the 37-table Operational Core schema in
+`docs/spec/06-database.md`. Packages, subscriptions, contests, F&B, vehicle maintenance
+logs, and policy-based incident resolution are Phase 1. Dedicated staff-cafe assignments,
+cafe closures/announcements, advanced dispute tables/workflow, SaaS tenant/billing,
+AI job/detail tables, loyalty, dynamic pricing, and advanced analytics remain Phase 2
+unless a new spec explicitly promotes them.
+
 ## Governance
 
 This constitution supersedes informal conventions and ad-hoc decisions. Any amendment
@@ -195,4 +219,4 @@ requires: (1) update `docs/spec/` source file, (2) re-run `/speckit-constitution
 before requesting review. Reviewers MUST reject PRs that bypass the State Machine Gate
 or Snapshot-First Pricing rules regardless of other quality signals.
 
-**Version**: 1.1.0 | **Ratified**: 2026-05-11 | **Last Amended**: 2026-05-11
+**Version**: 1.4.0 | **Ratified**: 2026-05-11 | **Last Amended**: 2026-05-16
