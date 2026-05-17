@@ -38,7 +38,8 @@ Cả 3 điều kiện phải đúng:
 Mỗi session chỉ được có đúng 1 `Inspection` loại `CHECK_IN`
 
 **BR-IN-005** — Staff phải thuộc chi nhánh  
-IF: Staff không được assign vào chi nhánh của session đó
+IF: Staff không được assign vào chi nhánh của session đó (`staff_cafe_assignments`)  
+THEN: Không thể thực hiện check-in
 
 **BR-IN-006** — RENTAL check-in: lấy xe từ fleet  
 IF: `play_mode = RENTAL` hoặc session vehicle có `vehicle_source = RENTAL`  
@@ -81,7 +82,9 @@ IF: Confirmed → `session.status → COMPLETED`
 **BR-IN-014** — Customer nhận damage notification  
 Timeout: 24 giờ. Im lặng = auto-confirm damage charge  
 IF: Customer xác nhận → COMPLETED  
-IF: Customer từ chối → tạo/cập nhật `incidents`, xử lý theo policy và ghi resolution log
+IF: Customer từ chối → có 2 hướng xử lý:
+- Tạo `incidents` (incident policy-based): Staff/Admin áp rule, ghi `responsible_party` + `resolution_note`
+- Mở `disputes` (tranh chấp chính thức): Admin xét xử dựa trên digital evidence từ inspection
 
 ---
 
@@ -95,4 +98,5 @@ Upload lên Cloudinary → lấy URL về lưu vào `inspection_photos.url`; che
 
 **BR-IN-016** — Retention  
 - Tối thiểu 90 ngày sau booking COMPLETED
-- Nếu có incident damage: giữ đến 30 ngày sau incident RESOLVED/WAIVED
+- Nếu có incident: giữ đến 30 ngày sau incident RESOLVED/WAIVED
+- Nếu có dispute: giữ đến 30 ngày sau dispute RESOLVED

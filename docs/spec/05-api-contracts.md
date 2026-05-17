@@ -183,7 +183,7 @@ pre_existing_flag: boolean
 
 ## Phase 2 APIs
 
-Các nhóm API sau không thuộc Phase 1: staff/cafe assignment nâng cao, cafe closures/announcements, dispute workflow nhiều bên, SaaS tenant admin, AI jobs, analytics nâng cao, loyalty/dynamic pricing.
+Các nhóm API sau không thuộc Phase 1: multi-party dispute workflow nâng cao, SaaS tenant admin, AI jobs, analytics nâng cao, loyalty/dynamic pricing.
 
 ## Response Format
 

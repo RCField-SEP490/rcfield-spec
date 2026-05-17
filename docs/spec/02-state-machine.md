@@ -71,7 +71,7 @@ CANCELLED, COMPLETED are terminal.
 | `COMPLETED` | Phiên đã hoàn tất và settlement chạy xong |
 | `CANCELLED` | Phiên bị hủy trước khi bắt đầu |
 
-Incident policy resolution là Phase 1 core. Workflow dispute nhiều bên là Phase 2.
+Incident policy resolution và dispute cơ bản (`disputes` table) là Phase 1 core. Multi-party dispute workflow nâng cao là Phase 2.
 
 ---
 

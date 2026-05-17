@@ -33,6 +33,10 @@ THEN: Tạo các components sau:
 IF: Booking có F&B pre-order
 THEN: Tạo `FB_PREORDER` (HELD) component, gộp vào 1 lần thanh toán
 
+**BR-PM-005** — Extension fee component  
+IF: Extension được approve (theo session)  
+THEN: Tạo `EXTENSION_FEE` (HELD), liên kết `session_id`; cộng dồn tổng không vượt 50% security_deposit
+
 **BR-PM-006** — Damage charge component  
 IF: Check-out có damage và customer confirm (hoặc auto-confirm)  
 THEN: Tạo `DAMAGE_CHARGE` (HELD → DISBURSED)
