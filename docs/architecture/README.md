@@ -24,6 +24,7 @@ B2B SaaS cho **1 doanh nghiệp** vận hành chuỗi sân xe RC tại Việt Na
 | [`02-payment-engine.md`](02-payment-engine.md) | Payment components, settlement, refund rules | Trước khi code bất kỳ payment logic |
 | [`03-inspection-flow.md`](03-inspection-flow.md) | Check-in/out protocol, evidence chain, Cloudinary | Trước khi làm inspection module |
 | [`04-dispute-resolution.md`](04-dispute-resolution.md) | Incident policy vs Dispute, evidence, Phase 1 scope | Trước khi làm incident/dispute |
+| [`02-ai-chat-rag.md`](02-ai-chat-rag.md) | NLU routing, RAG pipeline, KB ingestion, SSE streaming | Trước khi đụng chat/KB feature |
 
 **Sequence diagrams** (luồng end-to-end):  
 → [`docs/diagrams/sequence/`](../diagrams/sequence/)

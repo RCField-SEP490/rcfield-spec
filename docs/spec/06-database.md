@@ -82,12 +82,12 @@ erDiagram
 
 ---
 
-## 3. Phase 1 Schema Scope — 41 Tables Only
+## 3. Phase 1 Schema Scope — 44 Tables Only
 
-Phase 1 chỉ tạo schema/migration cho **41 bảng vận hành cốt lõi** dưới đây.
+Phase 1 chỉ tạo schema/migration cho **44 bảng vận hành cốt lõi** dưới đây.
 
 > Không cộng thêm bảng Phase 2 vào scope này. Chỉ các bảng multi-party dispute workflow nâng cao
-> (`dispute_evidences`, `dispute_parties`), SaaS, AI và analytics nâng cao **không được tạo trong Phase 1**.
+> (`dispute_evidences`, `dispute_parties`), AI và analytics nâng cao **không được tạo trong Phase 1**.
 
 | # | Bảng | Mô tả |
 |---|------|-------|
@@ -132,10 +132,12 @@ Phase 1 chỉ tạo schema/migration cho **41 bảng vận hành cốt lõi** d�
 | 39 | `disputes` | Tranh chấp booking |
 | 40 | `cafe_closures` | Ngày đóng cửa đặc biệt |
 | 41 | `cafe_announcements` | Thông báo/banner chi nhánh |
+| 42 | `saas_plans` | Định nghĩa gói SaaS |
+| 43 | `provider_subscriptions` | Đăng ký gói SaaS của Provider |
+| 44 | `cafe_staff` | Staff — Chi nhánh assignment |
 
 Các nghiệp vụ bị loại khỏi schema Phase 1:
 
-- SaaS tenant/billing.
 - AI job/detail tables.
 - Analytics nâng cao, dynamic pricing, loyalty và native mobile app.
 
@@ -192,6 +194,8 @@ enum PromoApplicableTo { ALL, RENTAL, BYOC, MIXED }
 enum NotificationChannel { PUSH, SMS, EMAIL }
 enum NotificationStatus { PENDING, SENT, FAILED }
 enum TrustScoreReason { NO_SHOW, DAMAGE_CONFIRMED, BOOKING_STREAK, ADMIN_ADJUSTMENT }
+
+enum SaasSubscriptionStatus { TRIALING, ACTIVE, PAST_DUE, CANCELLED }
 ```
 
 ---
@@ -696,6 +700,70 @@ Rules:
 
 ---
 
+### 5.13 SaaS / Platform
+
+#### `saas_plans`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `name` | `varchar(100)` | NOT NULL | VD: "Starter", "Growth", "Enterprise" |
+| `slug` | `varchar(50)` | NOT NULL, UNIQUE | VD: `starter`, `growth` |
+| `price_monthly` | `numeric(15,2)` | NOT NULL | 0 nếu free |
+| `max_cafes` | `integer` | NOT NULL | |
+| `max_vehicles_per_cafe` | `integer` | NOT NULL | |
+| `max_staff_per_cafe` | `integer` | NOT NULL | |
+| `features` | `jsonb` | NOT NULL, DEFAULT `{}` | VD: `{"ai_chat": true, "advanced_reports": false}` |
+| `is_active` | `boolean` | NOT NULL, DEFAULT `true` | |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+```sql
+CREATE UNIQUE INDEX idx_saas_plans_slug ON saas_plans(slug);
+CREATE INDEX idx_saas_plans_active ON saas_plans(is_active);
+```
+
+#### `provider_subscriptions`
+
+> Mỗi Provider chỉ có 1 subscription (UNIQUE trên `provider_id`).
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `provider_id` | `uuid` | NOT NULL, UNIQUE, FK -> users(id) | PROVIDER role |
+| `plan_id` | `uuid` | NOT NULL, FK -> saas_plans(id) | |
+| `status` | `SaasSubscriptionStatus` | NOT NULL, DEFAULT `TRIALING` | |
+| `trial_ends_at` | `timestamptz` | NULL | |
+| `current_period_start` | `timestamptz` | NOT NULL | |
+| `current_period_end` | `timestamptz` | NOT NULL | |
+| `cancelled_at` | `timestamptz` | NULL | |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+```sql
+CREATE UNIQUE INDEX idx_provider_subscriptions_provider ON provider_subscriptions(provider_id);
+CREATE INDEX idx_provider_subscriptions_status ON provider_subscriptions(status);
+```
+
+#### `cafe_staff`
+
+> 1 Staff chỉ thuộc đúng 1 chi nhánh tại một thời điểm (UNIQUE trên `user_id`).
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) | |
+| `user_id` | `uuid` | NOT NULL, UNIQUE, FK -> users(id) | STAFF role |
+| `is_active` | `boolean` | NOT NULL, DEFAULT `true` | false = đã remove |
+| `assigned_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | |
+| `removed_at` | `timestamptz` | NULL | |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+```sql
+CREATE UNIQUE INDEX idx_cafe_staff_user_id ON cafe_staff(user_id);
+CREATE INDEX idx_cafe_staff_cafe_id ON cafe_staff(cafe_id);
+```
+
+---
+
 ## 6. Redis — Slot Locking
 
 Redis chỉ giữ slot tạm trong checkout. DB là nguồn sự thật sau khi booking được tạo.
@@ -743,9 +811,7 @@ Các bảng dưới đây chỉ là backlog thiết kế cho Phase 2. Không t�
 
 | Nhóm | Bảng |
 |------|------|
-| Staff/cafe ops | `staff_cafe_assignments`, `cafe_closures`, `cafe_announcements` |
-| Advanced dispute | `incident_participants`, `disputes`, `dispute_evidences`, `dispute_parties` |
-| SaaS | `tenants`, `tenant_members`, `saas_plans`, `tenant_subscriptions` |
+| Advanced dispute | `incident_participants`, `dispute_evidences`, `dispute_parties` |
 | AI | `ai_analysis_jobs`, `ai_damage_detections`, `ai_recommendations` |
 | Advanced analytics | analytics aggregate/cache tables nếu cần |
 | Loyalty/dynamic pricing | loyalty points, price rules, campaign optimization |
@@ -853,4 +919,4 @@ CREATE INDEX idx_cafe_announcements_cafe_id ON cafe_announcements(cafe_id, is_ac
 
 ---
 
-*Last updated: 2026-05-17 · 41 Phase 1 tables*
+*Last updated: 2026-05-19 · 44 Phase 1 tables*
