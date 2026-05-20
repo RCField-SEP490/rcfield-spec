@@ -2,21 +2,21 @@
 
 ## 1. Product Overview
 
-RCField is a multi-tenant SaaS operations and booking platform for RC car field businesses in Vietnam. It is designed for multiple providers, where each provider subscribes to a SaaS plan and manages one or more cafe branches with separate operating hours, pricing, vehicle fleet, service capacity, menu, packages, subscriptions, contests, and promotions through one shared platform.
+RCField is a multi-tenant SaaS operations and booking platform for RC car field businesses in Vietnam. It supports multiple Providers on one shared platform, where each Provider subscribes to a SaaS plan, completes onboarding, and manages one or more cafe branches with separate operating hours, pricing, vehicle fleet, staff assignment, service capacity, menu, packages, subscriptions, contests, promotions, closures, and announcements.
 
 Source:
 - `docs/spec/00-overview.md` -> "Bối cảnh": RCField is a multi-tenant SaaS platform for multiple providers.
 - `docs/spec/00-overview.md` -> "Giải pháp": multi-branch management and operational core.
 - `docs/spec/00-overview.md` -> "Scope / Phase 1": SaaS billing, cafe, fleet, F&B, packages, subscriptions, contests, promotions, dispute resolution, staff assignment, cafe operations.
 
-The platform addresses current operational pain points: bookings handled through phone/chat, missing handover evidence, manual fleet tracking, and manual payment calculation. RCField centralizes booking, session operations, fleet status, BYOC vehicles, inspection evidence, incident handling, payment audit trails, notifications, reviews, and trust score logs.
+The platform addresses current operational pain points: bookings handled through phone/chat, missing handover evidence, manual fleet tracking, and manual payment calculation. RCField centralizes SaaS plan and provider subscription data, booking and session operations, fleet status, BYOC vehicles, inspection evidence, incident handling, basic formal disputes, payment audit trails, notification logs, reviews, trust score logs, and feature flags.
 
 Source:
 - `docs/spec/00-overview.md` -> "Pain points hiện tại".
 - `docs/spec/00-overview.md` -> "Scope / Phase 1".
-- `docs/spec/01-domain-model.md` -> ERD entities: `bookings`, `sessions`, `customer_vehicles`, `inspections`, `incidents`, `payment_components`, `payment_transactions`, `notification_logs`, `trust_score_logs`.
+- `docs/spec/01-domain-model.md` and `docs/spec/06-database.md` -> ERD/schema entities: `saas_plans`, `provider_subscriptions`, `cafes`, `cafe_staff`, `bookings`, `sessions`, `customer_vehicles`, `inspections`, `incidents`, `disputes`, `payment_components`, `payment_transactions`, `notification_logs`, `trust_score_logs`.
 
-At its core, RCField separates planned booking data from actual operational data. `Booking` stores the reservation plan, planned participants, planned rental vehicles, play mode, slot, promotion, and payment snapshot. `Session` stores the actual play session created at check-in, including actual participants, actual rental/BYOC vehicles, inspections, extension proposals, incidents, and settlement data.
+At its core, RCField separates planned booking data from actual operational data. `Booking` stores the reservation plan, planned participants, planned rental vehicles, play mode, slot, promotion, payment snapshot, cancellation/no-show state, and links to package or subscription usage when applicable. `Session` stores the actual play session created at check-in, including actual participants, actual rental/BYOC vehicles, inspections, extension proposals, incidents, dispute evidence context, and settlement data.
 
 Source:
 - `docs/spec/00-overview.md` -> "Kiến trúc dữ liệu cốt lõi".
