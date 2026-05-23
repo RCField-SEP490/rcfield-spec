@@ -391,6 +391,60 @@ Promotion là mã giảm giá cơ bản cho booking. Một booking tối đa m�
 - `trust_score_logs`: lịch sử thay đổi điểm uy tín.
 - `feature_flags`: bật/tắt module và lưu `config` cho Phase 2.
 
+### SaasPlan
+
+Gói SaaS định nghĩa giới hạn tài nguyên và tính năng cho Provider.
+
+```
+SaasPlan
+├── id: UUID
+├── name: string
+├── slug: string (UNIQUE)
+├── price_monthly: decimal
+├── max_cafes: integer
+├── max_vehicles_per_cafe: integer
+├── max_staff_per_cafe: integer
+├── features: JSON (danh sách tính năng được bật)
+├── is_active: boolean
+├── created_at / updated_at
+```
+
+### ProviderSubscription
+
+Đăng ký gói SaaS của một Provider.
+
+```
+ProviderSubscription
+├── id: UUID
+├── provider_id: UUID -> User (PROVIDER role, UNIQUE)
+├── plan_id: UUID -> SaasPlan
+├── status: SaasSubscriptionStatus
+├── trial_ends_at?: timestamptz
+├── current_period_start: timestamptz
+├── current_period_end: timestamptz
+├── cancelled_at?: timestamptz
+├── created_at / updated_at
+```
+
+Rule: `provider_id` là UNIQUE — mỗi Provider chỉ có đúng 1 subscription active tại một thời điểm.
+
+### CafeStaff
+
+Quan hệ Staff — Chi nhánh. Staff thuộc đúng 1 cafe tại một thời điểm.
+
+```
+CafeStaff
+├── id: UUID
+├── cafe_id: UUID -> Cafe
+├── user_id: UUID -> User (STAFF role, UNIQUE)
+├── is_active: boolean
+├── assigned_at: timestamptz
+├── removed_at?: timestamptz
+├── created_at / updated_at
+```
+
+Rule: `user_id` là UNIQUE — 1 Staff chỉ thuộc 1 cafe tại một thời điểm.
+
 ---
 
 ## 3. Enums
@@ -448,6 +502,8 @@ enum NotificationStatus { PENDING, SENT, FAILED }
 enum TrustScoreReason { NO_SHOW, DAMAGE_CONFIRMED, BOOKING_STREAK, ADMIN_ADJUSTMENT }
 enum DiscountType { PERCENT, FIXED }
 enum PromoApplicableTo { ALL, RENTAL, BYOC, MIXED }
+
+enum SaasSubscriptionStatus { TRIALING, ACTIVE, PAST_DUE, CANCELLED }
 ```
 
 ---
@@ -457,7 +513,6 @@ enum PromoApplicableTo { ALL, RENTAL, BYOC, MIXED }
 Các entity sau không thuộc Phase 1:
 
 - Multi-party dispute workflow nâng cao: `dispute_evidences`, `dispute_parties`, `incident_participants`
-- SaaS: `tenants`, `tenant_members`, `saas_plans`, `tenant_subscriptions`
 - AI: `ai_analysis_jobs`, `ai_damage_detections`, `ai_recommendations`
 
 ---
