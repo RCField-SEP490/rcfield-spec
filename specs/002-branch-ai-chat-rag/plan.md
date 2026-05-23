@@ -11,7 +11,7 @@ Xây dựng AI chat widget per-cafe sử dụng RAG pipeline: NLU service (Mekit
 
 **Language/Version**: Node.js 20+, TypeScript strict mode (no `any`)
 **Primary Dependencies**:
-- `@google/generative-ai` — Gemini 2.0 Flash (LLM) + text-embedding-004 (embedding)
+- `@google/genai` — Gemini 2.5 Pro/Flash (LLM) + text-embedding-004 (embedding); hỗ trợ implicit caching
 - `multer` — multipart file upload (10MB limit)
 - `pdf-parse` — PDF text extraction
 - `mammoth` — DOCX text extraction
@@ -41,7 +41,7 @@ Xây dựng AI chat widget per-cafe sử dụng RAG pipeline: NLU service (Mekit
 - `cafe_id` isolation tuyệt đối — chunk query phải luôn có `WHERE cafe_id = $cafeId`
 - Conversation history không lưu DB — client-side only
 
-**Scale/Scope**: ~10–30 cafes phase 1, ~10k chat messages/tháng. pgvector HNSW index đủ tốt, không cần scale out.
+**Scale/Scope**: Multi-provider — N providers × M cafes/provider. Phase 1 dự kiến ~20–50 cafes tổng cộng, ~50k chat messages/tháng. `cafe_id` isolation đảm bảo pgvector query không bao giờ cross-tenant. pgvector IVFFlat index đủ tốt, không cần scale out.
 
 ## Constitution Check
 
@@ -54,7 +54,7 @@ Xây dựng AI chat widget per-cafe sử dụng RAG pipeline: NLU service (Mekit
 | III — Evidence-Based Handover | No | ✅ PASS | Feature không liên quan inspection |
 | IV — Payment Component Isolation | No | ✅ PASS | Feature không tạo payment component |
 | V — Test-First for Financial Logic | No | ✅ PASS | Không có financial logic |
-| VI — RBAC Enforcement | **Yes** | ✅ PASS | Chat & GET config: public. POST/DELETE KB & PUT config: `authenticate + authorize('PROVIDER')` tại router level. Ownership check (`cafe.provider_id === req.user.id`) trong service. |
+| VI — RBAC Enforcement | **Yes** | ✅ PASS | Chat & GET config: public. POST/DELETE KB & PUT config: `authenticate + authorize('PROVIDER')` tại router level. Ownership check (`cafe.provider_id === req.user.id`) trong service — đảm bảo Provider A không thể đụng vào KB của Provider B. |
 
 ## Project Structure
 

@@ -24,7 +24,7 @@
 **Decision**: Google Gemini `text-embedding-004`, 768 dimensions.
 
 **Rationale**:
-- Cùng vendor với Gemini LLM → 1 API key, 1 SDK (`@google/generative-ai`).
+- Cùng vendor với Gemini LLM → 1 API key, 1 SDK (`@google/genai`).
 - 768 dims — cân bằng quality vs storage (768 × 4 bytes = 3KB/vector).
 - Hỗ trợ tiếng Việt tốt (multilingual model).
 - Free tier đủ dùng cho development; production cost thấp hơn OpenAI ada-002.
@@ -36,17 +36,21 @@
 
 ---
 
-## R-003: LLM — Gemini 2.0 Flash
+## R-003: LLM — Gemini 2.5 Pro (stream) + 2.5 Flash (quick replies / rephrase)
 
-**Decision**: `gemini-2.0-flash` qua Google Generative AI SDK.
+**Decision**: Split model usage theo mục đích:
+- **Streaming RAG** (`/chat/stream`): `gemini-2.5-pro` — độ chính xác cao hơn cho Q&A KB.
+- **Quick reply suggestions** + **cache rephrase**: `gemini-2.5-flash` — chạy song song/background, không block stream.
+- **Non-streaming RAG** (`/chat`): routing nluConfidence ≥ 0.7 → Flash, < 0.7 → Pro.
+
+Cấu hình qua env: `AI_MODEL` (Flash), `AI_SUPPORT_MODEL` (Pro).
 
 **Rationale**:
-- Flash variant: nhanh hơn Pro, đủ quality cho Q&A trên KB ngắn.
-- Function calling support cho `check_available_slots`.
-- Latency p95 ~1–2s cho context ~2000 tokens (5 chunks + history).
-- Cùng API key với embedding.
+- Pro cho stream: user thấy từng chữ xuất hiện → latency TTFT chấp nhận được dù Pro chậm hơn Flash.
+- Flash cho background tasks: quick replies + rephrase chạy parallel, xong trước khi stream finish.
+- Tách env vars → dễ swap model mà không cần sửa code.
 
-**System prompt strategy**: Vietnamese-only, scoped to RC cafe domain, explicit instruction không hallucinate khi KB thiếu thông tin.
+**System prompt strategy**: Vietnamese-only, scoped to RC cafe domain, explicit instruction không hallucinate khi KB thiếu thông tin. Khi tài liệu mâu thuẫn → ưu tiên tài liệu có ngày cập nhật mới hơn.
 
 ---
 
@@ -125,6 +129,44 @@
 
 ---
 
+## R-009: Google GenAI SDK Migration + Implicit Caching
+
+**Decision**: Migrate từ `@google/generative-ai` (deprecated) sang `@google/genai` (unified SDK mới).
+
+**Rationale**:
+- `@google/genai` là SDK chính thức mới từ Google, hỗ trợ Gemini 2.5 và implicit caching.
+- **Implicit caching**: Gemini 2.5 Pro tự động cache phần đầu prompt (system instruction + KB chunks) nếu prefix giống nhau qua nhiều request cho cùng cafe → TTFT giảm từ ~9s xuống ~600ms sau lần đầu.
+- Minimum token threshold để cache kick in: 1024 tokens (Gemini 2.5 Pro).
+- Cache tự động phía Google server — không cần code thêm, chỉ cần dùng đúng SDK.
+
+**API thay đổi chính**:
+```typescript
+// Cũ
+import { GoogleGenerativeAI } from '@google/generative-ai';
+const genAI = new GoogleGenerativeAI(apiKey);
+const model = genAI.getGenerativeModel({ model, systemInstruction });
+const result = await model.generateContent(prompt);
+const text = result.response.text(); // method
+
+// Mới
+import { GoogleGenAI } from '@google/genai';
+const ai = new GoogleGenAI({ apiKey });
+const response = await ai.models.generateContent({ model, config: { systemInstruction }, contents });
+const text = response.text; // property
+
+// Stream mới — iterate trực tiếp, không dùng result.stream
+const stream = await ai.models.generateContentStream({ model, config, contents });
+for await (const chunk of stream) { const text = chunk.text; }
+
+// Embedding mới
+const result = await ai.models.embedContent({ model, contents: text });
+return result.embeddings![0].values!;
+```
+
+**Lưu ý**: `quickRepliesPromise` tách ra khỏi `Promise.all` với stream call để tránh blocking TTFT. Quick replies chạy song song trong background, được await sau khi stream complete.
+
+---
+
 ## R-008: Cafe Isolation
 
 **Decision**: Mọi query liên quan KB PHẢI include `WHERE cafe_id = $cafeId` — không được bỏ qua dù có document_id.
@@ -141,3 +183,23 @@ ORDER BY embedding <=> $2::vector LIMIT 5
 ```
 
 Đây là invariant bảo mật — một cafe không bao giờ được thấy KB của cafe khác.
+
+---
+
+## R-010: Per-Cafe System Prompt
+
+**Decision**: Thêm column `system_prompt TEXT NULL` vào `cafe_widget_configs`. Managed qua `PUT /chat/config` hiện có (thêm field, không tạo endpoint mới).
+
+**Rationale**:
+- Provider cần cấu hình hành vi AI riêng cho từng chi nhánh (tone, rules, restrictions) độc lập với KB.
+- Lưu cùng `cafe_widget_configs` vì đây là per-cafe AI config — không cần bảng riêng cho Phase 1.
+- Max 2000 ký tự — đủ cho vài rule hành vi, không chiếm token của KB (KB chunks ~3000-5000 tokens).
+
+**Priority rule**: `system_prompt → cafe_info → KB chunks` trong Gemini system instruction.
+- `system_prompt` đặt đầu → weight cao nhất, override KB nếu conflict.
+- Áp dụng cho RAG route (`ragChat`, `ragChatStream`). fast_answer/slot_check giữ nguyên (không qua Gemini).
+- Khi `system_prompt = null` → behavior giữ nguyên như trước.
+
+**Migration**: `1747872000000-AddSystemPrompt.ts` — `ALTER TABLE cafe_widget_configs ADD COLUMN system_prompt TEXT NULL`.
+
+**Future**: UI sẽ guide Provider điền system_prompt theo template có cấu trúc (tone, giới hạn topic, routing rules) để tránh viết prompt quá dài thay thế KB.

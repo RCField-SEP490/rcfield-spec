@@ -13,6 +13,7 @@ POST /cafes/:cafeId/chat
         │
         ▼
 [1] Check feature_flag ai_chat + quota
+        │ flag tắt → 503
         │ quota hết → 429
         │
         ▼
@@ -31,7 +32,11 @@ POST /cafes/:cafeId/chat
         [3] Embed message → pgvector search → top-5 chunks
                 │
                 ▼
-        [4] Gemini 2.0 Flash (RAG + function calling nếu cần)
+        [4] Build system instruction:
+            system_prompt (Provider config) → cafe info → KB chunks
+                │
+                ▼
+        [5] Gemini 2.0 Flash (RAG + function calling nếu cần)
                 │
                 ▼
              response (<3s)
@@ -205,6 +210,7 @@ Lấy cấu hình widget của chi nhánh. Widget FE gọi khi khởi tạo.
 | `primary_color` | string | Hex color, ví dụ `#FF6B35`. |
 | `avatar_url` | string | URL ảnh avatar bot. Nullable — dùng default nếu null. |
 | `quick_replies` | string[] | Tối đa 5 nút. Rỗng nếu chưa cấu hình. |
+| `system_prompt` | string \| null | Prompt hành vi do Provider cấu hình. Null nếu chưa đặt. |
 | `is_default` | boolean | `true` nếu Provider chưa cấu hình, đang dùng giá trị mặc định. |
 
 **Giá trị mặc định hệ thống** (khi `is_default: true`):
@@ -214,7 +220,8 @@ Lấy cấu hình widget của chi nhánh. Widget FE gọi khi khởi tạo.
   "position": "bottom-right",
   "primary_color": "#2563EB",
   "avatar_url": null,
-  "quick_replies": []
+  "quick_replies": [],
+  "system_prompt": null
 }
 ```
 
@@ -233,7 +240,8 @@ Cập nhật cấu hình widget.
   "position": "bottom-right",
   "primary_color": "#FF6B35",
   "avatar_url": "https://cdn.rcfield.vn/cafes/rc-arena/bot-avatar.png",
-  "quick_replies": ["Xem giá xe", "Còn slot không?", "Nội quy sân"]
+  "quick_replies": ["Xem giá xe", "Còn slot không?", "Nội quy sân"],
+  "system_prompt": "Luôn xưng hô thân mật với khách. Ưu tiên giới thiệu gói premium khi khách hỏi giá."
 }
 ```
 
@@ -243,6 +251,7 @@ Cập nhật cấu hình widget.
 - `primary_color`: phải là hex color hợp lệ (`#RRGGBB`)
 - `quick_replies`: tối đa 5 phần tử, mỗi phần tử max 50 ký tự
 - `avatar_url`: URL hợp lệ hoặc null
+- `system_prompt`: max 2000 ký tự, nullable — đặt `null` để xóa
 
 **Response `200 OK`**: Trả về config đã được lưu (cùng format GET).
 
@@ -356,6 +365,9 @@ CREATE TABLE cafe_widget_configs (
   avatar_url       TEXT,
   quick_replies    JSONB        NOT NULL DEFAULT '[]',
                    -- array of string, max 5
+  system_prompt    TEXT,
+                   -- Provider-configured AI behavior instructions, max 2000 chars
+                   -- Injected before KB chunks in system instruction — highest priority
   created_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
   updated_at       TIMESTAMPTZ  NOT NULL DEFAULT now()
 );

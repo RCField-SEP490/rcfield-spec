@@ -150,6 +150,9 @@ export class CafeWidgetConfig {
   @Column({ name: 'greeting_message', type: 'text', nullable: true })
   greetingMessage: string | null;
 
+  @Column({ name: 'system_prompt', type: 'text', nullable: true })
+  systemPrompt: string | null;
+
   @Column({ name: 'is_enabled', default: true })
   isEnabled: boolean;
 

@@ -135,7 +135,7 @@ Provider muốn biết chi nhánh của mình đang có những tài liệu gì 
 **Chat — Customer facing**
 
 - **FR-001**: Hệ thống PHẢI cung cấp endpoint chat riêng cho từng chi nhánh, không cần xác thực từ phía Customer.
-- **FR-001a**: Trước khi xử lý mỗi chat request, hệ thống PHẢI kiểm tra chi nhánh có feature flag `ai_chat` được bật và còn quota tháng không; nếu không thỏa, trả về thông báo dịch vụ không khả dụng.
+- **FR-001a**: Trước khi xử lý mỗi chat request, hệ thống PHẢI kiểm tra: (1) cafe có feature flag `ai_chat` được bật không — nếu không, trả 503; (2) còn quota tháng không — nếu hết, trả 429.
 - **FR-002**: Hệ thống PHẢI trả lời câu hỏi dựa trên knowledge base của đúng chi nhánh được hỏi — không được lẫn KB của chi nhánh khác.
 - **FR-003**: Hệ thống PHẢI hỗ trợ conversation history nhiều lượt trong cùng một phiên chat (multi-turn).
 - **FR-004**: Hệ thống PHẢI tự động tra cứu slot trống theo thời gian thực khi Customer hỏi về lịch/slot.

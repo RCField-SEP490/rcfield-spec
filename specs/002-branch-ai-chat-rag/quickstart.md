@@ -49,6 +49,8 @@ export const WidgetConfigSchema = z.object({
   primary_color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
   avatar_url: z.string().url().nullable().optional(),
   quick_replies: z.array(z.string().max(50)).max(5).optional(),
+  system_prompt: z.string().max(2000).nullable().optional(),
+  // Injected before KB chunks — highest priority in Gemini system instruction
 });
 ```
 
@@ -147,11 +149,11 @@ wsService.init(httpServer);
 
 ```typescript
 // src/services/kb.service.ts (phần cốt lõi)
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import * as pdfParse from 'pdf-parse';
 import * as mammoth from 'mammoth';
 
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!);
+const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY! });
 
 // Chunking: ~500 tokens (≈2000 chars), overlap 100 tokens (≈400 chars)
 function chunkText(text: string): string[] {
@@ -167,9 +169,8 @@ function chunkText(text: string): string[] {
 }
 
 async function embedText(text: string): Promise<number[]> {
-  const model = genAI.getGenerativeModel({ model: 'text-embedding-004' });
-  const result = await model.embedContent(text);
-  return result.embedding.values;
+  const result = await ai.models.embedContent({ model: 'text-embedding-004', contents: text });
+  return result.embeddings![0].values!;
 }
 
 // Insert chunks dùng raw SQL vì TypeORM không support vector type
@@ -314,7 +315,7 @@ async deleteDocument(req: AuthRequest, res: Response, next: NextFunction) { ... 
 
 ```bash
 cd rcfeild-be
-npm install @google/generative-ai multer pdf-parse mammoth ws
+npm install @google/genai multer pdf-parse mammoth ws
 npm install -D @types/multer @types/pdf-parse @types/ws
 ```
 
