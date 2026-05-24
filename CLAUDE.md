@@ -211,11 +211,11 @@ graphify run                        # build graph từ docs/spec/
 ```
 
 <!-- SPECKIT START -->
-Current active feature plan: `specs/001-user-login/plan.md`
+Current active feature plan: `specs/003-fb-messenger-channel/plan.md`
 For implementation context, read in order:
-1. `specs/001-user-login/plan.md` — technical context, structure, constitution check
-2. `specs/001-user-login/research.md` — key decisions (Google OAuth, token storage, brute-force)
-3. `specs/001-user-login/data-model.md` — User + RefreshToken entities
-4. `specs/001-user-login/contracts/auth.md` — API endpoint contracts
-5. `specs/001-user-login/quickstart.md` — implementation order and code snippets
+1. `specs/003-fb-messenger-channel/plan.md` — technical context, structure, constitution check
+2. `specs/003-fb-messenger-channel/research.md` — OAuth flow, AES-256-GCM, dedup, formatter decisions
+3. `specs/003-fb-messenger-channel/data-model.md` — CafeChannel entity + migration
+4. `specs/003-fb-messenger-channel/contracts/api.md` — all endpoint contracts (channel management + webhook)
+5. `specs/003-fb-messenger-channel/quickstart.md` — implementation order and code snippets
 <!-- SPECKIT END -->
