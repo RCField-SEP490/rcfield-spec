@@ -73,6 +73,12 @@ Core value prop: structured evidence at every asset handover → eliminates dama
 | `rcfield-spec/docs/spec/04-inspection-flow.md` | Trước khi làm check-in/out module |
 | `rcfield-spec/docs/spec/05-api-contracts.md` | Trước khi tạo endpoint mới |
 
+## Developer Guides — Đọc khi implement tính năng theo domain
+
+| File | Khi nào cần đọc |
+|------|----------------|
+| `docs/developer/provider-subscription-enforcement.md` | **Bắt buộc** trước khi implement bất kỳ endpoint nào có role PROVIDER — subscription status check, quota guards, error codes |
+
 ---
 
 ## Tech Stack
@@ -211,11 +217,11 @@ graphify run                        # build graph từ docs/spec/
 ```
 
 <!-- SPECKIT START -->
-Current active feature plan: `specs/003-fb-messenger-channel/plan.md`
+Current active feature plan: `specs/004-provider-subscription/plan.md`
 For implementation context, read in order:
-1. `specs/003-fb-messenger-channel/plan.md` — technical context, structure, constitution check
-2. `specs/003-fb-messenger-channel/research.md` — OAuth flow, AES-256-GCM, dedup, formatter decisions
-3. `specs/003-fb-messenger-channel/data-model.md` — CafeChannel entity + migration
-4. `specs/003-fb-messenger-channel/contracts/api.md` — all endpoint contracts (channel management + webhook)
-5. `specs/003-fb-messenger-channel/quickstart.md` — implementation order and code snippets
+1. `specs/004-provider-subscription/plan.md` — technical context, structure, constitution check
+2. `specs/004-provider-subscription/research.md` — state machine, cron, notification, quota tracking decisions
+3. `specs/004-provider-subscription/data-model.md` — 5 new entities (provider_profiles, subscription_plans, provider_subscriptions, payment_requests, notifications)
+4. `specs/004-provider-subscription/contracts/api.md` — all 14 endpoint contracts
+5. `specs/004-provider-subscription/quickstart.md` — implementation order, code patterns, integration scenarios
 <!-- SPECKIT END -->

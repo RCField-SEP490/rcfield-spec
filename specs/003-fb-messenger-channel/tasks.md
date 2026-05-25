@@ -9,10 +9,10 @@
 
 **Purpose**: Extend existing project config — no new files, only additions to existing files.
 
-- [ ] T001 Add Facebook config block and CHANNEL_ENCRYPTION_KEY to `rcfeild-be/src/config/env.ts` (`facebook.appId`, `appSecret`, `verifyToken`, `redirectUri`, `encryptionKey` as Buffer)
-- [ ] T002 Add FB and CHANNEL_ENCRYPTION_KEY env vars to `rcfeild-be/.github/workflows/ci.yml` (use ci-placeholder values)
-- [ ] T003 [P] Add `ChannelType` and `ChannelStatus` enums to `rcfeild-be/src/types/index.ts`
-- [ ] T004 [P] Add `FbChannelQuerySchema` (cafeId validation) to `rcfeild-be/src/validate/index.ts`
+- [X] T001 Add Facebook config block and CHANNEL_ENCRYPTION_KEY to `rcfeild-be/src/config/env.ts` (`facebook.appId`, `appSecret`, `verifyToken`, `redirectUri`, `encryptionKey` as Buffer)
+- [X] T002 Add FB and CHANNEL_ENCRYPTION_KEY env vars to `rcfeild-be/.github/workflows/ci.yml` (use ci-placeholder values)
+- [X] T003 [P] Add `ChannelType` and `ChannelStatus` enums to `rcfeild-be/src/types/index.ts`
+- [X] T004 [P] Add `FbChannelQuerySchema` (cafeId validation) to `rcfeild-be/src/validate/index.ts`
 
 ---
 
@@ -22,10 +22,10 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T005 Create AES-256-GCM utility `rcfeild-be/src/utils/crypto.ts` with `encryptToken(plaintext, key): string` and `decryptToken(ciphertext, key): string` using Node.js built-in `crypto` — format: base64(iv[12] + authTag[16] + ciphertext)
-- [ ] T006 Create TypeORM entity `rcfeild-be/src/models/cafe-channel.entity.ts` — table `cafe_channels`, fields: `id`, `cafeId`, `channelType`, `status`, `pageId`, `pageName`, `encryptedPageToken`, `connectedAt`, `createdAt`, `updatedAt`, `deletedAt` (soft delete)
-- [ ] T007 Create migration `rcfeild-be/src/migrations/{timestamp}-FbMessengerChannel.ts` — creates `cafe_channels` table with: unique index on `(cafe_id, channel_type)` where `deleted_at IS NULL`, and index on `page_id` where `deleted_at IS NULL AND status = 'CONNECTED'`
-- [ ] T008 Register `CafeChannel` entity in `rcfeild-be/src/config/database.ts` entities array
+- [X] T005 Create AES-256-GCM utility `rcfeild-be/src/utils/crypto.ts` with `encryptToken(plaintext, key): string` and `decryptToken(ciphertext, key): string` using Node.js built-in `crypto` — format: base64(iv[12] + authTag[16] + ciphertext)
+- [X] T006 Create TypeORM entity `rcfeild-be/src/models/cafe-channel.entity.ts` — table `cafe_channels`, fields: `id`, `cafeId`, `channelType`, `status`, `pageId`, `pageName`, `encryptedPageToken`, `connectedAt`, `createdAt`, `updatedAt`, `deletedAt` (soft delete)
+- [X] T007 Create migration `rcfeild-be/src/migrations/1748390400000-FbMessengerChannel.ts` — creates `cafe_channels` table with: unique index on `(cafe_id, channel_type)` where `deleted_at IS NULL`, and index on `page_id` where `deleted_at IS NULL AND status = 'CONNECTED'`
+- [X] T008 Register `CafeChannel` entity in `rcfeild-be/src/config/database.ts` entities array (auto-loaded via glob)
 
 **Checkpoint**: `npm run migration:run` succeeds, `cafe_channels` table created in DB.
 
@@ -39,24 +39,20 @@
 
 ### Backend — US1
 
-- [ ] T009 [US1] Create `rcfeild-be/src/services/fb-channel.service.ts` with methods:
-  - `buildAuthUrl(cafeId): Promise<string>` — generates OAuth URL, stores CSRF nonce in Redis key `oauth:fb:nonce:{nonce}` TTL 600s
-  - `handleOAuthCallback(code, state): Promise<void>` — verifies nonce, exchanges code→short-lived→long-lived user token→Page token via `/me/accounts`, encrypts token with `encryptToken`, upserts `cafe_channels`, calls `POST /{pageId}/subscribed_apps`
-  - `getStatus(cafeId): Promise<FbChannelStatusResponse>` — returns connection status
-  - `disconnect(cafeId): Promise<void>` — soft-deletes `cafe_channels` row, sets `status = DISCONNECTED`
-- [ ] T010 [US1] Create `rcfeild-be/src/controllers/fb-channel.controller.ts` with handlers for `getAuthUrl`, `handleCallback`, `getStatus`, `disconnect` — follow controller comment convention (`// GET /api/v1/channels/facebook/...`)
-- [ ] T011 [US1] Create `rcfeild-be/src/routes/fb-channel.routes.ts` — mount `authenticate + authorize(UserRole.PROVIDER)` on all routes: `GET /auth-url`, `GET /callback`, `GET /status`, `DELETE /`
-- [ ] T012 [US1] Register `fb-channel.routes.ts` under `/api/v1/channels/facebook` in `rcfeild-be/src/routes/index.ts`
+- [X] T009 [US1] Create `rcfeild-be/src/services/fb-channel.service.ts` with methods: `buildAuthUrl`, `handleOAuthCallback`, `getStatus`, `disconnect`
+- [X] T010 [US1] Create `rcfeild-be/src/controllers/fb-channel.controller.ts` with handlers for `getAuthUrl`, `oauthCallback`, `getChannelStatus`, `disconnectChannel`
+- [X] T011 [US1] Create `rcfeild-be/src/routes/fb-channel.routes.ts` — PROVIDER auth on all routes
+- [X] T012 [US1] Register `fb-channel.routes.ts` under `/api/v1/channels/facebook` in `rcfeild-be/src/routes/index.ts`
 
 ### Frontend — US1
 
-- [ ] T013 [P] [US1] Add route paths to `rcfield-fe/src/app/router/route-paths.ts`: `providerChannels: '/settings/channels'`, `facebookOAuthCallback: '/settings/channels/callback'`
-- [ ] T014 [P] [US1] Create `rcfield-fe/src/features/channels/types/index.ts` — `FbChannelStatusResponse` interface: `{ connected: boolean; pageName?: string; pageId?: string; connectedAt?: string }`
-- [ ] T015 [P] [US1] Create `rcfield-fe/src/features/channels/api/channel.api.ts` — `getAuthUrl(cafeId)`, `getChannelStatus(cafeId)`, `disconnectChannel(cafeId)` using shared `api` axios instance
-- [ ] T016 [US1] Create `rcfield-fe/src/features/channels/components/FacebookConnectButton.tsx` — button that calls `getAuthUrl(cafeId)` then sets `window.location.href = url` (full-page redirect); shows loading state
-- [ ] T017 [US1] Create `rcfield-fe/src/pages/provider/ChannelSettingsPage.tsx` — queries `getChannelStatus(cafeId)`, shows Page name + "Đã kết nối" badge when connected, shows `<FacebookConnectButton>` when disconnected, shows "Ngắt kết nối" button with confirm dialog when connected
-- [ ] T018 [US1] Create `rcfield-fe/src/pages/FacebookOAuthCallbackPage.tsx` — reads `?status` query param, shows toast (`connected` → success, `cancelled` → info, `error` → error), then redirects to `routePaths.providerChannels` (no UI rendered, just redirect logic in useEffect)
-- [ ] T019 [US1] Add routes for `ChannelSettingsPage` and `FacebookOAuthCallbackPage` in `rcfield-fe/src/app/router/routes.tsx`
+- [X] T013 [P] [US1] Add route paths to `rcfield-fe/src/app/router/route-paths.ts`: `providerChannels: '/provider/channels'`, `facebookOAuthCallback: '/provider/channels/facebook/callback'`
+- [X] T014 [P] [US1] Create `rcfield-fe/src/features/channels/types/index.ts` — `FbChannelStatusResponse` and `FbAuthUrlResponse` interfaces
+- [X] T015 [P] [US1] Create `rcfield-fe/src/features/channels/api/channel.api.ts` — `getAuthUrl`, `getStatus`, `disconnect` using shared `api` axios instance
+- [X] T016 [US1] Create `rcfield-fe/src/features/channels/components/FacebookConnectButton.tsx` — OAuth redirect button with loading state
+- [X] T017 [US1] Create `rcfield-fe/src/pages/provider/ChannelSettingsPage.tsx` — connect/disconnect UI with confirm dialog
+- [X] T018 [US1] Create `rcfield-fe/src/pages/FacebookOAuthCallbackPage.tsx` — toast + redirect on OAuth return
+- [X] T019 [US1] Add routes for `ChannelSettingsPage` and `FacebookOAuthCallbackPage` in `rcfield-fe/src/app/router/routes.tsx`
 
 **Checkpoint**: Provider can connect and disconnect a Facebook Page. `GET /status` reflects correct state.
 
@@ -70,16 +66,11 @@
 
 ### Backend — US2
 
-- [ ] T020 [US2] Create `rcfeild-be/src/services/fb-messenger.formatter.ts` — `FbMessengerFormatter.format(chatResponse: ChatResponse): FbFormattedMessage`:
-  - `stripMarkdown(text)` removes `**`, `*`, `` ` ``, `#`, `[text](url)`
-  - Truncate at 2000 chars at last word boundary
-  - Map `quickReplies[]` → `[{ content_type: 'text', title: title.substring(0,20), payload: 'QR_...' }]` max 5
-- [ ] T021 [P] [US2] Create `rcfeild-be/src/services/fb-messenger.service.ts` — `sendMessage(psid, formatted: FbFormattedMessage, pageToken): Promise<void>` calls `POST https://graph.facebook.com/v21.0/me/messages?access_token={pageToken}` with `{ recipient: { id: psid }, messaging_type: 'RESPONSE', message: { text, quick_replies } }`; `sendText(psid, text, pageToken)` for fallback (no quick replies)
-- [ ] T022 [US2] Create `rcfeild-be/src/controllers/fb-webhook.controller.ts` with two handlers:
-  - `verifyWebhook`: `GET` — check `hub.verify_token === env.facebook.verifyToken`, echo `hub.challenge`
-  - `handleWebhookEvent`: `POST` — respond `200` immediately, then for each `entry.messaging` event: skip `is_echo`, skip non-text, dedup via `SET facebook:processed:{pageId}:{mid} NX EX 300`, lookup `cafe_channels` by `pageId`, call `checkGate` → `generateResponse` → `FbMessengerFormatter.format` → `fbMessengerService.sendMessage`; catch `AI_DISABLED`/`QUOTA_EXCEEDED` → send polite fallback via `sendText`
-- [ ] T023 [US2] Create `rcfeild-be/src/routes/fb-webhook.routes.ts` — public (no auth middleware): `GET /` and `POST /`
-- [ ] T024 [US2] Register `fb-webhook.routes.ts` under `/api/v1/webhook/facebook` in `rcfeild-be/src/routes/index.ts`
+- [X] T020 [US2] Create `rcfeild-be/src/services/fb-messenger.formatter.ts` — `FbMessengerFormatter.format` with `stripMarkdown`, truncate, quickReplies mapping
+- [X] T021 [P] [US2] Create `rcfeild-be/src/services/fb-messenger.service.ts` — `sendMessage` and `sendText` via Graph API v21.0
+- [X] T022 [US2] Create `rcfeild-be/src/controllers/fb-webhook.controller.ts` — `verifyWebhook` (GET challenge) + `handleWebhookEvent` (POST, dedup, AI pipeline)
+- [X] T023 [US2] Create `rcfeild-be/src/routes/fb-webhook.routes.ts` — public GET + POST
+- [X] T024 [US2] Register `fb-webhook.routes.ts` under `/api/v1/webhook/facebook` in `rcfeild-be/src/routes/index.ts`
 
 **Checkpoint**: Webhook receives message for a connected page → AI reply sent. Duplicate mid → only one reply. Non-text → no reply. Quota exceeded → fallback reply.
 
@@ -87,8 +78,8 @@
 
 ## Phase 5: Polish & Cross-Cutting Concerns
 
-- [ ] T025 [P] Add `FB_APP_ID`, `FB_APP_SECRET`, `FB_VERIFY_TOKEN`, `FB_REDIRECT_URI`, `CHANNEL_ENCRYPTION_KEY` to `rcfeild-be/.env.example` with placeholder values and comments explaining each
-- [ ] T026 [P] Add `FbFormattedMessage` and `FbQuickReply` types to `rcfeild-be/src/types/index.ts`
+- [X] T025 [P] Add `FB_APP_ID`, `FB_APP_SECRET`, `FB_VERIFY_TOKEN`, `FB_REDIRECT_URI`, `CHANNEL_ENCRYPTION_KEY` to `rcfeild-be/.env.example` with placeholder values and comments explaining each
+- [X] T026 [P] Add `FbFormattedMessage` and `FbQuickReply` types to `rcfeild-be/src/types/index.ts`
 - [ ] T027 Run quickstart.md testing checklist manually: verify all 16 test scenarios pass (US1 + US2 sections)
 
 ---
