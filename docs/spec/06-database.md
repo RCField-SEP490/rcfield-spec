@@ -94,7 +94,7 @@ erDiagram
 Phase 1 chỉ tạo schema/migration cho **46 bảng vận hành cốt lõi** dưới đây.
 
 > Không cộng thêm bảng Phase 2 vào scope này. Chỉ các bảng multi-party dispute workflow nâng cao
-> (`dispute_evidences`, `dispute_parties`), SaaS, AI và analytics nâng cao **không được tạo trong Phase 1**.
+> (`dispute_evidences`, `dispute_parties`), AI và analytics nâng cao **không được tạo trong Phase 1**.
 
 | # | Bảng | Mô tả |
 |---|------|-------|
@@ -147,7 +147,6 @@ Phase 1 chỉ tạo schema/migration cho **46 bảng vận hành cốt lõi** d�
 
 Các nghiệp vụ bị loại khỏi schema Phase 1:
 
-- SaaS tenant/billing.
 - AI job/detail tables.
 - Analytics nâng cao, dynamic pricing, loyalty và native mobile app.
 
@@ -859,9 +858,7 @@ Các bảng dưới đây chỉ là backlog thiết kế cho Phase 2. Không t�
 
 | Nhóm | Bảng |
 |------|------|
-| Staff/cafe ops | `staff_cafe_assignments`, `cafe_closures`, `cafe_announcements` |
-| Advanced dispute | `incident_participants`, `disputes`, `dispute_evidences`, `dispute_parties` |
-| SaaS | `tenants`, `tenant_members`, `saas_plans`, `tenant_subscriptions` |
+| Advanced dispute | `incident_participants`, `dispute_evidences`, `dispute_parties` |
 | AI | `ai_analysis_jobs`, `ai_damage_detections`, `ai_recommendations` |
 | Advanced analytics | analytics aggregate/cache tables nếu cần |
 | Loyalty/dynamic pricing | loyalty points, price rules, campaign optimization |

@@ -31,8 +31,7 @@ git clone https://github.com/rcfield-org/rcfield-app.git
 
 ## Project Overview
 
-**RCField** là **B2B SaaS** bán cho **1 doanh nghiệp** vận hành chuỗi sân xe RC tại Việt Nam.
-Không phải marketplace — giống mô hình chuỗi (Starbucks): 1 Provider, nhiều chi nhánh, dùng chung 1 hệ thống.
+**RCField** là **nền tảng SaaS multi-tenant** cho **nhiều Provider** vận hành sân xe RC tại Việt Nam. Mỗi Provider sở hữu một hoặc nhiều chi nhánh (cafes), đăng ký gói SaaS và vận hành độc lập trên cùng một hệ thống. Không phải marketplace — Provider quản lý chi nhánh của mình, Customer đặt lịch vào từng chi nhánh.
 
 **Roles**:
 - **ADMIN** — Team RCField (bên bán phần mềm): feature flag management, system monitoring
@@ -187,10 +186,11 @@ AssetTier:       STANDARD < PREMIUM < RESTRICTED
 BookingMode:     RENTAL  = customer thuê xe từ fleet
                  BYOC    = customer mang xe riêng
 
-PaymentFlow:     slot_fee + rental_fee → thu trước
-                 security_deposit      → hold, giải phóng sau check-out
-                 extension_fee         → post-paid, trừ vào deposit (max 50%)
-                 damage_charge         → trừ vào deposit hoặc charge thêm
+PaymentFlow:     Bước 1 (booking confirm): charge security_deposit → HELD
+                 Bước 2 (session checkout): CAPTURE (total_charges − security_deposit)
+                 total_charges = slot_fee + rental_fee + extension_fee + fnb + damage_charge
+                 security_deposit = vehicle.market_value × 15%
+                 extension_fee cap → max 50% security_deposit
 
 PlatformFee:     15% chỉ tính trên consummated components
 

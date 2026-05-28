@@ -17,9 +17,9 @@
 
 Sân xe RC (Radio-Controlled Car) là mô hình giải trí trải nghiệm đang nổi tại Việt Nam. Các địa điểm này thường được gọi là "cafe xe RC" theo tên thông dụng.
 
-**RCField** là phần mềm B2B cho **1 doanh nghiệp/chuỗi vận hành sân xe RC**. Doanh nghiệp có nhiều chi nhánh, mỗi chi nhánh có cấu hình riêng về giá, đội xe, giờ hoạt động và sức chứa, nhưng dùng chung một hệ thống.
+**RCField** là **nền tảng SaaS multi-tenant** cho **nhiều Provider** vận hành sân xe RC tại Việt Nam. Mỗi Provider đăng ký gói SaaS, sở hữu và quản lý một hoặc nhiều chi nhánh (cafes) độc lập. Mỗi chi nhánh có cấu hình riêng về giá, đội xe, giờ hoạt động và sức chứa, nhưng dùng chung một hệ thống.
 
-RCField Phase 1 tập trung vào vận hành thực tế của cafe xe RC, bao gồm booking/session, đội xe, BYOC, F&B, package, subscription, contest, promotion, inspection, dispute resolution, staff assignment, cafe operations và audit thanh toán/trust score. Phase 2 dành cho AI nâng cao, SaaS tenant/billing và multi-party dispute workflow nâng cao.
+RCField Phase 1 tập trung vào vận hành thực tế của cafe xe RC, bao gồm booking/session, đội xe, BYOC, F&B, package, subscription, contest, promotion, inspection, dispute resolution, staff assignment, cafe operations, audit thanh toán/trust score và SaaS subscription/billing. Phase 2 dành cho AI nâng cao và multi-party dispute workflow nâng cao.
 
 Hai nhóm khách chính:
 
@@ -66,9 +66,9 @@ RCField là hệ thống vận hành cho chuỗi sân xe RC, kết hợp:
 | Actor | Mô tả | App |
 |-------|------|-----|
 | **Customer** | Đặt lịch, thanh toán, xác nhận check-in/out, đánh giá | Web mobile-first |
-| **Provider** | Quản lý chi nhánh, đội xe, giá, doanh thu | Web |
-| **Staff** | Check-in/out, inspection, ghi nhận người/xe thực tế, đề xuất gia hạn | Web mobile-first |
-| **Admin** | Quản trị nền tảng, người dùng, cấu hình hệ thống | Web |
+| **Provider** | Chủ doanh nghiệp RC: đăng ký gói SaaS, quản lý chi nhánh, đội xe, giá, doanh thu | Web |
+| **Staff** | Nhân viên thuộc 1 chi nhánh: check-in/out, inspection, ghi nhận người/xe thực tế, đề xuất gia hạn | Web mobile-first |
+| **Admin** | Team RCField: quản trị nền tảng, onboard Provider, cấu hình hệ thống | Web |
 
 ---
 
@@ -79,7 +79,10 @@ RCField là hệ thống vận hành cho chuỗi sân xe RC, kết hợp:
 Phase 1 giữ các nghiệp vụ chính của hệ thống. Đây không chỉ là MVP tối giản mà là core vận hành của cafe xe RC.
 
 - Auth, refresh token, reset password.
+- **SaaS plans + Provider subscription/billing** (`saas_plans`, `provider_subscriptions`).
+- Provider onboarding: đăng ký gói SaaS, tạo chi nhánh đầu tiên.
 - Cafe/branch management cơ bản.
+- **Staff-cafe assignment** — Staff thuộc đúng 1 chi nhánh (`cafe_staff`).
 - Vehicle fleet management cơ bản.
 - BYOC vehicle registry.
 - Booking lifecycle cho `RENTAL`, `BYOC`, `MIXED`.
@@ -100,17 +103,16 @@ Phase 1 giữ các nghiệp vụ chính của hệ thống. Đây không chỉ l
 - Reviews.
 - Notification logs cơ bản.
 - Trust score hiện tại trên `users` và audit qua `trust_score_logs`.
-- Feature flags có `config` để bật/tắt module và chuẩn bị AI/SaaS Phase 2.
+- Feature flags có `config` để bật/tắt module và chuẩn bị AI Phase 2.
 
-**Phase 1 database target:** 41 bảng vận hành. Bao gồm staff assignment, cafe closures/announcements và dispute cơ bản. Multi-party dispute workflow nâng cao chuyển sang Phase 2.
+**Phase 1 database target:** 44 bảng vận hành. Bao gồm SaaS billing, staff assignment, cafe closures/announcements và dispute cơ bản. Multi-party dispute workflow nâng cao chuyển sang Phase 2.
 
-### Phase 2 — Business Expansion + AI/SaaS
+### Phase 2 — AI nâng cao + Business Expansion
 
 Các module sau không thuộc Phase 1:
 
-- SaaS tenant tables và tenant-level feature flags.
 - Multi-party dispute workflow nâng cao: `dispute_evidences`, `dispute_parties`, `incident_participants`.
-- AI jobs, AI damage detection, AI recommendations.
+- AI jobs, AI damage detection, AI recommendations nâng cao.
 - Analytics dashboard nâng cao.
 - Dynamic pricing, loyalty, native mobile app.
 
