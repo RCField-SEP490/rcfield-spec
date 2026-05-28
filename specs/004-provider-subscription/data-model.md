@@ -154,9 +154,9 @@ enum PlanName {
 
 | name | branch_limit | ai_quota_per_month | channel_limit | price_per_month | is_trial |
 |------|--------------|--------------------|---------------|-----------------|----------|
-| `TRIAL` | 1 | 100 | 1 | 0.00 | true |
-| `STARTER` | 3 | 500 | 2 | 299000.00 | false |
-| `GROWTH` | 10 | 2000 | 5 | 699000.00 | false |
+| `TRIAL` | 1 | 500 | 1 | 0.00 | true |
+| `STARTER` | 1 | 1000 | 1 | 299000.00 | false |
+| `GROWTH` | 3 | 5000 | 3 | 699000.00 | false |
 | `PRO` | -1 | -1 | -1 | 1499000.00 | false |
 
 ### TypeORM Entity Sketch

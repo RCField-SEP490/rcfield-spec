@@ -1,6 +1,6 @@
 # 06 — Database Specification
 
-**Last updated**: 2026-05-16
+**Last updated**: 2026-05-25
 
 > Đọc `01-domain-model.md` để hiểu entity relationships trước khi đọc file này.  
 > File này là nguồn sự thật cho schema Phase 1 Operational Core.
@@ -78,13 +78,20 @@ erDiagram
     users ||--o{ trust_score_logs : "trust audit"
     bookings ||--o{ trust_score_logs : "triggered by"
     sessions ||--o{ trust_score_logs : "triggered by"
+
+    users ||--o| provider_profiles : "has profile"
+    users ||--o{ provider_subscriptions : "subscription"
+    users ||--o{ payment_requests : "payment requests"
+    users ||--o{ notifications : "notifications"
+    provider_subscriptions ||--o{ subscription_plans : "plan"
+    payment_requests ||--o{ subscription_plans : "plan"
 ```
 
 ---
 
-## 3. Phase 1 Schema Scope — 41 Tables Only
+## 3. Phase 1 Schema Scope — 46 Tables
 
-Phase 1 chỉ tạo schema/migration cho **41 bảng vận hành cốt lõi** dưới đây.
+Phase 1 chỉ tạo schema/migration cho **46 bảng vận hành cốt lõi** dưới đây.
 
 > Không cộng thêm bảng Phase 2 vào scope này. Chỉ các bảng multi-party dispute workflow nâng cao
 > (`dispute_evidences`, `dispute_parties`), SaaS, AI và analytics nâng cao **không được tạo trong Phase 1**.
@@ -132,6 +139,11 @@ Phase 1 chỉ tạo schema/migration cho **41 bảng vận hành cốt lõi** d�
 | 39 | `disputes` | Tranh chấp booking |
 | 40 | `cafe_closures` | Ngày đóng cửa đặc biệt |
 | 41 | `cafe_announcements` | Thông báo/banner chi nhánh |
+| 42 | `provider_profiles` | Hồ sơ đăng ký Provider, trạng thái duyệt |
+| 43 | `subscription_plans` | Định nghĩa các gói: Trial, Starter, Growth, Pro |
+| 44 | `provider_subscriptions` | Subscription đang active của từng Provider, quota AI |
+| 45 | `payment_requests` | Yêu cầu thanh toán thủ công (chuyển khoản) |
+| 46 | `notifications` | In-app notifications cho Provider |
 
 Các nghiệp vụ bị loại khỏi schema Phase 1:
 
@@ -192,6 +204,16 @@ enum PromoApplicableTo { ALL, RENTAL, BYOC, MIXED }
 enum NotificationChannel { PUSH, SMS, EMAIL }
 enum NotificationStatus { PENDING, SENT, FAILED }
 enum TrustScoreReason { NO_SHOW, DAMAGE_CONFIRMED, BOOKING_STREAK, ADMIN_ADJUSTMENT }
+
+enum ProviderStatus { PENDING, ACTIVE, REJECTED, SUSPENDED }
+enum ProviderSubscriptionStatus { TRIAL, ACTIVE, GRACE_PERIOD, EXPIRED }
+enum PlanName { TRIAL, STARTER, GROWTH, PRO }
+enum PaymentRequestStatus { PENDING, CONFIRMED, REJECTED }
+enum NotificationType {
+  ACCOUNT_APPROVED, ACCOUNT_REJECTED, ACCOUNT_SUSPENDED, ACCOUNT_UNSUSPENDED,
+  TRIAL_EXPIRING_SOON, GRACE_PERIOD_STARTED, SUBSCRIPTION_EXPIRED,
+  SUBSCRIPTION_ACTIVATED, PAYMENT_REQUEST_CONFIRMED, PAYMENT_REQUEST_REJECTED
+}
 ```
 
 ---
@@ -696,6 +718,100 @@ Rules:
 
 ---
 
+### 5.13 Provider Subscription
+
+#### `provider_profiles`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `user_id` | `uuid` | NOT NULL, UNIQUE, FK -> users(id) ON DELETE CASCADE | 1:1 với users |
+| `business_name` | `varchar(255)` | NOT NULL | |
+| `business_description` | `text` | NULL | |
+| `registration_status` | `ProviderStatus` | NOT NULL, DEFAULT `PENDING` | |
+| `rejection_reason` | `text` | NULL | |
+| `suspended_at` | `timestamptz` | NULL | |
+| `suspended_reason` | `text` | NULL | |
+| `created_at`, `updated_at`, `deleted_at` | `timestamptz` | | |
+
+#### `subscription_plans`
+
+Seeded, read-only. `-1` = unlimited.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `name` | `PlanName` | NOT NULL, UNIQUE | |
+| `branch_limit` | `int` | NOT NULL | -1 = unlimited |
+| `ai_quota_per_month` | `int` | NOT NULL | -1 = unlimited |
+| `channel_limit` | `int` | NOT NULL | -1 = unlimited |
+| `price_per_month` | `decimal(12,2)` | NOT NULL | 0.00 cho TRIAL |
+| `is_trial` | `boolean` | NOT NULL, DEFAULT `false` | |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+**Seed data:**
+
+| name | branch_limit | ai_quota_per_month | channel_limit | price_per_month |
+|------|--------------|--------------------|---------------|-----------------|
+| TRIAL | 1 | 500 | 1 | 0 |
+| STARTER | 1 | 1000 | 1 | 299,000 |
+| GROWTH | 3 | 5000 | 3 | 699,000 |
+| PRO | -1 | -1 | -1 | 1,499,000 |
+
+#### `provider_subscriptions`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `provider_id` | `uuid` | NOT NULL, FK -> users(id) ON DELETE CASCADE | |
+| `plan_id` | `uuid` | NOT NULL, FK -> subscription_plans(id) | |
+| `status` | `ProviderSubscriptionStatus` | NOT NULL | |
+| `started_at` | `timestamptz` | NOT NULL | |
+| `expires_at` | `timestamptz` | NOT NULL | |
+| `grace_ends_at` | `timestamptz` | NULL | expires_at + 7 ngày |
+| `ai_messages_used` | `int` | NOT NULL, DEFAULT `0` | Reset hàng tháng |
+| `ai_quota_reset_at` | `timestamptz` | NOT NULL | Ngày đầu tháng sau |
+| `created_at`, `updated_at`, `deleted_at` | `timestamptz` | | |
+
+```sql
+CREATE INDEX idx_provider_subscriptions_provider_status ON provider_subscriptions (provider_id, status);
+CREATE INDEX idx_provider_subscriptions_expires_status ON provider_subscriptions (expires_at, status);
+```
+
+#### `payment_requests`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `provider_id` | `uuid` | NOT NULL, FK -> users(id) ON DELETE CASCADE | |
+| `plan_id` | `uuid` | NOT NULL, FK -> subscription_plans(id) | |
+| `status` | `PaymentRequestStatus` | NOT NULL, DEFAULT `PENDING` | |
+| `transfer_reference` | `varchar(255)` | NOT NULL | Nội dung CK |
+| `transfer_date` | `date` | NOT NULL | Ngày CK |
+| `transfer_amount` | `decimal(12,2)` | NOT NULL | Số tiền VNĐ |
+| `admin_notes` | `text` | NULL | Ghi chú Admin |
+| `reviewed_by` | `uuid` | NULL, FK -> users(id) | Admin duyệt |
+| `reviewed_at` | `timestamptz` | NULL | |
+| `created_at`, `updated_at`, `deleted_at` | `timestamptz` | | |
+
+#### `notifications`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `user_id` | `uuid` | NOT NULL, FK -> users(id) ON DELETE CASCADE | |
+| `type` | `NotificationType` | NOT NULL | |
+| `title` | `varchar(255)` | NOT NULL | |
+| `message` | `text` | NOT NULL | |
+| `read_at` | `timestamptz` | NULL | NULL = chưa đọc |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+```sql
+CREATE INDEX idx_notifications_user_read_at ON notifications (user_id, read_at);
+```
+
+---
+
 ## 6. Redis — Slot Locking
 
 Redis chỉ giữ slot tạm trong checkout. DB là nguồn sự thật sau khi booking được tạo.
@@ -853,4 +969,4 @@ CREATE INDEX idx_cafe_announcements_cafe_id ON cafe_announcements(cafe_id, is_ac
 
 ---
 
-*Last updated: 2026-05-17 · 41 Phase 1 tables*
+*Last updated: 2026-05-25 · 46 tables (41 operational core + 5 provider subscription)*

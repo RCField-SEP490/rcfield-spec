@@ -1,6 +1,6 @@
 # 01 — Domain Model
 
-**Last updated**: 2026-05-16  
+**Last updated**: 2026-05-25  
 **Status**: Active
 
 > Đây là file nguồn định nghĩa entity và enum. Xem `06-database.md` để biết schema chi tiết và indexes.
@@ -54,6 +54,12 @@ erDiagram
     users ||--o{ notification_logs : "notifications"
     users ||--o{ trust_score_logs : "trust audit"
     bookings ||--o{ trust_score_logs : "triggered by"
+    users ||--o| provider_profiles : "has profile"
+    users ||--o{ provider_subscriptions : "subscription"
+    users ||--o{ payment_requests : "payment requests"
+    users ||--o{ notifications : "in-app notifications"
+    provider_subscriptions }o--|| subscription_plans : "plan"
+    payment_requests }o--|| subscription_plans : "plan"
 ```
 
 ---
@@ -391,6 +397,91 @@ Promotion là mã giảm giá cơ bản cho booking. Một booking tối đa m�
 - `trust_score_logs`: lịch sử thay đổi điểm uy tín.
 - `feature_flags`: bật/tắt module và lưu `config` cho Phase 2.
 
+### ProviderProfile
+
+Hồ sơ đăng ký của Provider, 1:1 với `users`.
+
+```
+ProviderProfile
+├── id: UUID
+├── user_id: UUID -> User (UNIQUE)
+├── business_name: string
+├── business_description: string?
+├── registration_status: ProviderStatus
+├── rejection_reason: string?
+├── suspended_at: timestamptz?
+├── suspended_reason: string?
+├── created_at / updated_at / deleted_at
+```
+
+### SubscriptionPlan
+
+Định nghĩa gói dịch vụ — seeded, không edit qua UI. `-1` = unlimited.
+
+```
+SubscriptionPlan
+├── id: UUID
+├── name: PlanName           // TRIAL | STARTER | GROWTH | PRO
+├── branch_limit: int        // -1 = unlimited
+├── ai_quota_per_month: int  // -1 = unlimited
+├── channel_limit: int       // -1 = unlimited
+├── price_per_month: decimal
+├── is_trial: boolean
+├── created_at / updated_at
+```
+
+### ProviderSubscription
+
+Subscription đang active của Provider. Một Provider chỉ có tối đa 1 subscription non-EXPIRED.
+
+```
+ProviderSubscription
+├── id: UUID
+├── provider_id: UUID -> User
+├── plan_id: UUID -> SubscriptionPlan
+├── status: ProviderSubscriptionStatus
+├── started_at: timestamptz
+├── expires_at: timestamptz
+├── grace_ends_at: timestamptz?   // expires_at + 7 ngày
+├── ai_messages_used: int
+├── ai_quota_reset_at: timestamptz
+├── created_at / updated_at / deleted_at
+```
+
+### PaymentRequest
+
+Yêu cầu thanh toán thủ công (chuyển khoản ngân hàng) từ Provider. Tối đa 1 PENDING request mỗi Provider.
+
+```
+PaymentRequest
+├── id: UUID
+├── provider_id: UUID -> User
+├── plan_id: UUID -> SubscriptionPlan
+├── status: PaymentRequestStatus
+├── transfer_reference: string
+├── transfer_date: date
+├── transfer_amount: decimal
+├── admin_notes: string?
+├── reviewed_by: UUID? -> User
+├── reviewed_at: timestamptz?
+├── created_at / updated_at / deleted_at
+```
+
+### Notification
+
+In-app notification cho Provider. Gắn với các sự kiện tài khoản và subscription.
+
+```
+Notification
+├── id: UUID
+├── user_id: UUID -> User
+├── type: NotificationType
+├── title: string
+├── message: text
+├── read_at: timestamptz?    // NULL = chưa đọc
+├── created_at / updated_at
+```
+
 ---
 
 ## 3. Enums
@@ -448,6 +539,16 @@ enum NotificationStatus { PENDING, SENT, FAILED }
 enum TrustScoreReason { NO_SHOW, DAMAGE_CONFIRMED, BOOKING_STREAK, ADMIN_ADJUSTMENT }
 enum DiscountType { PERCENT, FIXED }
 enum PromoApplicableTo { ALL, RENTAL, BYOC, MIXED }
+
+enum ProviderStatus { PENDING, ACTIVE, REJECTED, SUSPENDED }
+enum ProviderSubscriptionStatus { TRIAL, ACTIVE, GRACE_PERIOD, EXPIRED }
+enum PlanName { TRIAL, STARTER, GROWTH, PRO }
+enum PaymentRequestStatus { PENDING, CONFIRMED, REJECTED }
+enum NotificationType {
+  ACCOUNT_APPROVED, ACCOUNT_REJECTED, ACCOUNT_SUSPENDED, ACCOUNT_UNSUSPENDED,
+  TRIAL_EXPIRING_SOON, GRACE_PERIOD_STARTED, SUBSCRIPTION_EXPIRED,
+  SUBSCRIPTION_ACTIVATED, PAYMENT_REQUEST_CONFIRMED, PAYMENT_REQUEST_REJECTED
+}
 ```
 
 ---
@@ -457,7 +558,6 @@ enum PromoApplicableTo { ALL, RENTAL, BYOC, MIXED }
 Các entity sau không thuộc Phase 1:
 
 - Multi-party dispute workflow nâng cao: `dispute_evidences`, `dispute_parties`, `incident_participants`
-- SaaS: `tenants`, `tenant_members`, `saas_plans`, `tenant_subscriptions`
 - AI: `ai_analysis_jobs`, `ai_damage_detections`, `ai_recommendations`
 
 ---
