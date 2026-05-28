@@ -72,6 +72,12 @@ Core value prop: structured evidence at every asset handover → eliminates dama
 | `rcfield-spec/docs/spec/04-inspection-flow.md` | Trước khi làm check-in/out module |
 | `rcfield-spec/docs/spec/05-api-contracts.md` | Trước khi tạo endpoint mới |
 
+## Developer Guides — Đọc khi implement tính năng theo domain
+
+| File | Khi nào cần đọc |
+|------|----------------|
+| `docs/developer/provider-subscription-enforcement.md` | **Bắt buộc** trước khi implement bất kỳ endpoint nào có role PROVIDER — subscription status check, quota guards, error codes |
+
 ---
 
 ## Tech Stack
@@ -211,13 +217,11 @@ graphify run                        # build graph từ docs/spec/
 ```
 
 <!-- SPECKIT START -->
-<!-- SPECKIT START -->
-Current active feature plan: `specs/002-branch-ai-chat-rag/plan.md`
+Current active feature plan: `specs/004-provider-subscription/plan.md`
 For implementation context, read in order:
-1. `specs/002-branch-ai-chat-rag/plan.md` — technical context, structure, constitution check
-2. `specs/002-branch-ai-chat-rag/research.md` — key decisions (pgvector, Gemini, NLU routing, chunking)
-3. `specs/002-branch-ai-chat-rag/data-model.md` — KbDocument, KbChunk, CafeWidgetConfig entities
-4. `specs/002-branch-ai-chat-rag/contracts/api.md` — all 6 endpoint contracts + DB schema + NLU config
-5. `specs/002-branch-ai-chat-rag/quickstart.md` — implementation order (9 steps) and code snippets
-<!-- SPECKIT END -->
+1. `specs/004-provider-subscription/plan.md` — technical context, structure, constitution check
+2. `specs/004-provider-subscription/research.md` — state machine, cron, notification, quota tracking decisions
+3. `specs/004-provider-subscription/data-model.md` — 5 new entities (provider_profiles, subscription_plans, provider_subscriptions, payment_requests, notifications)
+4. `specs/004-provider-subscription/contracts/api.md` — all 14 endpoint contracts
+5. `specs/004-provider-subscription/quickstart.md` — implementation order, code patterns, integration scenarios
 <!-- SPECKIT END -->
