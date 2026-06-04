@@ -88,7 +88,7 @@ payment_components     pc-001: type=SLOT_FEE,    amount=50k,  status=PENDING
 ### Case C: Dùng gói đã mua (PACKAGE)
 
 ```
-Customer đã mua gói 10 buổi trước đó
+Customer đã mua gói 10 slot trước đó
                        │
                        ▼
 customer_packages      cp-001: remaining_slots=7 → 6 sau khi đặt
@@ -101,9 +101,15 @@ package_usages         pu-001: customer_package_id=cp-001
                                booking_id=bkg-001
                                used_slots=1
 
-payment_components     pc-001: type=SLOT_FEE, amount=0   ← đã bao gồm trong gói
-                       pc-002: type=SECURITY_DEPOSIT, amount=800k, status=PENDING ← vẫn thu cọc theo giá trị xe
-                       ← KHÔNG có RENTAL_FEE (gói đã cover)
+payment_components     pc-001: type=SLOT_FEE, amount=0   ← gói slot cover tiền sân
+                       pc-002: type=RENTAL_FEE, amount=300k, status=PENDING
+                               ← vẫn tính nếu khách thuê xe và package không cover rental
+                       pc-003: type=SECURITY_DEPOSIT, amount=800k, status=PENDING
+                               ← vẫn thu cọc theo giá trị xe
+
+NOTE: Phase 1 khuyến nghị package 10 slot chỉ cover SLOT_FEE.
+Nếu Provider muốn gói cover cả RENTAL_FEE, phải snapshot rõ package_coverage
+trên booking để PaymentEngine biết component nào amount=0.
 ```
 
 ---
@@ -517,7 +523,7 @@ payment_components     SLOT_FEE: CANCELLED   SLOT_FEE:   charge (phạt)
 
 | Bảng | Ý nghĩa |
 |---|---|
-| `packages` | Gói buổi chơi (VD: 10 buổi giá 1.2M) — Provider tạo per cafe. |
+| `packages` | Gói slot chơi (VD: 10 slot giá 1.2M) — Provider tạo per cafe. |
 | `customer_packages` | Gói đã mua của từng khách — theo dõi `remaining_slots`. |
 | `package_usages` | Mỗi lần dùng gói = 1 row liên kết `customer_package` ↔ `booking`. |
 | `subscriptions` | Đặt lịch định kỳ (VD: thứ 7 hàng tuần 14:00) — system tự tạo booking mỗi tuần. |

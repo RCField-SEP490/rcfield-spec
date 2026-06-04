@@ -9,6 +9,127 @@ quet ma check-in, vao san, order tai quan, gia han, check-out va settlement.
 
 ---
 
+## 0. Booking modes truoc khi vao luong van hanh
+
+RCField co 3 booking modes:
+
+| Mode | Nghiep vu | Ket qua truoc check-in |
+|---|---|---|
+| `SINGLE` | Dat binh thuong tung lan | Booking duoc payment confirm |
+| `PACKAGE` | Dung goi slot da mua, vi du 10 slot | Booking tru `customer_packages.remaining_slots` |
+| `SUBSCRIPTION` | Lich co dinh, vi du Thu Bay hang tuan | Scheduler sinh booking tu `subscriptions` |
+
+Sau khi booking da `CONFIRMED`, ca 3 mode deu di vao luong check-in/session
+ben duoi.
+
+---
+
+## 0.1 SINGLE: Dat binh thuong tung lan
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Customer
+    participant FE as Customer App
+    participant API as API
+    participant DB as PostgreSQL
+    participant Pay as Payment Gateway
+
+    C->>FE: Chon cafe, track, slot_count, play_mode, xe/F&B neu co
+    FE->>API: POST /bookings booking_mode=SINGLE
+    API->>DB: Check cafe ACTIVE, slot, vehicle/BYOC availability
+    API->>DB: INSERT Booking PENDING
+    API->>DB: INSERT booking_participants, booking_vehicles neu rental
+    API->>Pay: Create payment/hold deposit
+    alt Payment success trong 30 phut
+        Pay-->>API: Success callback
+        API->>DB: Booking PENDING -> CONFIRMED
+    else Timeout/fail
+        API->>DB: Booking PENDING -> CANCELLED
+        API->>DB: Release slot locks
+    end
+```
+
+---
+
+## 0.2 PACKAGE: Mua goi slot va dung den khi het slot
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Customer
+    participant FE as Customer App
+    participant API as API
+    participant DB as PostgreSQL
+    participant Pay as Payment Gateway
+
+    C->>FE: Chon goi 10 slot cua Cafe A
+    FE->>API: POST /packages/:id/purchase
+    API->>DB: Validate packages.status=ACTIVE, cafe ACTIVE
+    API->>Pay: Charge PACKAGE_PURCHASE
+    Pay-->>API: Payment success
+    API->>DB: INSERT customer_packages(remaining_slots=10, status=ACTIVE)
+
+    C->>FE: Dung goi dat lich 2 slot
+    FE->>API: POST /bookings booking_mode=PACKAGE, customer_package_id
+    API->>DB: SELECT customer_package FOR UPDATE
+    API->>DB: Check ACTIVE, not expired, remaining_slots >= 2
+    API->>DB: Check slot/vehicle/BYOC availability
+    API->>DB: INSERT Booking booking_mode=PACKAGE
+    API->>DB: INSERT package_usages(used_slots=2)
+    API->>DB: remaining_slots 10 -> 8
+    opt Rental vehicle deposit still required
+        API->>Pay: Hold/charge security deposit
+        Pay-->>API: Deposit success
+    end
+    API->>DB: Booking -> CONFIRMED
+    API-->>FE: Booking confirmed, remaining_slots=8
+```
+
+Example:
+
+```text
+Goi 10 slot
+Lan 1 dat 2 slot: remaining 10 -> 8
+Lan 2 dat 3 slot: remaining 8 -> 5
+Lan 3 dat 5 slot: remaining 5 -> 0, package DEPLETED
+```
+
+---
+
+## 0.3 SUBSCRIPTION: Lich co dinh sinh booking
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Customer
+    participant FE as Customer App
+    participant API as API
+    participant DB as PostgreSQL
+    participant Job as Scheduler Job
+
+    C->>FE: Chon lich Thu Bay hang tuan 14:00-16:00
+    FE->>API: POST /subscriptions
+    API->>DB: Validate cafe, play_mode, track_type, frequency_rule
+    API->>DB: INSERT subscriptions(status=ACTIVE)
+    API-->>FE: Fixed schedule active
+
+    Job->>DB: Scan active subscriptions
+    Job->>DB: Calculate next occurrence
+    Job->>DB: Check cafe closure, operating hours, availability
+    alt Available
+        Job->>DB: INSERT Booking booking_mode=SUBSCRIPTION, source=SYSTEM_SUBSCRIPTION
+        Job->>DB: Set subscription_id on booking
+        Job->>DB: Booking CONFIRMED/PENDING theo payment policy
+        Job-->>C: Notify generated booking
+    else Conflict
+        Job->>DB: No booking confirmed
+        Job-->>C: Notify choose replacement slot
+    end
+```
+
+---
+
 ## 1. Happy path: Dat truoc + thue xe + check-in bang QR/code
 
 ```mermaid
