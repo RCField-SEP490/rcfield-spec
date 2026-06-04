@@ -19,6 +19,7 @@
 | [BR-extension.md](./BR-extension.md) | Gia hạn slot | — |
 | [BR-fnb.md](./BR-fnb.md) | F&B pre-order và on-site | — |
 | [BR-dispute.md](./BR-dispute.md) | Incident policy resolution Phase 1; dispute workflow nhiều bên Phase 2 | — |
+| [BR-booking-lifecycle.md](./BR-booking-lifecycle.md) | Luồng booking end-to-end: đặt giờ, thuê xe, check-in, F&B, extension, checkout | — |
 
 ---
 
