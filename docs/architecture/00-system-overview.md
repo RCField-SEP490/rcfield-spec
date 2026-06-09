@@ -83,7 +83,7 @@ C4Container
 
 ## 4. Domain Modules
 
-Hệ thống chia thành 9 module theo domain, mỗi module có router + controller + service riêng.
+Hệ thống chia thành các module theo domain, mỗi module có router + controller + service riêng.
 
 ```mermaid
 graph TD
@@ -99,6 +99,7 @@ graph TD
         EXTENSION["Extension\n/bookings/:id/extensions\nPropose, approve, reject + notify"]
         INCIDENT["Incident Policy\n/incidents\nLog, resolve/waive"]
         FNB["F&B\n/cafes/:id/menu + /bookings/:id/fnb-orders\nMenu mgmt, pre-order, on-site order"]
+        CONTEST["Contest\n/cafes/:id/contests\nRegistration + event lifecycle"]
     end
 
     subgraph Discovery["Discovery Modules"]
@@ -113,6 +114,10 @@ graph TD
     BOOKING --> FNB
     CAFE --> FLEET
     CAFE --> FNB
+    CAFE --> CONTEST
+    CONTEST --> PAYMENT
+    CONTEST --> FLEET
+    CONTEST --> INCIDENT
     FLEET --> BOOKING
 ```
 
@@ -234,6 +239,7 @@ F&B on-site (thêm tại quán):        Tiền mặt / chuyển khoản thẳng 
 | Immutable ledger | Không edit amount component đã tạo — tạo component mới | `03-payment-engine.md` |
 | Single state machine | Mọi booking state change đều qua `BookingService.transition()` | `02-state-machine.md` |
 | Evidence-based handover | 4 ảnh + checklist tại mỗi điểm bàn giao → incident có bằng chứng số | `04-inspection-flow.md` |
+| Contest là event domain riêng | Contest không phải booking giả; entry fee/result/leaderboard cần lifecycle riêng | `03-contest.md` |
 | Express.js cho backend | Team 4 người, timeline 4 tháng — Express đủ đơn giản và an toàn triển khai | `docs/adr/002-backend-framework-express.md` |
 | Role-based routing (FE) | 1 app cho 4 actor — đơn giản hóa deployment | — |
 | F&B pre-order gộp 1 payment | Customer không muốn trả 2 lần — gộp booking + F&B vào 1 transaction | — |
@@ -268,7 +274,9 @@ F&B on-site (thêm tại quán):        Tiền mặt / chuyển khoản thẳng 
 - `docs/spec/03-payment-engine.md` — Payment component lifecycle
 - `docs/spec/04-inspection-flow.md` — Check-in/out protocol
 - `docs/spec/05-api-contracts.md` — REST API endpoints
+- `docs/architecture/03-contest.md` — Contest architecture
 - `docs/diagrams/sequence/sequence-flow-booking-lifecycle.md` — End-to-end sequence diagram
+- `docs/diagrams/sequence/sequence-flow-contest-lifecycle.md` — Contest lifecycle sequence diagram
 - `docs/adr/002-backend-framework-express.md` — Framework decision record
 
 ---
