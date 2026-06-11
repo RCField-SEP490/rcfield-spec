@@ -82,13 +82,13 @@ flowchart TD
         PH5A --> PH5B{Result verified?}
         PH5B -->|No| PH5_EDIT[Edit with audit note]
         PH5_EDIT --> PH5B
-        PH5B -->|Yes| PH5C[Publish leaderboard / podium]
+        PH5B -->|Yes| PH5C[Publish leaderboard snapshot / podium]
     end
 
     PH5C --> DONE
 
     subgraph PH6 ["Phase 6 — Complete / Cancel"]
-        DONE[contest RUNNING -> COMPLETED] --> PH6A[Award voucher/package/trophy]
+        DONE[contest RUNNING -> COMPLETED] --> PH6A[Issue contest_reward_claims]
         PH6A --> PH6B[Public result page]
     end
 
@@ -119,8 +119,8 @@ flowchart TD
 | Register | `contest_registrations`, later `payment_components(CONTEST_ENTRY)` |
 | Prepare | `contest_registrations`, proposed heat/schedule tables |
 | Event day | `contest_registrations.status`, `checked_in_cafe_id`, rental pool, optional inspection/tech-check |
-| Result | proposed `contest_results`, `contest_leaderboard_snapshots` |
-| Complete | `contests.status`, prize/voucher/package reward records |
+| Result | proposed `contest_results`, `contest_leaderboard_snapshots`, `contest_result_audits` |
+| Complete | `contests.status`, `contest_rewards`, `contest_reward_claims` |
 
 ---
 

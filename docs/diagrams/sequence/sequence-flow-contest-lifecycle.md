@@ -302,9 +302,10 @@ sequenceDiagram
     RD->>API: POST /contests/:id/complete
     API->>DB: Validate all required results verified
     API->>DB: Compute final leaderboard / podium
-    API->>DB: Assign prize records or voucher/package rewards
+    API->>DB: Publish final leaderboard snapshot
+    API->>DB: Create contest_reward_claims from contest_rewards
     API->>DB: Contest RUNNING -> COMPLETED
-    API->>N: Notify participants final result
+    API->>N: Notify participants final result and rewards
     API-->>Board: Publish final leaderboard/podium
 ```
 

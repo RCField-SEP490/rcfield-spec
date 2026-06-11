@@ -938,7 +938,255 @@ WHERE bv.vehicle_id = :vehicle_id
 
 ---
 
-## 7. Phase 2 Backlog — Not Part Of Phase 1 Schema
+## 7. Contest Competition Core — Phase 1B/2 Extension
+
+Các bảng dưới đây không bắt buộc cho Registration MVP, nhưng là thiết kế chuẩn để
+contest trở thành một giải đấu có bảng đấu, kết quả, leaderboard và phần thưởng.
+Với đồ án, nên chọn subset `contest_classes`, `contest_rounds`, `contest_heats`,
+`contest_results`, `contest_leaderboard_snapshots`, `contest_rewards`,
+`contest_reward_claims`.
+
+### 7.1 Competition Structure
+
+#### `contest_classes`
+
+Hạng mục thi trong contest, ví dụ `BEGINNER`, `RENTAL_SPEC`, `BYOC_OPEN`.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `contest_id` | `uuid` | NOT NULL, FK -> contests(id) ON DELETE CASCADE | |
+| `name` | `varchar(120)` | NOT NULL | Tên hiển thị |
+| `code` | `varchar(50)` | NOT NULL | Unique trong contest |
+| `track_type_id` | `uuid` | NULL, FK -> track_types(id) | NULL = dùng track chính của contest |
+| `vehicle_policy` | `varchar(50)` | NOT NULL | `RENTAL_ONLY`, `BYOC_ONLY`, `MIXED_*` |
+| `vehicle_rule` | `jsonb` | NOT NULL, DEFAULT `{}` | Rule riêng hạng mục |
+| `scoring_format` | `varchar(50)` | NOT NULL | `TIME_ATTACK`, `RACE_FINAL`, `POINTS_ROUNDS`, `DRIFT_JUDGED`, `CRAWLER_TRIAL` |
+| `scoring_config` | `jsonb` | NOT NULL, DEFAULT `{}` | Tie-breaker, points table, penalty config |
+| `capacity` | `integer` | NULL | NULL = dùng capacity contest |
+| `sort_order` | `integer` | NOT NULL, DEFAULT `0` | |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+```sql
+CREATE UNIQUE INDEX idx_contest_classes_code ON contest_classes(contest_id, code);
+CREATE INDEX idx_contest_classes_contest_id ON contest_classes(contest_id);
+```
+
+#### `contest_rounds`
+
+Vòng thi trong một class: practice, qualifying, semi-final, final.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `contest_id` | `uuid` | NOT NULL, FK -> contests(id) ON DELETE CASCADE | |
+| `contest_class_id` | `uuid` | NOT NULL, FK -> contest_classes(id) ON DELETE CASCADE | |
+| `round_type` | `varchar(50)` | NOT NULL | `PRACTICE`, `QUALIFYING`, `SEMI_FINAL`, `FINAL` |
+| `round_no` | `integer` | NOT NULL | |
+| `name` | `varchar(120)` | NULL | |
+| `status` | `varchar(30)` | NOT NULL, DEFAULT `DRAFT` | `DRAFT`, `READY`, `RUNNING`, `COMPLETED`, `CANCELLED` |
+| `scheduled_at` | `timestamptz` | NULL | |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+```sql
+CREATE UNIQUE INDEX idx_contest_rounds_unique ON contest_rounds(contest_class_id, round_type, round_no);
+CREATE INDEX idx_contest_rounds_contest_id ON contest_rounds(contest_id);
+```
+
+#### `contest_heats`
+
+Một lượt chạy/trận trong round. Với bracket, mỗi heat có thể xem như một match.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `contest_id` | `uuid` | NOT NULL, FK -> contests(id) ON DELETE CASCADE | |
+| `contest_round_id` | `uuid` | NOT NULL, FK -> contest_rounds(id) ON DELETE CASCADE | |
+| `heat_no` | `integer` | NOT NULL | |
+| `name` | `varchar(120)` | NULL | VD: Heat A, Final |
+| `status` | `varchar(30)` | NOT NULL, DEFAULT `DRAFT` | `DRAFT`, `READY`, `RUNNING`, `COMPLETED`, `CANCELLED` |
+| `scheduled_at` | `timestamptz` | NULL | |
+| `started_at`, `ended_at` | `timestamptz` | NULL | |
+| `metadata` | `jsonb` | NOT NULL, DEFAULT `{}` | lane/layout/bracket node |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+```sql
+CREATE UNIQUE INDEX idx_contest_heats_unique ON contest_heats(contest_round_id, heat_no);
+CREATE INDEX idx_contest_heats_contest_id ON contest_heats(contest_id);
+```
+
+#### `contest_heat_entries`
+
+Danh sách người chạy trong heat, snapshot từ registration.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `heat_id` | `uuid` | NOT NULL, FK -> contest_heats(id) ON DELETE CASCADE | |
+| `registration_id` | `uuid` | NOT NULL, FK -> contest_registrations(id) | |
+| `contest_class_id` | `uuid` | NULL, FK -> contest_classes(id) | |
+| `grid_position` | `integer` | NULL | Vị trí xuất phát |
+| `lane` | `varchar(20)` | NULL | |
+| `car_number` | `varchar(20)` | NULL | |
+| `seed` | `integer` | NULL | |
+| `status` | `varchar(30)` | NOT NULL, DEFAULT `READY` | `READY`, `STARTED`, `FINISHED`, `DNS`, `DNF`, `DQ` |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+```sql
+CREATE UNIQUE INDEX idx_contest_heat_entries_unique ON contest_heat_entries(heat_id, registration_id);
+CREATE INDEX idx_contest_heat_entries_registration ON contest_heat_entries(registration_id);
+```
+
+### 7.2 Results, Leaderboard, Audit
+
+#### `contest_results`
+
+Kết quả của một heat entry. Tất cả leaderboard public phải tính từ result đã verify.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `contest_id` | `uuid` | NOT NULL, FK -> contests(id) ON DELETE CASCADE | |
+| `heat_id` | `uuid` | NOT NULL, FK -> contest_heats(id) ON DELETE CASCADE | |
+| `heat_entry_id` | `uuid` | NOT NULL, FK -> contest_heat_entries(id) ON DELETE CASCADE | |
+| `registration_id` | `uuid` | NOT NULL, FK -> contest_registrations(id) | |
+| `lap_count` | `integer` | NULL | Race format |
+| `elapsed_ms` | `integer` | NULL | Tổng thời gian |
+| `best_lap_ms` | `integer` | NULL | Time attack |
+| `points` | `numeric(10,2)` | NULL | Points round |
+| `penalty_points` | `numeric(10,2)` | NULL | Crawler/drift/race penalty |
+| `judge_score` | `numeric(10,2)` | NULL | Drift judged |
+| `rank` | `integer` | NULL | Rank trong heat/round sau scoring |
+| `status` | `varchar(30)` | NOT NULL, DEFAULT `DRAFT` | `DRAFT`, `VERIFIED`, `VOID`, `DISQUALIFIED` |
+| `verified_by` | `uuid` | NULL, FK -> users(id) | |
+| `verified_at` | `timestamptz` | NULL | |
+| `note` | `text` | NULL | |
+| `raw_payload` | `jsonb` | NOT NULL, DEFAULT `{}` | Manual timing/import payload |
+| `created_by` | `uuid` | NOT NULL, FK -> users(id) | Staff/Provider nhập |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+```sql
+CREATE UNIQUE INDEX idx_contest_results_heat_entry ON contest_results(heat_entry_id);
+CREATE INDEX idx_contest_results_contest_status ON contest_results(contest_id, status);
+```
+
+#### `contest_laps`
+
+Optional cho lap-by-lap timing hoặc import từ transponder ở phase automation.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `result_id` | `uuid` | NOT NULL, FK -> contest_results(id) ON DELETE CASCADE | |
+| `lap_no` | `integer` | NOT NULL | |
+| `lap_time_ms` | `integer` | NOT NULL | |
+| `recorded_at` | `timestamptz` | NULL | |
+| `source` | `varchar(30)` | NOT NULL, DEFAULT `MANUAL` | `MANUAL`, `IMPORT`, `TRANSPONDER` |
+| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
+
+```sql
+CREATE UNIQUE INDEX idx_contest_laps_unique ON contest_laps(result_id, lap_no);
+```
+
+#### `contest_leaderboard_snapshots`
+
+Snapshot bảng xếp hạng đã publish để public page ổn định và trace được.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `contest_id` | `uuid` | NOT NULL, FK -> contests(id) ON DELETE CASCADE | |
+| `contest_class_id` | `uuid` | NULL, FK -> contest_classes(id) | NULL = leaderboard toàn contest |
+| `scope` | `varchar(50)` | NOT NULL | `CONTEST_FINAL`, `CONTEST_CLASS`, `ROUND`, `HEAT`, `BRANCH_MONTHLY`, `SERIES` |
+| `source_round_id` | `uuid` | NULL, FK -> contest_rounds(id) | |
+| `source_heat_id` | `uuid` | NULL, FK -> contest_heats(id) | |
+| `payload` | `jsonb` | NOT NULL | Ordered standings + tie-breaker details |
+| `is_public` | `boolean` | NOT NULL, DEFAULT `false` | |
+| `published_by` | `uuid` | NULL, FK -> users(id) | |
+| `published_at` | `timestamptz` | NULL | |
+| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
+
+```sql
+CREATE INDEX idx_contest_leaderboard_scope ON contest_leaderboard_snapshots(contest_id, scope, published_at DESC);
+```
+
+#### `contest_result_audits`
+
+Audit mọi chỉnh sửa kết quả đã nhập hoặc đã verify.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `result_id` | `uuid` | NOT NULL, FK -> contest_results(id) ON DELETE CASCADE | |
+| `changed_by` | `uuid` | NOT NULL, FK -> users(id) | |
+| `reason` | `text` | NOT NULL | |
+| `before_json` | `jsonb` | NOT NULL | |
+| `after_json` | `jsonb` | NOT NULL | |
+| `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | |
+
+### 7.3 Rewards
+
+#### `contest_rewards`
+
+Cấu hình phần thưởng đã publish trước hoặc trong contest. Phase 1 nên chỉ dùng
+non-cash reward.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `contest_id` | `uuid` | NOT NULL, FK -> contests(id) ON DELETE CASCADE | |
+| `contest_class_id` | `uuid` | NULL, FK -> contest_classes(id) | NULL = toàn contest |
+| `reward_scope` | `varchar(50)` | NOT NULL | `FINAL_RANK`, `BEST_LAP`, `PARTICIPATION`, `CUSTOM` |
+| `rank` | `integer` | NULL | Required khi `FINAL_RANK` |
+| `title` | `varchar(120)` | NOT NULL | Champion, Runner-up |
+| `reward_type` | `varchar(50)` | NOT NULL | `VOUCHER`, `PACKAGE_SLOT`, `FNB_COUPON`, `TROPHY_MANUAL`, `POINTS`, `CUSTOM` |
+| `reward_payload` | `jsonb` | NOT NULL, DEFAULT `{}` | VD: slot_count, voucher code, points |
+| `is_published` | `boolean` | NOT NULL, DEFAULT `false` | |
+| `created_by` | `uuid` | NOT NULL, FK -> users(id) | |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+```sql
+CREATE INDEX idx_contest_rewards_contest ON contest_rewards(contest_id, contest_class_id);
+```
+
+#### `contest_reward_claims`
+
+Phần thưởng đã assign cho participant sau khi contest hoàn tất.
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `contest_reward_id` | `uuid` | NOT NULL, FK -> contest_rewards(id) | |
+| `contest_id` | `uuid` | NOT NULL, FK -> contests(id) ON DELETE CASCADE | |
+| `registration_id` | `uuid` | NOT NULL, FK -> contest_registrations(id) | |
+| `user_id` | `uuid` | NOT NULL, FK -> users(id) | |
+| `source_result_id` | `uuid` | NULL, FK -> contest_results(id) | |
+| `status` | `varchar(30)` | NOT NULL, DEFAULT `PENDING` | `PENDING`, `ISSUED`, `CLAIMED`, `EXPIRED`, `CANCELLED` |
+| `issued_by` | `uuid` | NULL, FK -> users(id) | |
+| `issued_at`, `claimed_at`, `expires_at` | `timestamptz` | NULL | |
+| `metadata` | `jsonb` | NOT NULL, DEFAULT `{}` | Generated voucher/package references |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+```sql
+CREATE UNIQUE INDEX idx_contest_reward_claims_unique ON contest_reward_claims(contest_reward_id, registration_id);
+CREATE INDEX idx_contest_reward_claims_user ON contest_reward_claims(user_id, status);
+```
+
+### 7.4 Protests and Large Tournament Backlog
+
+Các bảng này dành cho giải lớn, chưa cần làm trong đồ án nếu thời gian hạn chế:
+
+| Nhóm | Bảng | Mục tiêu |
+|------|------|----------|
+| Protest | `contest_protests` | Participant khiếu nại kết quả/penalty trong thời hạn quy định |
+| Officials | `contest_officials` | Race director, referee, timekeeper, tech inspector |
+| Bracket | `contest_brackets`, `contest_bracket_matches` | Knockout/head-to-head bracket |
+| Series | `contest_series`, `contest_series_events`, `contest_season_points` | Nhiều contest thành một mùa giải |
+| Team race | `contest_teams`, `contest_team_members` | Endurance/team event |
+
+---
+
+## 8. General Phase 2 Backlog — Not Part Of Phase 1 Schema
 
 Các bảng dưới đây chỉ là backlog thiết kế cho Phase 2. Không tạo migration, entity hoặc API bắt buộc cho các bảng này trong Phase 1.
 

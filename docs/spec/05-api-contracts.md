@@ -186,6 +186,17 @@ pre_existing_flag: boolean
 | POST | `/contest-registrations/:id/check-in` | PROVIDER/STAFF | Check-in tại một chi nhánh tham gia contest |
 | POST | `/contest-registrations/:id/cancel` | CUSTOMER/PROVIDER | Hủy registration |
 | POST | `/contests/:id/cancel` | PROVIDER | Hủy contest |
+| POST | `/contests/:id/classes` | PROVIDER | Phase 1B/2: tạo hạng mục thi |
+| POST | `/contests/:id/rounds` | PROVIDER | Phase 1B/2: tạo round thủ công |
+| POST | `/contest-rounds/:id/heats` | PROVIDER/STAFF | Phase 1B/2: tạo heat/lượt chạy |
+| POST | `/contest-heats/:id/results` | PROVIDER/STAFF | Phase 1B/2: nhập result thủ công |
+| POST | `/contest-results/:id/verify` | PROVIDER/STAFF | Phase 1B/2: verify result |
+| GET | `/contests/:id/leaderboard` | Public | Phase 1B/2: xem leaderboard public |
+| POST | `/contests/:id/leaderboard/publish` | PROVIDER/STAFF | Phase 1B/2: publish leaderboard snapshot |
+| POST | `/contests/:id/rewards` | PROVIDER | Phase 1B/2: cấu hình reward non-cash |
+| GET | `/contests/:id/rewards` | Public/Auth | Phase 1B/2: xem rewards đã publish |
+| POST | `/contests/:id/rewards/issue` | PROVIDER | Phase 1B/2: tạo reward claims từ final leaderboard |
+| GET | `/me/contest-reward-claims` | CUSTOMER/PROVIDER | Phase 1B/2: xem phần thưởng được assign |
 
 **POST /contests body:**
 ```json
@@ -219,6 +230,8 @@ Rules:
 - Customer đăng ký contest chung; không chọn chi nhánh ở MVP.
 - Provider registration phase: role `PROVIDER` có thể đăng ký contest của Provider khác, nhưng không được tự đăng ký contest do chính mình tạo.
 - Contest có phí không tạo booking giả; `CONTEST_ENTRY` payment subject là phase payment sau.
+- Leaderboard public phải được publish từ result đã verify và lưu snapshot.
+- Reward trong phase đồ án chỉ là non-cash: `VOUCHER`, `PACKAGE_SLOT`, `FNB_COUPON`, `TROPHY_MANUAL`, `POINTS`, `CUSTOM`.
 
 ---
 

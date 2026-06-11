@@ -221,7 +221,8 @@ tham gia contest của Provider khác như racer.
 
 ### Phase 1B — Operational Contest Core
 
-Mục tiêu: contest chạy thật tại chi nhánh mà không phá booking/fleet/payment.
+Mục tiêu: contest chạy thật tại chi nhánh mà không phá booking/fleet/payment, và
+đủ sâu cho đồ án có result, leaderboard và reward đơn giản.
 
 Nên bổ sung:
 
@@ -234,6 +235,11 @@ Nên bổ sung:
 - Rental vehicle pool cho contest.
 - BYOC tech check checklist.
 - Manual result entry đơn giản: fastest lap hoặc final rank.
+- `contest_classes` tối thiểu một class mặc định nếu Provider không tách hạng mục.
+- `contest_rounds` + `contest_heats` tạo thủ công để staff nhập kết quả.
+- `contest_results` verified trước khi publish.
+- `contest_leaderboard_snapshots` cho public board.
+- `contest_rewards` + `contest_reward_claims` cho phần thưởng non-cash.
 
 ### Phase 2 — Race Management Core
 
@@ -247,7 +253,9 @@ Nên bổ sung:
 - `contest_heats`: heat/mains trong từng round.
 - `contest_heat_entries`: người đua trong heat, grid position.
 - `contest_results`: lap count, elapsed time, best lap, rank, penalty, DQ.
-- `contest_leaderboards`: bảng xếp hạng per class/round/final.
+- `contest_leaderboard_snapshots`: bảng xếp hạng per class/round/final đã publish.
+- `contest_rewards`: phần thưởng theo rank/best-lap/participation.
+- `contest_reward_claims`: phần thưởng đã assign/claimed.
 - Audit chỉnh kết quả.
 
 Format nên hỗ trợ:
@@ -258,6 +266,19 @@ Format nên hỗ trợ:
 - Bracket head-to-head.
 - Drift judged score.
 - Crawler/obstacle penalty.
+
+### Phase 2B — Large Tournament Controls
+
+Mục tiêu: xử lý giải lớn có nhiều tranh chấp, nhiều official, nhiều bảng đấu.
+
+Nên bổ sung:
+
+- `contest_result_audits`: mọi sửa kết quả phải có before/after/reason.
+- `contest_protests`: participant khiếu nại kết quả trong deadline.
+- `contest_officials`: Race Director, Referee, Timekeeper, Tech Inspector.
+- `contest_brackets` / `contest_bracket_matches`: knockout/head-to-head.
+- `contest_laps`: lap-by-lap timing hoặc import.
+- `contest_teams`: endurance/team race.
 
 ### Phase 3 — Community & Multi-Branch Expansion
 
@@ -746,6 +767,20 @@ THEN: Nó phải được tính từ result đã verify; không nhập rank tay 
 IF: Có thể có hòa điểm/lap  
 THEN: `scoring_config.tie_breakers` phải được publish trước khi contest RUNNING.
 
+**BR-CT-103 — Leaderboard snapshot là bản public ổn định**  
+IF: Provider publish leaderboard  
+THEN: System lưu `contest_leaderboard_snapshots.payload` chứa ordered standings, scoring format,
+tie-breaker đã áp dụng và timestamp publish.  
+NOTE: Không nên render public leaderboard trực tiếp từ query động nếu result còn đang được sửa.
+
+**BR-CT-104 — Không publish result chưa verify**  
+IF: `contest_results.status != VERIFIED`  
+THEN: Result đó không được tính vào leaderboard public.
+
+**BR-CT-105 — Scope leaderboard bắt buộc rõ ràng**  
+IF: Leaderboard được publish  
+THEN: Scope phải là một trong `CONTEST_FINAL`, `CONTEST_CLASS`, `ROUND`, `HEAT`, `BRANCH_MONTHLY`, `SERIES`.
+
 ---
 
 ## 14. Prize config
@@ -765,13 +800,78 @@ Ví dụ Phase 1/2:
 }
 ```
 
-**BR-CT-110 — Prize không được vượt quá rule đã publish**  
+Reward type nên hỗ trợ:
+
+| Type | Ý nghĩa | Gợi ý phase |
+|---|---|---|
+| `VOUCHER` | Mã giảm giá hoặc coupon | Phase 1B |
+| `PACKAGE_SLOT` | Tặng slot/gói chơi | Phase 1B |
+| `FNB_COUPON` | Coupon đồ uống/món ăn | Phase 1B |
+| `TROPHY_MANUAL` | Cúp/huy chương trao ngoài hệ thống | Phase 1B |
+| `POINTS` | Điểm mùa giải/community score | Phase 3 |
+| `CUSTOM` | Mô tả thủ công | Phase 1B |
+
+**BR-CT-110 — Reward không được thấp hơn rule đã publish**  
 IF: Contest đã OPEN  
-THEN: Provider không được giảm prize đã công bố, trừ khi cancel contest hoặc có admin override audit.
+THEN: Provider không được giảm reward đã công bố, trừ khi cancel contest hoặc có admin override audit.
 
 **BR-CT-111 — Award cần gắn với final standing**  
 IF: Contest COMPLETED  
 THEN: Award được tính từ final leaderboard đã verify.
+
+**BR-CT-112 — Reward claim chỉ tạo từ nguồn đã verify**  
+IF: System tạo `contest_reward_claims`  
+THEN: Claim phải tham chiếu reward config và registration/user thắng giải; nếu reward dựa trên result thì result phải `VERIFIED`.
+
+**BR-CT-113 — Cash prize không nằm trong platform phase đầu**  
+IF: Provider muốn trao tiền mặt  
+THEN: Hệ thống chỉ ghi chú `CUSTOM`/manual outside platform, không xử lý ví, payout, thuế hoặc fraud trong Phase 1/2 đồ án.
+
+---
+
+## 14A. Competition structure cho đồ án và giải lớn
+
+Đồ án nên làm một Competition Core đủ sâu nhưng kiểm soát scope:
+
+| Capability | Nên làm trong đồ án? | Ghi chú |
+|---|---|---|
+| Contest multi-branch registration | Có | Đã là Phase 1A |
+| Check-in theo chi nhánh tham gia | Có | Dựa trên `checked_in_cafe_id` |
+| One default class | Có | Tự tạo `DEFAULT` nếu Provider không tách class |
+| Manual rounds/heats | Có | Provider tạo thủ công, không auto seed phức tạp |
+| Manual result entry | Có | TIME_ATTACK hoặc RACE_FINAL |
+| Verified result | Có | Trước khi publish leaderboard |
+| Leaderboard snapshot | Có | Public board ổn định |
+| Non-cash rewards | Có | Voucher/package/F&B/manual trophy |
+| Reward claims | Có | Tạo khi complete contest |
+| Result audit | Nên có | Ít nhất khi sửa result đã verify |
+| Protest workflow | Backlog | Có thể mô tả, chưa cần implement |
+| Auto bracket generation | Backlog | Phase 2B/3 |
+| Live transponder timing | Backlog | Phase 4 |
+
+**BR-CT-120 — Default class giúp MVP không bị kẹt bởi multi-class**  
+IF: Provider không tạo class riêng  
+THEN: System có thể tạo `contest_classes(code=DEFAULT)` khi contest chuyển OPEN hoặc khi tạo heat đầu tiên.
+
+**BR-CT-121 — Heat là đơn vị nhập kết quả thủ công**  
+IF: Staff nhập result  
+THEN: Result phải gắn với `contest_heat_entries`, không nhập rank lẻ trực tiếp vào registration.
+
+**BR-CT-122 — Scoring format quyết định field bắt buộc**  
+IF: `scoring_format = TIME_ATTACK`  
+THEN: `best_lap_ms` là field bắt buộc để rank.  
+IF: `scoring_format = RACE_FINAL`  
+THEN: `lap_count` và `elapsed_ms` là field bắt buộc để rank.  
+IF: `scoring_format = DRIFT_JUDGED`  
+THEN: `judge_score` và penalty config là field bắt buộc.  
+
+**BR-CT-123 — Sửa kết quả cần audit**  
+IF: Result đã `VERIFIED` bị sửa hoặc void  
+THEN: Phải tạo `contest_result_audits` với before/after JSON và reason.
+
+**BR-CT-124 — Large tournament cần official roles**  
+IF: Contest dùng protest, bracket hoặc multi-round serious race  
+THEN: Nên assign official roles trước event để biết ai được verify result, resolve protest, hoặc publish final.
 
 ---
 
@@ -848,11 +948,17 @@ contest_laps optional
 contest_leaderboard_snapshots
   id, contest_id, contest_class_id, scope, payload, published_at
 
-contest_prizes
-  id, contest_id, contest_class_id, rank, title, reward_type, reward_payload, awarded_to_entry_id
+contest_rewards
+  id, contest_id, contest_class_id, reward_scope, rank, title, reward_type, reward_payload, is_published
+
+contest_reward_claims
+  id, contest_reward_id, contest_id, registration_id, user_id, source_result_id, status, issued_at, claimed_at
 
 contest_result_audits
   id, result_id, changed_by, reason, before_json, after_json, created_at
+
+contest_protests optional
+  id, contest_id, result_id, opened_by, reason, status, resolution_note, resolved_by
 ```
 
 ---
@@ -892,6 +998,11 @@ contest_result_audits
 | POST | `/contest-heats/:id/results` | STAFF | Nhập/import result |
 | POST | `/contest-results/:id/verify` | STAFF/PROVIDER | Verify result |
 | GET | `/contests/:id/leaderboard` | Public | Public leaderboard |
+| POST | `/contests/:id/leaderboard/publish` | PROVIDER/STAFF | Publish leaderboard snapshot |
+| POST | `/contests/:id/rewards` | PROVIDER | Cấu hình reward |
+| GET | `/contests/:id/rewards` | Public/Auth | Xem reward đã publish |
+| POST | `/contests/:id/rewards/issue` | PROVIDER | Tạo reward claims từ final leaderboard |
+| GET | `/me/contest-reward-claims` | CUSTOMER/PROVIDER | Xem phần thưởng đã được assign |
 | POST | `/contests/:id/complete` | PROVIDER/STAFF | RUNNING -> COMPLETED |
 
 ---

@@ -33,7 +33,8 @@ check-in, kết quả, leaderboard và giải thưởng.
 | Phase 1A | Registration MVP | Provider tạo contest multi-branch, public listing, customer đăng ký, staff/provider check-in | Cần `contest_cafes` |
 | Phase 1C | Provider Participant | Provider đăng ký contest của Provider khác như racer | Có |
 | Phase 1B | Operational Contest Core | Chạy contest thật mà không trùng booking/fleet/payment | Cần bổ sung nhẹ |
-| Phase 2 | Race Management Core | Class, entry, round, heat, result, leaderboard | Cần bảng mới |
+| Phase 2 | Race Management Core | Class, round, heat, result, leaderboard, reward | Cần bảng mới |
+| Phase 2B | Large Tournament Controls | Protest, officials, bracket, audit, lap import | Cần bảng mới |
 | Phase 3 | Community Expansion | Series, season points, multi-branch leaderboard, racer profile | Cần domain mới |
 | Phase 4 | Timing Automation | Import/integrate transponder, live leaderboard, auto heat generation | Cần integration |
 
@@ -178,43 +179,45 @@ Phase 2 target:
 ```mermaid
 erDiagram
     contests ||--o{ contest_classes : "has classes"
-    contest_classes ||--o{ contest_entries : "entries"
     contest_classes ||--o{ contest_rounds : "rounds"
     contest_rounds ||--o{ contest_heats : "heats"
     contest_heats ||--o{ contest_heat_entries : "grid"
-    contest_entries ||--o{ contest_heat_entries : "runs in"
+    contest_registrations ||--o{ contest_heat_entries : "runs in"
     contest_heat_entries ||--o{ contest_results : "result"
+    contest_results ||--o{ contest_laps : "lap detail"
     contest_classes ||--o{ contest_leaderboard_snapshots : "published board"
-    contests ||--o{ contest_prizes : "awards"
+    contests ||--o{ contest_rewards : "reward config"
+    contest_rewards ||--o{ contest_reward_claims : "issued rewards"
     contest_results ||--o{ contest_result_audits : "corrections"
+    contest_results ||--o{ contest_protests : "protests"
 
     contest_classes {
       uuid id
       uuid contest_id
       string name
-      string track_type
+      string code
+      uuid track_type_id
+      string vehicle_policy
       jsonb vehicle_rule
+      string scoring_format
       jsonb scoring_config
       integer capacity
     }
 
-    contest_entries {
+    contest_heat_entries {
       uuid id
-      uuid contest_id
-      uuid contest_class_id
-      uuid user_id
-      VehicleSource vehicle_source
-      uuid vehicle_id
-      uuid customer_vehicle_id
+      uuid heat_id
+      uuid registration_id
+      integer grid_position
       string car_number
-      string transponder_id
       string status
     }
 
     contest_results {
       uuid id
       uuid heat_id
-      uuid entry_id
+      uuid heat_entry_id
+      uuid registration_id
       integer lap_count
       integer elapsed_ms
       integer best_lap_ms
@@ -225,11 +228,31 @@ erDiagram
       string status
       uuid verified_by
     }
+
+    contest_rewards {
+      uuid id
+      uuid contest_id
+      uuid contest_class_id
+      string reward_scope
+      integer rank
+      string title
+      string reward_type
+      jsonb reward_payload
+    }
+
+    contest_reward_claims {
+      uuid id
+      uuid contest_reward_id
+      uuid registration_id
+      uuid user_id
+      string status
+    }
 ```
 
 **Migration principle:** keep Phase 1 `contest_registrations` as the simple entry
-table. Introduce `contest_entries` only when multi-class/multi-round is actually
-implemented.
+table. Use `contest_heat_entries` to map registrations into heats. Introduce a
+separate `contest_entries` table only if one registration can later join multiple
+classes in the same contest.
 
 ---
 
@@ -461,6 +484,25 @@ Scoring formats:
 
 All public results must be traceable to a result row and verifier.
 
+### 11.1 Rewards
+
+Phase 1B/2 rewards should be non-cash and traceable to a final leaderboard/result.
+
+```text
+contest_rewards
+  reward_scope = FINAL_RANK | BEST_LAP | PARTICIPATION | CUSTOM
+  reward_type = VOUCHER | PACKAGE_SLOT | FNB_COUPON | TROPHY_MANUAL | POINTS | CUSTOM
+
+contest_reward_claims
+  status = PENDING | ISSUED | CLAIMED | EXPIRED | CANCELLED
+```
+
+Rules:
+
+- Do not process cash prize/payout inside Phase 1/2 platform scope.
+- Reward claims are created only from verified final standings or verified source results.
+- Public reward config must not be reduced after contest is OPEN without audit.
+
 ---
 
 ## 12. API Surface
@@ -495,6 +537,10 @@ POST /contests/:id/generate-heats
 GET  /contests/:id/schedule
 POST /contest-heats/:id/results
 POST /contest-results/:id/verify
+POST /contests/:id/leaderboard/publish
+POST /contests/:id/rewards
+POST /contests/:id/rewards/issue
+GET  /me/contest-reward-claims
 ```
 
 ---
@@ -509,6 +555,8 @@ POST /contest-results/:id/verify
 | Schedule protection | Add schedule block before running real contests |
 | Payment | Extend ledger subject to support contest registration |
 | Result | Manual result in Phase 1B, calculated leaderboard in Phase 2 |
+| Reward | Non-cash rewards and claims in Phase 1B/2; no cash payout |
+| Result audit | Required once results can be verified/edited |
 | Multi-branch | Phase 1 via `contest_cafes`; championship/series is Phase 3 |
 | Provider participant | Phase 1C allows Provider to register contests owned by other providers |
 | Transponder/live timing | Phase 4 integration/import |

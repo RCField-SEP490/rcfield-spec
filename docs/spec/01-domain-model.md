@@ -381,6 +381,13 @@ ExtensionProposal
 - `Contest`: giải đua/sự kiện do Provider tạo ở cấp provider, có thể chọn nhiều chi nhánh tham gia.
 - `ContestCafe`: bảng nối giữa contest và các chi nhánh tham gia; chi nhánh phải thuộc cùng Provider và đang ACTIVE.
 - `ContestRegistration`: user đăng ký contest chung bằng rental vehicle hoặc BYOC vehicle; MVP cho Customer, phase sau cho Provider đăng ký contest của Provider khác.
+- `ContestClass`: hạng mục thi trong contest, ví dụ Beginner, Rental Spec, BYOC Open.
+- `ContestRound`: vòng thi của một class, ví dụ Practice, Qualifying, Final.
+- `ContestHeat`: lượt chạy hoặc trận trong một round.
+- `ContestResult`: kết quả đã nhập cho một người trong heat.
+- `ContestLeaderboardSnapshot`: bảng xếp hạng đã publish, tính từ result đã verify.
+- `ContestReward`: cấu hình phần thưởng.
+- `ContestRewardClaim`: phần thưởng đã assign cho người thắng hoặc người đạt điều kiện.
 
 ```
 Contest
@@ -425,6 +432,91 @@ ContestRegistration
 ├── cancelled_by? / cancelled_at? / cancellation_reason?
 ├── metadata: JSON
 ├── created_at / updated_at
+
+ContestClass
+├── id: UUID
+├── contest_id: UUID -> Contest
+├── name / code
+├── track_type_id?: UUID -> TrackType
+├── vehicle_policy
+├── vehicle_rule: JSON
+├── scoring_format
+├── scoring_config: JSON
+├── capacity?
+├── sort_order
+├── created_at / updated_at
+
+ContestRound
+├── id: UUID
+├── contest_id: UUID -> Contest
+├── contest_class_id: UUID -> ContestClass
+├── round_type
+├── round_no
+├── name?
+├── status
+├── scheduled_at?
+├── created_at / updated_at
+
+ContestHeat
+├── id: UUID
+├── contest_id: UUID -> Contest
+├── contest_round_id: UUID -> ContestRound
+├── heat_no
+├── name?
+├── status
+├── scheduled_at?
+├── started_at? / ended_at?
+├── metadata: JSON
+├── created_at / updated_at
+
+ContestResult
+├── id: UUID
+├── contest_id: UUID -> Contest
+├── heat_id: UUID -> ContestHeat
+├── registration_id: UUID -> ContestRegistration
+├── lap_count? / elapsed_ms? / best_lap_ms?
+├── points? / penalty_points? / judge_score?
+├── rank?
+├── status
+├── verified_by? / verified_at?
+├── raw_payload: JSON
+├── created_by: UUID -> User
+├── created_at / updated_at
+
+ContestLeaderboardSnapshot
+├── id: UUID
+├── contest_id: UUID -> Contest
+├── contest_class_id?: UUID -> ContestClass
+├── scope
+├── payload: JSON
+├── is_public
+├── published_by? / published_at?
+├── created_at
+
+ContestReward
+├── id: UUID
+├── contest_id: UUID -> Contest
+├── contest_class_id?: UUID -> ContestClass
+├── reward_scope
+├── rank?
+├── title
+├── reward_type
+├── reward_payload: JSON
+├── is_published
+├── created_by: UUID -> User
+├── created_at / updated_at
+
+ContestRewardClaim
+├── id: UUID
+├── contest_reward_id: UUID -> ContestReward
+├── contest_id: UUID -> Contest
+├── registration_id: UUID -> ContestRegistration
+├── user_id: UUID -> User
+├── source_result_id?: UUID -> ContestResult
+├── status
+├── issued_by? / issued_at? / claimed_at? / expires_at?
+├── metadata: JSON
+├── created_at / updated_at
 ```
 
 Rules:
@@ -434,6 +526,8 @@ Rules:
 - Registration MVP ở cấp contest chung, không bắt customer chọn chi nhánh.
 - `checked_in_cafe_id` phải là một cafe trong `contest_cafes`.
 - Provider registration phase chỉ cho Provider tham gia contest của Provider khác, không tự đăng ký contest do mình tạo.
+- Leaderboard public phải được tính từ `ContestResult` đã verify và lưu thành snapshot.
+- Reward claim chỉ được tạo sau khi contest có final leaderboard hoặc result nguồn đã verify.
 
 ### Incident Policy Resolution & Disputes
 
