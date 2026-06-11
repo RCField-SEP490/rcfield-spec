@@ -1,6 +1,6 @@
 # 06 — Database Specification
 
-**Last updated**: 2026-05-25
+**Last updated**: 2026-06-11
 
 > Đọc `01-domain-model.md` để hiểu entity relationships trước khi đọc file này.  
 > File này là nguồn sự thật cho schema Phase 1 Operational Core.
@@ -34,7 +34,6 @@ erDiagram
     cafes ||--o{ menu_items : "menu"
     cafes ||--o{ packages : "offers"
     cafes ||--o{ subscriptions : "supports"
-    cafes ||--o{ contests : "organizes"
     cafes ||--o{ bookings : "receives"
     cafes ||--o{ sessions : "runs"
 
@@ -66,6 +65,9 @@ erDiagram
     packages ||--o{ customer_packages : "purchased"
     customer_packages ||--o{ package_usages : "usage history"
     subscriptions ||--o{ bookings : "generates"
+    users ||--o{ contests : "provider creates"
+    contests ||--o{ contest_cafes : "participating branches"
+    cafes ||--o{ contest_cafes : "hosts event"
     contests ||--o{ contest_registrations : "registrations"
 
     cafes ||--o{ promotions : "promotions"
@@ -89,9 +91,9 @@ erDiagram
 
 ---
 
-## 3. Phase 1 Schema Scope — 46 Tables
+## 3. Phase 1 Schema Scope — 47 Tables
 
-Phase 1 chỉ tạo schema/migration cho **46 bảng vận hành cốt lõi** dưới đây.
+Phase 1 chỉ tạo schema/migration cho **47 bảng vận hành cốt lõi** dưới đây.
 
 > Không cộng thêm bảng Phase 2 vào scope này. Chỉ các bảng multi-party dispute workflow nâng cao
 > (`dispute_evidences`, `dispute_parties`), AI và analytics nâng cao **không được tạo trong Phase 1**.
@@ -127,23 +129,24 @@ Phase 1 chỉ tạo schema/migration cho **46 bảng vận hành cốt lõi** d�
 | 27 | `customer_packages` | Gói khách đã mua |
 | 28 | `package_usages` | Audit sử dụng gói |
 | 29 | `subscriptions` | Lịch chơi định kỳ |
-| 30 | `contests` | Giải đua/sự kiện |
-| 31 | `contest_registrations` | Đăng ký giải đua |
-| 32 | `promotions` | Mã khuyến mãi |
-| 33 | `promotion_usages` | Audit dùng mã |
-| 34 | `reviews` | Đánh giá |
-| 35 | `notification_logs` | Log thông báo |
-| 36 | `trust_score_logs` | Audit trust score |
-| 37 | `feature_flags` | Bật/tắt module, config Phase 2 |
-| 38 | `staff_cafe_assignments` | Staff assign vào chi nhánh |
-| 39 | `disputes` | Tranh chấp booking |
-| 40 | `cafe_closures` | Ngày đóng cửa đặc biệt |
-| 41 | `cafe_announcements` | Thông báo/banner chi nhánh |
-| 42 | `provider_profiles` | Hồ sơ đăng ký Provider, trạng thái duyệt |
-| 43 | `subscription_plans` | Định nghĩa các gói: Trial, Starter, Growth, Pro |
-| 44 | `provider_subscriptions` | Subscription đang active của từng Provider, quota AI |
-| 45 | `payment_requests` | Yêu cầu thanh toán thủ công (chuyển khoản) |
-| 46 | `notifications` | In-app notifications cho Provider |
+| 30 | `contests` | Giải đua/sự kiện do Provider tạo |
+| 31 | `contest_cafes` | Chi nhánh tham gia contest |
+| 32 | `contest_registrations` | Đăng ký giải đua |
+| 33 | `promotions` | Mã khuyến mãi |
+| 34 | `promotion_usages` | Audit dùng mã |
+| 35 | `reviews` | Đánh giá |
+| 36 | `notification_logs` | Log thông báo |
+| 37 | `trust_score_logs` | Audit trust score |
+| 38 | `feature_flags` | Bật/tắt module, config Phase 2 |
+| 39 | `staff_cafe_assignments` | Staff assign vào chi nhánh |
+| 40 | `disputes` | Tranh chấp booking |
+| 41 | `cafe_closures` | Ngày đóng cửa đặc biệt |
+| 42 | `cafe_announcements` | Thông báo/banner chi nhánh |
+| 43 | `provider_profiles` | Hồ sơ đăng ký Provider, trạng thái duyệt |
+| 44 | `subscription_plans` | Định nghĩa các gói: Trial, Starter, Growth, Pro |
+| 45 | `provider_subscriptions` | Subscription đang active của từng Provider, quota AI |
+| 46 | `payment_requests` | Yêu cầu thanh toán thủ công (chuyển khoản) |
+| 47 | `notifications` | In-app notifications cho Provider |
 
 Các nghiệp vụ bị loại khỏi schema Phase 1:
 
@@ -694,14 +697,97 @@ Rules:
 | `customer_packages` | `package_id`, `customer_id`, `remaining_slots`, `purchased_at`, `expires_at`, `status` | Gói khách đã mua |
 | `package_usages` | `customer_package_id`, `booking_id`, `used_slots`, `created_at` | Audit trừ slot |
 | `subscriptions` | `cafe_id`, `customer_id`, `play_mode`, `track_type`, `frequency_rule`, `slot_count`, `starts_at`, `ends_at`, `status` | Lịch định kỳ sinh booking |
-| `contests` | `cafe_id`, `name`, `description`, `track_type`, `vehicle_rule`, `starts_at`, `ends_at`, `capacity`, `entry_fee`, `status`, `created_by` | Giải đua/sự kiện |
-| `contest_registrations` | `contest_id`, `user_id`, `vehicle_source`, `vehicle_id`, `customer_vehicle_id`, `status` | Một user đăng ký một lần cho một contest |
+| `contests` | `provider_id`, `name`, `description`, `track_type_id`, `vehicle_rule`, `starts_at`, `ends_at`, `registration_opens_at`, `registration_closes_at`, `capacity`, `entry_fee`, `status`, `banner_image_url`, `config`, `created_by` | Giải đua/sự kiện do Provider tạo, không thuộc trực tiếp một cafe |
+| `contest_cafes` | `contest_id`, `cafe_id`, `role`, `capacity_override`, `check_in_enabled`, `display_order` | Danh sách chi nhánh tham gia contest |
+| `contest_registrations` | `contest_id`, `user_id`, `participant_role_snapshot`, `vehicle_source`, `vehicle_id`, `customer_vehicle_id`, `status`, `checked_in_cafe_id`, `checked_in_by` | Một user đăng ký một lần cho contest chung |
 
 Rules:
 
 - `Booking.booking_mode = PACKAGE` phải có `package_usages`.
 - `Booking.booking_mode = SUBSCRIPTION` phải có `subscription_id`.
+- Contest chỉ do `PROVIDER` tạo; `STAFF` không tạo contest.
+- Contest có thể gắn nhiều chi nhánh qua `contest_cafes`; mọi chi nhánh phải thuộc cùng `provider_id` và đang `ACTIVE`.
+- Customer đăng ký ở cấp contest chung, không chọn chi nhánh trong MVP. Capacity mặc định tính theo `contests.capacity`.
+- Check-in có thể ghi `checked_in_cafe_id`, nhưng cafe đó bắt buộc nằm trong `contest_cafes`.
+- Phase sau cho phép `PROVIDER` đăng ký contest của Provider khác như racer; mặc định không cho Provider tự đăng ký contest do chính mình tạo.
 - Contest registration hỗ trợ cả `RENTAL` và `BYOC`.
+
+#### `contests`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `provider_id` | `uuid` | NOT NULL, FK -> users(id) | Provider sở hữu contest |
+| `name` | `varchar(255)` | NOT NULL | |
+| `description` | `text` | NULL | |
+| `track_type_id` | `uuid` | NOT NULL, FK -> track_types(id) | Track chính của contest MVP |
+| `vehicle_rule` | `jsonb` | NOT NULL, DEFAULT `{}` | Rule rental/BYOC/spec |
+| `starts_at` | `timestamptz` | NOT NULL | Thời điểm bắt đầu event |
+| `ends_at` | `timestamptz` | NOT NULL | Thời điểm kết thúc event |
+| `registration_opens_at` | `timestamptz` | NOT NULL | Public registration mở từ thời điểm này |
+| `registration_closes_at` | `timestamptz` | NOT NULL | Sau thời điểm này không nhận đăng ký mới |
+| `capacity` | `integer` | NOT NULL | Capacity tổng của contest MVP |
+| `entry_fee` | `numeric(15,2)` | NOT NULL, DEFAULT `0` | Không tạo booking giả để thu phí |
+| `status` | `ContestStatus` | NOT NULL, DEFAULT `DRAFT` | |
+| `banner_image_url` | `text` | NULL | Ảnh/banner public |
+| `config` | `jsonb` | NOT NULL, DEFAULT `{}` | Format/prize/scoring hooks |
+| `created_by` | `uuid` | NOT NULL, FK -> users(id) | Bằng `provider_id` trong MVP |
+| `created_at`, `updated_at`, `deleted_at` | `timestamptz` | | |
+
+**Indexes:**
+```sql
+CREATE INDEX idx_contests_provider_status ON contests(provider_id, status);
+CREATE INDEX idx_contests_status_starts ON contests(status, starts_at);
+CREATE INDEX idx_contests_registration_window ON contests(registration_opens_at, registration_closes_at);
+```
+
+#### `contest_cafes`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `contest_id` | `uuid` | NOT NULL, FK -> contests(id) ON DELETE CASCADE | |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) | Chi nhánh tham gia |
+| `role` | `varchar(30)` | NOT NULL, DEFAULT `HOST` | `HOST`, `PARTICIPATING`, hoặc future role |
+| `capacity_override` | `integer` | NULL | Chỉ dùng khi phase sau chia capacity theo cafe |
+| `check_in_enabled` | `boolean` | NOT NULL, DEFAULT `true` | Cafe được phép check-in contest |
+| `display_order` | `integer` | NOT NULL, DEFAULT `0` | Thứ tự hiển thị public |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+**Indexes:**
+```sql
+CREATE UNIQUE INDEX idx_contest_cafes_unique ON contest_cafes(contest_id, cafe_id);
+CREATE INDEX idx_contest_cafes_cafe_id ON contest_cafes(cafe_id);
+```
+
+#### `contest_registrations`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `contest_id` | `uuid` | NOT NULL, FK -> contests(id) ON DELETE CASCADE | |
+| `user_id` | `uuid` | NOT NULL, FK -> users(id) | Customer hoặc Provider phase sau |
+| `participant_role_snapshot` | `UserRole` | NOT NULL | Snapshot role lúc đăng ký |
+| `vehicle_source` | `VehicleSource` | NOT NULL | `RENTAL` hoặc `BYOC` |
+| `vehicle_id` | `uuid` | NULL, FK -> vehicles(id) | Optional rental assignment |
+| `customer_vehicle_id` | `uuid` | NULL, FK -> customer_vehicles(id) | Optional BYOC |
+| `status` | `ContestRegistrationStatus` | NOT NULL, DEFAULT `PENDING` | |
+| `check_in_code` | `varchar(64)` | NOT NULL, UNIQUE | QR/check-in code |
+| `checked_in_cafe_id` | `uuid` | NULL, FK -> cafes(id) | Cafe check-in thực tế |
+| `checked_in_by` | `uuid` | NULL, FK -> users(id) | Provider/Staff thực hiện |
+| `checked_in_at` | `timestamptz` | NULL | |
+| `cancelled_by` | `uuid` | NULL, FK -> users(id) | |
+| `cancelled_at` | `timestamptz` | NULL | |
+| `cancellation_reason` | `text` | NULL | |
+| `metadata` | `jsonb` | NOT NULL, DEFAULT `{}` | Tech-check/manual payment note |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+**Indexes:**
+```sql
+CREATE UNIQUE INDEX idx_contest_registrations_unique ON contest_registrations(contest_id, user_id);
+CREATE INDEX idx_contest_registrations_contest_status ON contest_registrations(contest_id, status);
+CREATE INDEX idx_contest_registrations_user_id ON contest_registrations(user_id);
+```
 
 ### 5.11 Incidents & Policy Resolution
 

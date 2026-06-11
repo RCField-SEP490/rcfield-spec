@@ -1,6 +1,6 @@
 # 01 — Domain Model
 
-**Last updated**: 2026-05-25  
+**Last updated**: 2026-06-11  
 **Status**: Active
 
 > Đây là file nguồn định nghĩa entity và enum. Xem `06-database.md` để biết schema chi tiết và indexes.
@@ -19,7 +19,6 @@ erDiagram
     cafes ||--o{ menu_items : "menu"
     cafes ||--o{ packages : "offers"
     cafes ||--o{ subscriptions : "supports"
-    cafes ||--o{ contests : "organizes"
     cafes ||--o{ bookings : "receives"
     cafes ||--o{ sessions : "runs"
     vehicles ||--o{ vehicle_images : "images"
@@ -47,6 +46,9 @@ erDiagram
     customer_packages ||--o{ package_usages : "usage history"
     bookings ||--o{ package_usages : "uses package"
     subscriptions ||--o{ bookings : "generates"
+    users ||--o{ contests : "provider creates"
+    contests ||--o{ contest_cafes : "participating branches"
+    cafes ||--o{ contest_cafes : "hosts event"
     contests ||--o{ contest_registrations : "registrations"
     cafes ||--o{ promotions : "promotions"
     promotions ||--o{ promotion_usages : "usage history"
@@ -376,8 +378,62 @@ ExtensionProposal
 
 ### Contests
 
-- `Contest`: giải đua/sự kiện theo cafe.
-- `ContestRegistration`: customer đăng ký contest bằng rental vehicle hoặc BYOC vehicle.
+- `Contest`: giải đua/sự kiện do Provider tạo ở cấp provider, có thể chọn nhiều chi nhánh tham gia.
+- `ContestCafe`: bảng nối giữa contest và các chi nhánh tham gia; chi nhánh phải thuộc cùng Provider và đang ACTIVE.
+- `ContestRegistration`: user đăng ký contest chung bằng rental vehicle hoặc BYOC vehicle; MVP cho Customer, phase sau cho Provider đăng ký contest của Provider khác.
+
+```
+Contest
+├── id: UUID
+├── provider_id: UUID -> User
+├── name / description
+├── track_type_id: UUID -> TrackType
+├── vehicle_rule: JSON
+├── starts_at / ends_at
+├── registration_opens_at / registration_closes_at
+├── capacity
+├── entry_fee
+├── status: ContestStatus
+├── banner_image_url?
+├── config: JSON
+├── created_by: UUID -> User
+├── created_at / updated_at / deleted_at
+
+ContestCafe
+├── id: UUID
+├── contest_id: UUID -> Contest
+├── cafe_id: UUID -> Cafe
+├── role
+├── capacity_override?
+├── check_in_enabled
+├── display_order
+├── created_at / updated_at
+
+ContestRegistration
+├── id: UUID
+├── contest_id: UUID -> Contest
+├── user_id: UUID -> User
+├── participant_role_snapshot: UserRole
+├── vehicle_source: VehicleSource
+├── vehicle_id?: UUID -> Vehicle
+├── customer_vehicle_id?: UUID -> CustomerVehicle
+├── status: ContestRegistrationStatus
+├── check_in_code
+├── checked_in_cafe_id?: UUID -> Cafe
+├── checked_in_by?: UUID -> User
+├── checked_in_at?
+├── cancelled_by? / cancelled_at? / cancellation_reason?
+├── metadata: JSON
+├── created_at / updated_at
+```
+
+Rules:
+
+- Chỉ Provider tạo contest; Staff không tạo contest.
+- Public cafe contest listing dựa trên `contest_cafes`, không dựa trên `contests.cafe_id`.
+- Registration MVP ở cấp contest chung, không bắt customer chọn chi nhánh.
+- `checked_in_cafe_id` phải là một cafe trong `contest_cafes`.
+- Provider registration phase chỉ cho Provider tham gia contest của Provider khác, không tự đăng ký contest do mình tạo.
 
 ### Incident Policy Resolution & Disputes
 

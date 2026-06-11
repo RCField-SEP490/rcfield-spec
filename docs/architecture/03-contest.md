@@ -1,15 +1,15 @@
 # Architecture: Contest & Race Event
 
-**Last Updated:** 2026-06-08  
+**Last Updated:** 2026-06-11  
 **Spec refs:** `docs/spec/business-rules/BR-contest.md`, `docs/spec/01-domain-model.md`, `docs/spec/06-database.md`
 
 ---
 
 ## 1. Intent
 
-Contest là module tổ chức sự kiện đua RC tại từng chi nhánh. Nó phục vụ mục tiêu
+Contest là module tổ chức sự kiện đua RC do Provider tạo và chọn nhiều chi nhánh tham gia. Nó phục vụ mục tiêu
 "kết nối mọi người lại với nhau" bằng cách biến RCField từ nền tảng đặt lịch cá
-nhân thành nơi cafe có thể tạo hoạt động cộng đồng: giải đua, time attack,
+nhân thành nơi Provider/cafe có thể tạo hoạt động cộng đồng: giải đua, time attack,
 rental spec cup, BYOC race, party race và sau này là leaderboard/series.
 
 Nguyên tắc kiến trúc:
@@ -30,7 +30,8 @@ check-in, kết quả, leaderboard và giải thưởng.
 
 | Phase | Tên | Mục tiêu | Có thể dùng schema hiện tại? |
 |---|---|---|---|
-| Phase 1A | Registration MVP | Tạo contest, public listing, customer đăng ký, staff check-in | Có |
+| Phase 1A | Registration MVP | Provider tạo contest multi-branch, public listing, customer đăng ký, staff/provider check-in | Cần `contest_cafes` |
+| Phase 1C | Provider Participant | Provider đăng ký contest của Provider khác như racer | Có |
 | Phase 1B | Operational Contest Core | Chạy contest thật mà không trùng booking/fleet/payment | Cần bổ sung nhẹ |
 | Phase 2 | Race Management Core | Class, entry, round, heat, result, leaderboard | Cần bảng mới |
 | Phase 3 | Community Expansion | Series, season points, multi-branch leaderboard, racer profile | Cần domain mới |
@@ -47,7 +48,7 @@ check-in, kết quả, leaderboard và giải thưởng.
 graph TD
     subgraph Discovery["Discovery"]
         CAFE["Cafe Module\n/cafes"]
-        CONTEST_PUBLIC["Contest Public\n/cafes/:id/contests\n/contests/:id"]
+        CONTEST_PUBLIC["Contest Public\n/contests\n/cafes/:id/contests\n/contests/:id"]
     end
 
     subgraph ContestOps["Contest Module"]
@@ -81,8 +82,8 @@ graph TD
 
 | Module | Sở hữu |
 |---|---|
-| Contest Service | `ContestStatus`, config validation, open/close/run/complete/cancel |
-| Registration Service | Capacity lock, one user per contest in Phase 1A, payment status, check-in |
+| Contest Service | Provider ownership, participating cafes, `ContestStatus`, config validation, open/close/run/complete/cancel |
+| Registration Service | Capacity lock, one user per contest in Phase 1A, payment status, provider-participant guard, check-in |
 | Result Service | Manual result in Phase 1B, calculated leaderboard in Phase 2 |
 | Schedule Block | Reserve track/time so contest does not collide with normal booking |
 | Fleet/BYOC | Rental pool, assigned rental vehicle, BYOC eligibility/tech-check |
@@ -91,14 +92,15 @@ graph TD
 
 ---
 
-## 4. Current Entity Map
+## 4. Current Target Entity Map
 
-Current Phase 1 schema:
+Phase 1A target schema:
 
 ```mermaid
 erDiagram
-    cafes ||--o{ contests : "organizes"
-    users ||--o{ contests : "created_by"
+    users ||--o{ contests : "provider creates"
+    contests ||--o{ contest_cafes : "participating branches"
+    cafes ||--o{ contest_cafes : "hosts"
     contests ||--o{ contest_registrations : "registrations"
     users ||--o{ contest_registrations : "registers"
     vehicles ||--o{ contest_registrations : "rental vehicle optional"
@@ -106,37 +108,57 @@ erDiagram
 
     contests {
       uuid id
-      uuid cafe_id
+      uuid provider_id
       string name
       text description
-      string track_type
+      uuid track_type_id
       jsonb vehicle_rule
       timestamptz starts_at
       timestamptz ends_at
+      timestamptz registration_opens_at
+      timestamptz registration_closes_at
       integer capacity
       numeric entry_fee
       ContestStatus status
+      text banner_image_url
+      jsonb config
       uuid created_by
+    }
+
+    contest_cafes {
+      uuid id
+      uuid contest_id
+      uuid cafe_id
+      string role
+      integer capacity_override
+      boolean check_in_enabled
+      integer display_order
     }
 
     contest_registrations {
       uuid id
       uuid contest_id
       uuid user_id
+      UserRole participant_role_snapshot
       VehicleSource vehicle_source
       uuid vehicle_id
       uuid customer_vehicle_id
       ContestRegistrationStatus status
+      string check_in_code
+      uuid checked_in_cafe_id
+      uuid checked_in_by
+      timestamptz checked_in_at
     }
 ```
 
 This supports:
 
-- Public contest listing.
-- Create contest per cafe.
+- Public contest listing globally and by participating cafe.
+- Provider-created contest with multiple participating branches.
 - Customer registration.
 - Basic registration status.
 - Rental/BYOC selection.
+- Staff/provider check-in at a participating cafe.
 
 This does not support:
 
@@ -269,14 +291,14 @@ Recommended later statuses:
 
 ```mermaid
 flowchart TD
-    A[Provider/Staff creates contest] --> B[Validate cafe ACTIVE + staff/provider scope]
-    B --> C[Validate provider subscription active]
-    C --> D[Save Contest DRAFT]
+    A[Provider creates contest] --> B[Validate provider active + subscription active]
+    B --> C[Validate participating cafes ACTIVE + owned by provider]
+    C --> D[Save Contest DRAFT + contest_cafes]
     D --> E[Provider configures vehicle_rule, capacity, entry_fee, time range]
     E --> F{Open registration?}
     F -->|No| D
     F -->|Yes| G[Validate config completeness]
-    G --> H[Create schedule block if Phase 1B]
+    G --> H[Create schedule blocks per participating cafe if Phase 1B]
     H --> I[Contest DRAFT -> OPEN]
 ```
 
@@ -296,11 +318,15 @@ flowchart TD
     I -->|No/Timeout| J[Registration CANCELLED + release capacity]
 ```
 
+Phase 1C extends this flow by allowing role `PROVIDER` to register only when
+`contest.provider_id != currentUser.id`; the registration stores
+`participant_role_snapshot = PROVIDER`.
+
 ### 7.3 Event Day
 
 ```mermaid
 flowchart TD
-    A[Staff scans registration QR] --> B[Validate CONFIRMED]
+    A[Staff/Provider scans registration QR] --> B[Validate CONFIRMED + checked_in_cafe_id in contest_cafes]
     B --> C{Vehicle source}
     C -->|RENTAL| D[Assign rental car from pool]
     C -->|BYOC| E[Run BYOC tech check]
@@ -442,9 +468,10 @@ All public results must be traceable to a result row and verifier.
 Phase 1A:
 
 ```text
+GET  /contests
 GET  /cafes/:cafeId/contests
 GET  /contests/:id
-POST /cafes/:cafeId/contests
+POST /contests
 PATCH /contests/:id
 POST /contests/:id/open
 POST /contests/:id/register
@@ -477,12 +504,13 @@ POST /contest-results/:id/verify
 | Decision | Recommendation |
 |---|---|
 | Contest vs Booking | Contest is separate event domain; do not fake booking for entry fee |
-| Phase 1 scope | Single-branch registration/check-in MVP |
+| Phase 1 scope | Provider-owned multi-branch registration/check-in MVP |
 | First demo format | `RENTAL_SPEC_CUP` or `TIME_ATTACK` |
 | Schedule protection | Add schedule block before running real contests |
 | Payment | Extend ledger subject to support contest registration |
 | Result | Manual result in Phase 1B, calculated leaderboard in Phase 2 |
-| Multi-branch | Phase 3, not Phase 1 |
+| Multi-branch | Phase 1 via `contest_cafes`; championship/series is Phase 3 |
+| Provider participant | Phase 1C allows Provider to register contests owned by other providers |
 | Transponder/live timing | Phase 4 integration/import |
 
 ---

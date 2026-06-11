@@ -1,6 +1,6 @@
 # 05 — API Contracts
 
-**Last updated**: 2026-05-16
+**Last updated**: 2026-06-11
 > Convention: tất cả response đều wrap trong `{ data, meta?, error? }`
 > Auth header: `Authorization: Bearer <jwt_token>`
 
@@ -175,9 +175,50 @@ pre_existing_flag: boolean
 | POST | `/packages/:id/purchase` | CUSTOMER | Mua package |
 | GET | `/me/packages` | CUSTOMER | Gói đã mua |
 | POST | `/subscriptions` | CUSTOMER/STAFF | Tạo lịch định kỳ |
-| GET | `/cafes/:cafeId/contests` | Public | List contests |
-| POST | `/cafes/:cafeId/contests` | PROVIDER/STAFF | Tạo contest |
-| POST | `/contests/:id/register` | CUSTOMER | Đăng ký contest |
+| GET | `/contests` | Public | List contests public, filter theo status/upcoming/notify window |
+| GET | `/cafes/:cafeId/contests` | Public | List contests có chi nhánh này tham gia |
+| GET | `/contests/:id` | Public/Auth | Chi tiết contest + participating cafes + registration summary |
+| POST | `/contests` | PROVIDER | Tạo contest DRAFT ở cấp Provider |
+| PATCH | `/contests/:id` | PROVIDER | Sửa DRAFT/OPEN fields được phép |
+| POST | `/contests/:id/open` | PROVIDER | Mở đăng ký contest |
+| POST | `/contests/:id/register` | CUSTOMER | Đăng ký contest; phase sau cho PROVIDER đăng ký contest của Provider khác |
+| GET | `/contests/:id/registrations` | PROVIDER | Danh sách người đăng ký |
+| POST | `/contest-registrations/:id/check-in` | PROVIDER/STAFF | Check-in tại một chi nhánh tham gia contest |
+| POST | `/contest-registrations/:id/cancel` | CUSTOMER/PROVIDER | Hủy registration |
+| POST | `/contests/:id/cancel` | PROVIDER | Hủy contest |
+
+**POST /contests body:**
+```json
+{
+  "name": "RCField Rental Spec Cup",
+  "description": "Giai dua rental spec cho cong dong RCField",
+  "track_type_id": "uuid",
+  "participating_cafe_ids": ["uuid-cafe-1", "uuid-cafe-2"],
+  "starts_at": "2026-07-20T09:00:00+07:00",
+  "ends_at": "2026-07-20T12:00:00+07:00",
+  "registration_opens_at": "2026-07-01T09:00:00+07:00",
+  "registration_closes_at": "2026-07-19T18:00:00+07:00",
+  "capacity": 32,
+  "entry_fee": 0,
+  "banner_image_url": "https://cdn.rcfield.vn/contests/spec-cup.jpg",
+  "vehicle_rule": {
+    "vehicle_policy": "RENTAL_ONLY",
+    "assignment_policy": "AT_CHECK_IN"
+  },
+  "config": {
+    "format": "RENTAL_SPEC_CUP",
+    "notify_lead_days": 7
+  }
+}
+```
+
+Rules:
+
+- Chỉ `PROVIDER` tạo contest. `STAFF` có thể hỗ trợ check-in ở chi nhánh được assign nhưng không tạo contest.
+- `participating_cafe_ids` chỉ nhận cafe ACTIVE thuộc Provider hiện tại.
+- Customer đăng ký contest chung; không chọn chi nhánh ở MVP.
+- Provider registration phase: role `PROVIDER` có thể đăng ký contest của Provider khác, nhưng không được tự đăng ký contest do chính mình tạo.
+- Contest có phí không tạo booking giả; `CONTEST_ENTRY` payment subject là phase payment sau.
 
 ---
 

@@ -1,6 +1,6 @@
 # BR-Contest — Quy tắc nghiệp vụ: Contest, tournament và race event
 
-**Last updated**: 2026-06-08  
+**Last updated**: 2026-06-11  
 **Status**: Draft for business review  
 **Owner**: Product / Backend / Operations
 
@@ -8,7 +8,7 @@
 > quản lý người đua, luật xe, chia vòng, scoring, leaderboard, giải thưởng và
 > lộ trình phase. Mục tiêu không chỉ là "có contest" trong database, mà là biến
 > contest thành hoạt động cộng đồng đúng với tinh thần đề tài: kết nối người chơi
-> RC lại với nhau tại từng chi nhánh.
+> RC lại với nhau qua các sự kiện do Provider tổ chức và các chi nhánh tham gia.
 
 ---
 
@@ -31,17 +31,18 @@
 
 **Ghi chú về mâu thuẫn scope:**  
 `00-overview.md`, `05-api-contracts.md`, `06-database.md` đưa contest vào Phase 1.
-`ADR-001` lại ghi contest management single-branch và multi-branch ở Phase 2.
-Cách dung hòa hợp lý:
+`ADR-001` cũ ghi contest management single-branch và multi-branch ở Phase 2.
+Quyết định mới:
 
-- Phase 1: contest theo từng chi nhánh, đăng ký tham gia, check-in, vận hành giải đơn giản.
-- Phase 2+: race management nâng cao: multi-class, multi-round, leaderboard, transponder, multi-branch championship.
+- Phase 1: contest do Provider tạo ở cấp provider, chọn nhiều chi nhánh tham gia, customer đăng ký contest chung và staff/provider check-in tại chi nhánh tham gia.
+- Phase 1C: Provider role có thể đăng ký contest của Provider khác như racer, nhưng không tự đăng ký contest do chính mình tạo.
+- Phase 2+: race management nâng cao: multi-class, multi-round, leaderboard, transponder, championship/series.
 
 ---
 
 ## 2. Tại sao Contest phức tạp
 
-Contest không phải một booking lớn. Contest là một event vận hành của chi nhánh,
+Contest không phải một booking lớn. Contest là một event vận hành của Provider và các chi nhánh tham gia,
 đụng đồng thời vào discovery, capacity, fleet, BYOC, thanh toán, check-in, luật thi
 đấu, lịch chạy, nhân sự, bằng chứng hư hỏng và kết quả công khai.
 
@@ -51,14 +52,14 @@ multi-branch ranking, payout giải thưởng và dispute luật thi đấu. Vì
 phase rõ.
 
 **BR-CT-001 — Contest là event, không phải booking thường**  
-IF: Provider tạo cuộc thi tại một chi nhánh  
-THEN: System tạo `Contest` để quản lý event, rule, registration, schedule và result.  
+IF: Provider tạo cuộc thi cho một hoặc nhiều chi nhánh  
+THEN: System tạo `Contest` do Provider sở hữu và các dòng `contest_cafes` để quản lý chi nhánh tham gia.  
 NOTE: Không nên tạo một booking thường cho từng người đua chỉ để "giữ chỗ thi", vì
 booking/session hiện tại là mô hình khách chơi theo slot, không phải race event.
 
-**BR-CT-002 — Contest phải block capacity của chi nhánh**  
+**BR-CT-002 — Contest phải biết chi nhánh tham gia và block capacity khi chạy thật**  
 IF: Contest chạy trong khung `starts_at` -> `ends_at` trên một `track_type`  
-THEN: Hệ thống phải ngăn booking thường làm trùng tài nguyên sân/xe trong khung đó.  
+THEN: Hệ thống phải biết các chi nhánh tham gia qua `contest_cafes`; Phase 1B phải ngăn booking thường làm trùng tài nguyên sân/xe trong khung đó.  
 NOTE: Schema hiện tại chưa có bảng block lịch theo track/time. Đây là gap cần xử lý
 ở phase vận hành thật.
 
@@ -73,10 +74,9 @@ không phản ánh đầy đủ nghiệp vụ.
 
 ## 3. Gap analysis của schema/API hiện tại
 
-Hiện tại RCField đã có:
+Baseline RCField đã có:
 
-- `contests`: `cafe_id`, `name`, `description`, `track_type`, `vehicle_rule`, `starts_at`,
-  `ends_at`, `capacity`, `entry_fee`, `status`, `created_by`.
+- `contests`: cần chuyển từ `cafe_id` sang `provider_id` và dùng `contest_cafes` để gắn nhiều chi nhánh tham gia.
 - `contest_registrations`: `contest_id`, `user_id`, `vehicle_source`, `vehicle_id`,
   `customer_vehicle_id`, `status`.
 - Status: `ContestStatus { DRAFT, OPEN, CLOSED, RUNNING, COMPLETED, CANCELLED }`.
@@ -88,6 +88,8 @@ Nhưng để tổ chức cuộc thi thật còn thiếu:
 
 | Gap | Hệ quả | Phase xử lý |
 |---|---|---|
+| Contest cũ gắn trực tiếp một `cafe_id` | Không thể để Provider mở một contest cho nhiều chi nhánh tham gia | Phase 1A |
+| Thiếu `contest_cafes` | Public listing theo cafe và check-in theo chi nhánh không có nguồn dữ liệu chuẩn | Phase 1A |
 | Không có registration window (`registration_opens_at`, `registration_closes_at`) | Không biết khi nào được đăng ký/hủy | Phase 1A |
 | `contest_registrations` unique `(contest_id, user_id)` | Một user không thể đăng ký nhiều hạng mục/class trong cùng contest | Phase 2 |
 | `contests` chỉ có một `track_type` | Không tổ chức được event nhiều phân khúc: drift + circuit + offroad | Phase 2 |
@@ -101,8 +103,9 @@ Nhưng để tổ chức cuộc thi thật còn thiếu:
 | Không có prize table | Không quản lý cơ cấu giải và trao thưởng | Phase 2 |
 | Không có audit chỉnh kết quả | Dễ tranh cãi khi staff sửa điểm/penalty | Phase 2 |
 
-**Kết luận:** Hai bảng hiện tại đủ cho "contest listing + registration MVP", chưa đủ
-cho "race management system".
+**Kết luận:** Phase 1A cần tối thiểu ba bảng `contests`, `contest_cafes`,
+`contest_registrations` để đúng mô hình Provider tạo contest multi-branch. Các bảng
+race management nâng cao vẫn để Phase 2.
 
 ---
 
@@ -176,7 +179,7 @@ Mục tiêu: thống nhất Contest nằm ở scope nào, tránh BE/FE hiểu kh
 
 | Hạng mục | Việc cần làm |
 |---|---|
-| Chốt scope | Phase 1 chỉ single-branch contest; multi-branch/season để Phase 2+ |
+| Chốt scope | Phase 1 đã hỗ trợ Provider tạo contest với nhiều chi nhánh tham gia; series/championship để Phase 2+ |
 | Chốt payment | Không tạo booking giả cho contest entry; cần ledger support cho contest registration |
 | Chốt schedule block | Contest phải block track/time trước khi mở đăng ký |
 | Chốt MVP format | Rental-only social cup + BYOC simple registration |
@@ -186,12 +189,13 @@ Mục tiêu: thống nhất Contest nằm ở scope nào, tránh BE/FE hiểu kh
 
 ### Phase 1A — Contest Registration MVP
 
-Mục tiêu: tạo được contest, public listing, customer đăng ký, staff xem danh sách.
+Mục tiêu: Provider tạo được contest multi-branch, public listing, customer đăng ký contest chung, staff/provider xem danh sách và check-in.
 
 Fit với schema hiện tại:
 
-- Provider/Staff tạo contest ở chi nhánh.
-- Public xem contest theo cafe.
+- Provider tạo contest ở cấp provider và chọn các cafe ACTIVE của mình vào `contest_cafes`.
+- Staff không tạo contest.
+- Public xem contest ở `/contests` hoặc theo cafe tham gia.
 - Customer đăng ký một lần cho một contest.
 - Chọn `vehicle_source = RENTAL` hoặc `BYOC`.
 - `ContestRegistration.status`: `PENDING -> CONFIRMED -> CHECKED_IN`.
@@ -204,6 +208,16 @@ Không nên hứa:
 - Chưa có leaderboard chính thức.
 - Chưa có multi-class.
 - Chưa có transponder/live timing.
+
+### Phase 1C — Provider Participant Registration
+
+Mục tiêu: khi hệ thống có nhiều Provider cùng tổ chức contest, Provider cũng có thể
+tham gia contest của Provider khác như racer.
+
+- Cho role `PROVIDER` gọi `POST /contests/:id/register` nếu contest không thuộc `provider_id` của họ.
+- Lưu `participant_role_snapshot = PROVIDER`.
+- Không cho Provider tự đăng ký contest do chính mình tạo.
+- Staff vẫn không đăng ký bằng role staff; nếu một người muốn đua thì dùng tài khoản customer/provider riêng theo policy tài khoản.
 
 ### Phase 1B — Operational Contest Core
 
@@ -296,7 +310,7 @@ Nên bổ sung:
 
 ```mermaid
 flowchart TD
-    A([Provider/Staff muốn tổ chức giải]) --> B[Chọn chi nhánh]
+    A([Provider muốn tổ chức giải]) --> B[Chọn các chi nhánh ACTIVE tham gia]
     B --> C[Chọn track_type và thời gian]
     C --> D{Có trùng booking/closure/contest khác?}
     D -->|Có| D1[Từ chối hoặc yêu cầu đổi lịch]
@@ -313,25 +327,30 @@ flowchart TD
 ```
 
 **BR-CT-020 — Cafe phải ACTIVE**  
-IF: Cafe không `ACTIVE`  
-THEN: Không cho tạo/open contest tại cafe đó.
+IF: Một chi nhánh trong `participating_cafe_ids` không `ACTIVE` hoặc không thuộc Provider hiện tại  
+THEN: Không cho tạo/open contest.
 
 **BR-CT-021 — Provider subscription active**  
-IF: PROVIDER/STAFF tạo hoặc mở contest  
+IF: PROVIDER tạo hoặc mở contest  
 THEN: Service phải gọi `assertSubscriptionActive(providerId)`.  
 NOTE: Tạo contest là write operation tạo doanh thu/hoạt động mới, nên block khi grace/expired.
 
-**BR-CT-022 — Staff chỉ thao tác trong chi nhánh của mình**  
-IF: Staff tạo/sửa/check-in contest  
-THEN: Staff phải thuộc cafe đó theo `staff_cafe_assignments` hoặc policy tương đương.
+**BR-CT-022 — Chỉ Provider tạo contest**  
+IF: User role là `STAFF`, `CUSTOMER` hoặc `ADMIN` gọi API tạo contest  
+THEN: Từ chối với `FORBIDDEN`.  
+NOTE: Admin có thể hỗ trợ qua tooling riêng sau này, nhưng không nằm trong API vận hành Provider.
 
 **BR-CT-023 — Contest DRAFT chưa public**  
 IF: `contest.status = DRAFT`  
-THEN: Chỉ Provider/Staff/Admin xem được; public listing không hiển thị.
+THEN: Chỉ Provider sở hữu contest xem được; public listing không hiển thị.
 
 **BR-CT-024 — OPEN chỉ khi config đủ**  
-IF: Contest thiếu time range, capacity, entry_fee policy, vehicle_rule hoặc registration window  
+IF: Contest thiếu participating cafe, time range, capacity, entry_fee policy, vehicle_rule hoặc registration window  
 THEN: Không cho chuyển `DRAFT -> OPEN`.
+
+**BR-CT-025 — Staff chỉ check-in tại chi nhánh được assign**  
+IF: Staff check-in contest registration  
+THEN: Staff phải thuộc `checked_in_cafe_id` và cafe đó phải nằm trong `contest_cafes`.
 
 ### 8.2 Customer đăng ký contest
 
@@ -344,13 +363,14 @@ sequenceDiagram
     participant DB as DB
     participant Pay as Payment Gateway
 
-    C->>App: Xem contest public của chi nhánh
-    App->>API: GET /cafes/:cafeId/contests
+    C->>App: Xem contest public hoặc contest của một chi nhánh
+    App->>API: GET /contests hoặc GET /cafes/:cafeId/contests
     API-->>App: Contest OPEN
     C->>App: Chọn tham gia
     App->>API: POST /contests/:id/register
-    API->>DB: Validate contest OPEN, capacity, vehicle_rule
+    API->>DB: Validate contest OPEN, registration window, capacity, vehicle_rule
     API->>DB: Validate rental/BYOC vehicle
+    API->>DB: Validate user chưa đăng ký contest này
     API->>DB: INSERT contest_registrations(PENDING)
     alt entry_fee > 0
         API->>Pay: Create contest entry payment
@@ -364,7 +384,7 @@ sequenceDiagram
 
 **BR-CT-030 — Chỉ đăng ký khi Contest OPEN**  
 IF: Contest không ở `OPEN`  
-THEN: Customer không được đăng ký mới.
+THEN: Customer hoặc Provider participant không được đăng ký mới.
 
 **BR-CT-031 — Một user một registration trong schema hiện tại**  
 IF: Dùng bảng `contest_registrations` hiện tại  
@@ -373,7 +393,8 @@ NOTE: Muốn cho user tham gia nhiều hạng mục cần Phase 2 `contest_entri
 
 **BR-CT-032 — Capacity phải lock bằng transaction**  
 IF: Customer đăng ký contest có giới hạn capacity  
-THEN: Count confirmed/pending registrations phải chạy trong DB transaction/row lock để tránh overbook.
+THEN: Count confirmed/pending registrations phải chạy trong DB transaction/row lock để tránh overbook.  
+NOTE: MVP tính capacity ở cấp contest tổng, không chia capacity theo chi nhánh.
 
 **BR-CT-033 — Entry fee > 0 thì registration bắt đầu PENDING**  
 IF: Contest có `entry_fee > 0`  
@@ -382,6 +403,12 @@ THEN: Tạo registration `PENDING`, chỉ chuyển `CONFIRMED` khi payment thàn
 **BR-CT-034 — Entry fee = 0 có thể auto-confirm**  
 IF: Contest miễn phí và capacity còn chỗ  
 THEN: Registration có thể chuyển ngay `CONFIRMED`.
+
+**BR-CT-034A — Provider participant phase**  
+IF: Role `PROVIDER` đăng ký contest ở Phase 1C  
+THEN: Chỉ cho đăng ký contest có `provider_id` khác user đó; lưu `participant_role_snapshot = PROVIDER`.  
+IF: Provider đăng ký contest do chính mình tạo  
+THEN: Từ chối với `CONTEST_SELF_REGISTRATION_FORBIDDEN`.
 
 **BR-CT-035 — Rental vehicle trong contest không giống rental booking thường**  
 IF: Contest dùng xe rental của quán  
@@ -450,6 +477,10 @@ flowchart TD
 **BR-CT-050 — CHECKED_IN là trạng thái có mặt, chưa phải đang chạy heat**  
 IF: Registration chuyển `CONFIRMED -> CHECKED_IN`  
 THEN: Nghĩa là customer đã có mặt và đủ điều kiện tham gia event.
+
+**BR-CT-050A — Check-in gắn với chi nhánh tham gia**  
+IF: Staff/Provider check-in registration  
+THEN: `checked_in_cafe_id` phải nằm trong `contest_cafes` và `check_in_enabled = true`.
 
 **BR-CT-051 — Rental handover vẫn cần evidence nếu có rủi ro damage**  
 IF: Contest giao xe rental cho customer điều khiển  
@@ -672,7 +703,7 @@ IF: Cần thu phí contest
 THEN: Không nên tạo booking giả vì sẽ làm sai booking lifecycle, settlement, no-show và doanh thu slot.
 
 **BR-CT-092 — Provider hủy contest thì refund 100%**  
-IF: Contest bị Provider/Staff/Admin hủy trước hoặc trong event  
+IF: Contest bị Provider sở hữu hủy trước hoặc trong event  
 THEN: Hoàn 100% `CONTEST_ENTRY` cho registrations đã paid/confirmed.
 
 **BR-CT-093 — Customer hủy trước cutoff**  
@@ -746,22 +777,33 @@ THEN: Award được tính từ final leaderboard đã verify.
 
 ## 15. Data model đề xuất theo phase
 
-### Phase 1A dùng schema hiện tại
+### Phase 1A registration multi-branch MVP
 
 ```text
 contests
+contest_cafes
 contest_registrations
 ```
 
-Nên thêm field nhẹ nếu có thể:
+Schema tối thiểu:
 
 ```text
+contests.provider_id
+contests.track_type_id
 contests.registration_opens_at
 contests.registration_closes_at
+contests.banner_image_url
 contests.config jsonb
+contest_cafes.contest_id
+contest_cafes.cafe_id
+contest_cafes.check_in_enabled
+contest_registrations.participant_role_snapshot
+contest_registrations.check_in_code
+contest_registrations.checked_in_cafe_id
+contest_registrations.checked_in_by
 contest_registrations.checked_in_at
 contest_registrations.cancelled_at
-contest_registrations.payment_status
+contest_registrations.metadata jsonb
 ```
 
 ### Phase 1B operational
@@ -821,15 +863,23 @@ contest_result_audits
 
 | Method | Endpoint | Actor | Mô tả |
 |---|---|---|---|
+| GET | `/contests` | Public | List contest public across participating cafes |
 | GET | `/cafes/:cafeId/contests` | Public | List contest OPEN/CLOSED/RUNNING/COMPLETED |
 | GET | `/contests/:id` | Public/Auth | Contest detail + registration summary |
-| POST | `/cafes/:cafeId/contests` | PROVIDER/STAFF | Tạo contest DRAFT |
-| PATCH | `/contests/:id` | PROVIDER/STAFF | Sửa DRAFT/OPEN fields được phép |
-| POST | `/contests/:id/open` | PROVIDER/STAFF | DRAFT -> OPEN |
+| POST | `/contests` | PROVIDER | Tạo contest DRAFT với `participating_cafe_ids` |
+| PATCH | `/contests/:id` | PROVIDER | Sửa DRAFT/OPEN fields được phép |
+| POST | `/contests/:id/open` | PROVIDER | DRAFT -> OPEN |
 | POST | `/contests/:id/register` | CUSTOMER | Đăng ký contest |
-| GET | `/contests/:id/registrations` | PROVIDER/STAFF | Danh sách người đăng ký |
-| POST | `/contest-registrations/:id/check-in` | STAFF | CONFIRMED -> CHECKED_IN |
-| POST | `/contest-registrations/:id/cancel` | CUSTOMER/STAFF | Hủy registration |
+| GET | `/contests/:id/registrations` | PROVIDER | Danh sách người đăng ký |
+| POST | `/contest-registrations/:id/check-in` | PROVIDER/STAFF | CONFIRMED -> CHECKED_IN tại cafe tham gia |
+| POST | `/contest-registrations/:id/cancel` | CUSTOMER/PROVIDER | Hủy registration |
+| POST | `/contests/:id/cancel` | PROVIDER | Hủy contest |
+
+### Phase 1C provider participant
+
+| Method | Endpoint | Actor | Mô tả |
+|---|---|---|---|
+| POST | `/contests/:id/register` | PROVIDER | Đăng ký contest của Provider khác như racer |
 
 ### Phase 2
 
@@ -853,6 +903,8 @@ contest_result_audits
 | Customer thanh toán fail | Registration vẫn `PENDING`; timeout thì `CANCELLED`; release capacity |
 | Capacity full | Từ chối hoặc đưa vào waitlist |
 | Customer no-show | Mark `NO_SHOW` ở Phase 1B/2; entry fee theo refund policy |
+| Provider tự đăng ký contest mình tạo | Từ chối `CONTEST_SELF_REGISTRATION_FORBIDDEN` ở Phase 1C |
+| Check-in tại cafe không tham gia | Từ chối vì `checked_in_cafe_id` không nằm trong `contest_cafes` |
 | Provider hủy contest | Refund 100%, notify participants |
 | Mưa/mất điện/sự cố sân | Contest `CANCELLED` hoặc reschedule với audit |
 | Rental car hỏng trước event | Staff đổi xe trong rental pool; nếu không đủ xe thì giảm capacity/notify |
@@ -870,12 +922,20 @@ contest_result_audits
 ### Phase 1A checklist
 
 - [ ] Contest CRUD DRAFT/OPEN.
-- [ ] Public contest listing theo cafe.
+- [ ] Provider tạo contest với nhiều participating cafes.
+- [ ] Public contest listing tổng và theo cafe tham gia.
 - [ ] Register contest với transaction capacity lock.
 - [ ] Registration QR/check-in.
 - [ ] Validate vehicle_source RENTAL/BYOC.
 - [ ] Basic notification/log.
 - [ ] Manual cancel/refund policy documented.
+
+### Phase 1C checklist
+
+- [ ] Cho Provider đăng ký contest của Provider khác.
+- [ ] Chặn Provider tự đăng ký contest do mình tạo.
+- [ ] Lưu `participant_role_snapshot`.
+- [ ] Test public multi-provider contest listing.
 
 ### Phase 1B checklist
 
