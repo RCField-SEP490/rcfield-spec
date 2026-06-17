@@ -59,6 +59,8 @@ const sidebars: SidebarsConfig = {
       items: [
         'diagrams/sequence/sequence-flow-booking-lifecycle',
         'diagrams/sequence/sequence-flow-provider-onboarding-subscription',
+        'diagrams/sequence/sequence-flow-rag-chat',
+        'diagrams/sequence/sequence-flow-redis-usage',
       ],
     },
     {
