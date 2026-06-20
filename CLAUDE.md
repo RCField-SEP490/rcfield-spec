@@ -204,7 +204,7 @@ Refund rules:    Xem rcfield-spec/docs/spec/03-payment-engine.md (R1, R2, R3)
 
 ```bash
 cd rcfield-workspace/rcfield-spec/website
-npm start        # http://localhost:3000
+npm start        # http://localhost:3100
 ```
 
 ### Hook — Khi tạo tài liệu mới, BẮT BUỘC cập nhật sidebar
@@ -246,6 +246,29 @@ Nếu không chắc ID là gì, chạy `npm run build` trong `website/` — Docu
 
 ---
 
+## Codegraph — Bắt buộc dùng khi `/speckit-plan`
+
+> Codegraph là SQLite knowledge graph đã index toàn bộ symbol, entity, và file trong codebase.
+> Dùng TRƯỚC khi generate `data-model.md` và `contracts/` để plan chính xác hơn.
+
+Khi chạy `/speckit-plan`, **bắt buộc** query codegraph theo thứ tự:
+
+1. **`codegraph_explore`** — hỏi về entities/services liên quan đến feature đang plan  
+   Ví dụ: `"what booking and payment entities exist?"`, `"show me the cafe and provider models"`
+2. **`codegraph_search`** — tìm symbol cụ thể khi cần verify tên chính xác  
+   Ví dụ: tìm `BookingSnapshot`, `PaymentComponent`, `CafePricingConfig`
+3. **`codegraph_callers`** — xem ai đang dùng method/service cần modify
+
+**Dùng kết quả để:**
+- Tránh tạo entity/table trùng với cái đã có
+- Reuse service methods thay vì tạo mới
+- Giữ đúng naming convention thực tế trong code (không chỉ dựa vào spec)
+- Xác định đúng file path cần modify (không đoán)
+
+**Lưu ý:** Codegraph index codebase tại `rcfield-app/`. Nếu chưa có codebase thì bỏ qua bước này.
+
+---
+
 ## GitNexus (chạy sau khi có codebase)
 
 ```bash
@@ -263,11 +286,11 @@ graphify run                        # build graph từ docs/spec/
 ```
 
 <!-- SPECKIT START -->
-Current active feature plan: `specs/009-customer-package-booking/plan.md`
+Current active feature plan: `specs/012-dynamic-pricing/plan.md`
 For implementation context, read in order:
-1. `specs/009-customer-package-booking/plan.md` — technical context, file structure, constitution check
-2. `specs/009-customer-package-booking/research.md` — 7 decisions: payment_tx schema, IPN routing, zero-total bypass, slot deduction timing, slot refund condition, public listing route, CustomerPackageStatus lifecycle
-3. `specs/009-customer-package-booking/data-model.md` — new CustomerPackage entity, modified booking/payment_transaction entities, migration plan
-4. `specs/009-customer-package-booking/contracts/api.md` — 6 endpoints: public package listing, purchase, list my packages, usage history, modified booking creation, IPN routing change; Zod schemas
-5. `specs/009-customer-package-booking/quickstart.md` — 8-phase implementation order + 5 E2E scenarios + unit test checklist
+1. `specs/012-dynamic-pricing/plan.md` — technical context, file structure, constitution check (Phase 2 promotion)
+2. `specs/012-dynamic-pricing/research.md` — 7 decisions: table structure, lookup injection point, holidays seed, frontend API, snapshot extension, timezone, peak hours scope
+3. `specs/012-dynamic-pricing/data-model.md` — 2 new entities (CafePricingRule, HolidayDate), booking snapshot extension, migration SQL with 2026 holiday seed data
+4. `specs/012-dynamic-pricing/contracts/api.md` — 8 endpoints: public pricing/preview, provider config (rules + holidays CRUD); modified booking breakdown response; Zod schemas
+5. `specs/012-dynamic-pricing/quickstart.md` — implementation order, 11 unit test cases, 5 E2E scenarios, exact code change location in createBooking
 <!-- SPECKIT END -->

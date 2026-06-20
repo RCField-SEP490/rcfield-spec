@@ -128,6 +128,20 @@ const sidebars: SidebarsConfig = {
         'customer-package-booking/contracts/api',
       ],
     },
+    {
+      type: 'category',
+      label: '012 · Dynamic Pricing',
+      collapsed: true,
+      items: [
+        'dynamic-pricing/spec',
+        'dynamic-pricing/plan',
+        'dynamic-pricing/data-model',
+        'dynamic-pricing/research',
+        'dynamic-pricing/quickstart',
+        'dynamic-pricing/tasks',
+        'dynamic-pricing/contracts/api',
+      ],
+    },
   ],
 };
 

@@ -1,6 +1,6 @@
 # 02 — Booking & Session State Machine
 
-**Last updated**: 2026-05-16  
+**Last updated**: 2026-06-20  
 **Status**: Active
 
 > Do tách `bookings` và `sessions`, Phase 1 có 2 state machine riêng.  
@@ -12,26 +12,33 @@
 
 Booking quản lý đơn đặt lịch dự kiến, không chứa dữ liệu vận hành thực tế.
 
-```text
-PENDING
-  -> CONFIRMED   [payment confirmed]
-  -> CANCELLED   [payment timeout/customer cancels]
+```mermaid
+stateDiagram-v2
+    direction LR
 
-CONFIRMED
-  -> COMPLETED   [all sessions completed]
-  -> CANCELLED   [customer/provider cancels before session]
-  -> NO_SHOW     [slot_start + grace window, no session created]
+    [*] --> PENDING : Customer tạo booking
+
+    PENDING --> CONFIRMED : PAYMENT_CONFIRMED\n(VNPay IPN / Mock)
+    PENDING --> CANCELLED : PAYMENT_TIMEOUT\n(30 phút, cron job)
+
+    CONFIRMED --> COMPLETED : COMPLETE\n(tất cả sessions done)
+    CONFIRMED --> CANCELLED : CUSTOMER_CANCEL\nPROVIDER_CANCEL
+    CONFIRMED --> NO_SHOW : NO_SHOW\n(slot_start + 30 phút\nkhông có session)
+
+    COMPLETED --> [*]
+    CANCELLED --> [*]
+    NO_SHOW --> [*]
 ```
 
 | Status | Ý nghĩa |
 |--------|---------|
-| `PENDING` | Đã tạo, chờ thanh toán |
-| `CONFIRMED` | Đã thanh toán, chờ check-in |
-| `CANCELLED` | Bị huỷ |
-| `NO_SHOW` | Quá hạn check-in, không có session |
+| `PENDING` | Đã tạo, chờ thanh toán — vehicle lock được giữ |
+| `CONFIRMED` | Đã thanh toán, chờ check-in — payment components created |
+| `CANCELLED` | Bị huỷ — vehicle lock released, refund triggered |
+| `NO_SHOW` | Quá hạn check-in, không có session — deposit không hoàn |
 | `COMPLETED` | Tất cả sessions đã hoàn tất và settled |
 
-Rules:
+**Rules:**
 
 - Booking chỉ có thể tạo session khi `status = CONFIRMED`.
 - Khi session đầu tiên được check-in, booking vẫn `CONFIRMED`.
@@ -44,22 +51,24 @@ Rules:
 
 Session quản lý phiên chơi thực tế.
 
-```text
-CHECKED_IN
-  -> ACTIVE      [session starts / vehicles assigned]
-  -> CANCELLED   [cancel before start]
+```mermaid
+stateDiagram-v2
+    direction LR
 
-ACTIVE
-  -> EXTENDING      [staff proposes extension]
-  -> CHECKING_OUT   [staff starts checkout]
+    [*] --> CHECKED_IN : Staff tạo session\n(check-in inspection)
 
-EXTENDING
-  -> ACTIVE         [customer approves/rejects/timeout]
+    CHECKED_IN --> ACTIVE : CHECK_IN_COMPLETED\n(customer confirm\nhoặc auto sau 15 phút)
+    CHECKED_IN --> CANCELLED : CANCELLED\n(huỷ trước khi bắt đầu)
 
-CHECKING_OUT
-  -> COMPLETED      [customer confirms or auto-confirms]
+    ACTIVE --> EXTENDING : EXTENSION_INITIATED\n(Staff đề xuất gia hạn)
+    ACTIVE --> CHECKING_OUT : CHECKOUT_INITIATED\n(Staff bắt đầu checkout)
 
-CANCELLED, COMPLETED are terminal.
+    EXTENDING --> ACTIVE : EXTENSION_APPROVED\nEXTENSION_REJECTED\n(hoặc timeout 10 phút)
+
+    CHECKING_OUT --> COMPLETED : CUSTOMER_CONFIRMED\n(hoặc auto-confirm\ntheo timeout)
+
+    COMPLETED --> [*]
+    CANCELLED --> [*]
 ```
 
 | Status | Ý nghĩa |
@@ -67,11 +76,9 @@ CANCELLED, COMPLETED are terminal.
 | `CHECKED_IN` | Staff đã tạo session, đang hoàn tất kiểm tra đầu vào |
 | `ACTIVE` | Phiên đang chơi |
 | `EXTENDING` | Đang chờ khách phản hồi đề xuất gia hạn |
-| `CHECKING_OUT` | Staff đang kiểm tra trả xe/kết thúc phiên |
+| `CHECKING_OUT` | Staff đang kiểm tra trả xe / kết thúc phiên |
 | `COMPLETED` | Phiên đã hoàn tất và settlement chạy xong |
 | `CANCELLED` | Phiên bị hủy trước khi bắt đầu |
-
-Incident policy resolution và dispute cơ bản (`disputes` table) là Phase 1 core. Multi-party dispute workflow nâng cao là Phase 2.
 
 ---
 
@@ -89,7 +96,7 @@ Incident policy resolution và dispute cơ bản (`disputes` table) là Phase 1 
 | State | Timeout | Action |
 |-------|---------|--------|
 | `CHECKED_IN` | 15 phút customer không confirm inspection | Auto-confirm check-in |
-| `EXTENDING` | 10 phút customer không phản hồi | Auto-reject extension, quay lại ACTIVE |
+| `EXTENDING` | 10 phút customer không phản hồi | Auto-reject extension, quay lại `ACTIVE` |
 | `CHECKING_OUT` no damage | 2 giờ | Auto-confirm checkout |
 | `CHECKING_OUT` damage flagged | 24 giờ | Auto-confirm damage charge |
 
@@ -100,21 +107,23 @@ Incident policy resolution và dispute cơ bản (`disputes` table) là Phase 1 
 ```typescript
 enum BookingEvent {
   PAYMENT_CONFIRMED = 'PAYMENT_CONFIRMED',
-  CANCELLED = 'CANCELLED',
-  TIMEOUT = 'TIMEOUT',
-  ALL_SESSIONS_DONE = 'ALL_SESSIONS_DONE',
+  PAYMENT_TIMEOUT   = 'PAYMENT_TIMEOUT',
+  CUSTOMER_CANCEL   = 'CUSTOMER_CANCEL',
+  PROVIDER_CANCEL   = 'PROVIDER_CANCEL',
+  NO_SHOW           = 'NO_SHOW',
+  COMPLETE          = 'COMPLETE',
 }
 
 enum SessionEvent {
-  CHECK_IN_COMPLETED = 'CHECK_IN_COMPLETED',
-  SESSION_STARTED = 'SESSION_STARTED',
-  EXTENSION_INITIATED = 'EXTENSION_INITIATED',
-  EXTENSION_APPROVED = 'EXTENSION_APPROVED',
-  EXTENSION_REJECTED = 'EXTENSION_REJECTED',
-  CHECKOUT_INITIATED = 'CHECKOUT_INITIATED',
-  CUSTOMER_CONFIRMED = 'CUSTOMER_CONFIRMED',
-  TIMEOUT = 'TIMEOUT',
-  CANCELLED = 'CANCELLED',
+  CHECK_IN_COMPLETED   = 'CHECK_IN_COMPLETED',
+  SESSION_STARTED      = 'SESSION_STARTED',
+  EXTENSION_INITIATED  = 'EXTENSION_INITIATED',
+  EXTENSION_APPROVED   = 'EXTENSION_APPROVED',
+  EXTENSION_REJECTED   = 'EXTENSION_REJECTED',
+  CHECKOUT_INITIATED   = 'CHECKOUT_INITIATED',
+  CUSTOMER_CONFIRMED   = 'CUSTOMER_CONFIRMED',
+  TIMEOUT              = 'TIMEOUT',
+  CANCELLED            = 'CANCELLED',
 }
 ```
 
@@ -122,18 +131,27 @@ enum SessionEvent {
 
 ## 5. Implementation Note
 
-Implement bằng TypeScript service + enum guard:
+Route và controller **không được** update status trực tiếp. Mọi thay đổi trạng thái phải gọi qua:
 
 ```typescript
-export function canTransition(
-  currentStatus: BookingStatus | SessionStatus,
-  event: BookingEvent | SessionEvent
-): boolean {
-  // lookup transition table
-}
+// rcfeild-be/src/services/booking.service.ts
+export async function transition(bookingId: string, event: string): Promise<Booking>
+
+// rcfeild-be/src/services/session.service.ts (tương tự)
+export async function transition(sessionId: string, event: string): Promise<Session>
 ```
 
-Route/controller không được update status trực tiếp; phải gọi `BookingService.transition()` hoặc `SessionService.transition()`.
+Transition table được enforce tại runtime:
+
+```typescript
+const VALID_TRANSITIONS: Record<BookingStatus, string[]> = {
+  [BookingStatus.PENDING]:    ['PAYMENT_CONFIRMED', 'PAYMENT_TIMEOUT'],
+  [BookingStatus.CONFIRMED]:  ['CUSTOMER_CANCEL', 'PROVIDER_CANCEL', 'NO_SHOW', 'COMPLETE'],
+  [BookingStatus.CANCELLED]:  [],
+  [BookingStatus.NO_SHOW]:    [],
+  [BookingStatus.COMPLETED]:  [],
+}
+```
 
 ---
 
