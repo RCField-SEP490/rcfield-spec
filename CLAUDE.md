@@ -46,7 +46,7 @@ Core value prop: structured evidence at every asset handover → eliminates dama
 
 **F&B**: Customer pre-order khi đặt lịch (gộp 1 lần thanh toán) + Staff ghi order thêm tại quán (khách trả trực tiếp cho quán). Platform không thu phí trên F&B.
 
-**Payment**: Booking + F&B pre-order → 1 lần qua payment gateway (TBD). F&B tại quán → tiền mặt hoặc chuyển khoản thẳng Provider. Platform thu 15% trên booking xe, 0% trên F&B.
+**Payment**: Booking + F&B pre-order → 1 lần qua payment gateway (TBD). F&B tại quán → tiền mặt hoặc chuyển khoản thẳng Provider. Platform không thu % trên booking — revenue model là SaaS subscription fee.
 
 ---
 
@@ -200,6 +200,52 @@ Refund rules:    Xem rcfield-spec/docs/spec/03-payment-engine.md (R1, R2, R3)
 
 ---
 
+## Docusaurus — Tài liệu site (chạy local)
+
+```bash
+cd rcfield-workspace/rcfield-spec/website
+npm start        # http://localhost:3000
+```
+
+### Hook — Khi tạo tài liệu mới, BẮT BUỘC cập nhật sidebar
+
+Sau khi tạo bất kỳ file `.md` mới trong `docs/` hoặc `specs/`, phải cập nhật sidebar tương ứng:
+
+| Tài liệu nằm ở | File cần cập nhật |
+|----------------|-------------------|
+| `docs/spec/`, `docs/architecture/`, `docs/diagrams/`, `docs/adr/`, `docs/developer/` | `website/sidebars.ts` |
+| `specs/NNN-*/` (feature spec mới) | `website/sidebars-specs.ts` |
+
+**Quy tắc đặt ID trong sidebar:**
+- Docusaurus tự strip numeric prefix khỏi tên folder và file
+- `docs/spec/00-overview.md` → ID là `spec/overview`
+- `specs/010-new-feature/spec.md` → ID là `new-feature/spec`
+- `specs/010-new-feature/contracts/api.md` → ID là `new-feature/contracts/api`
+
+**Thêm feature spec mới vào `website/sidebars-specs.ts`:**
+```ts
+{
+  type: 'category',
+  label: '010 · Tên Feature',
+  collapsed: true,
+  items: [
+    'ten-feature/spec',
+    'ten-feature/plan',
+    'ten-feature/data-model',
+    'ten-feature/research',
+    'ten-feature/quickstart',
+    'ten-feature/tasks',
+    'ten-feature/contracts/api',  // nếu có
+  ],
+},
+```
+
+**Thêm doc mới vào `website/sidebars.ts`** — thêm ID vào đúng category tương ứng.
+
+Nếu không chắc ID là gì, chạy `npm run build` trong `website/` — Docusaurus sẽ liệt kê toàn bộ available document ids trong error message.
+
+---
+
 ## GitNexus (chạy sau khi có codebase)
 
 ```bash
@@ -217,11 +263,11 @@ graphify run                        # build graph từ docs/spec/
 ```
 
 <!-- SPECKIT START -->
-Current active feature plan: `specs/004-provider-subscription/plan.md`
+Current active feature plan: `specs/009-customer-package-booking/plan.md`
 For implementation context, read in order:
-1. `specs/004-provider-subscription/plan.md` — technical context, structure, constitution check
-2. `specs/004-provider-subscription/research.md` — state machine, cron, notification, quota tracking decisions
-3. `specs/004-provider-subscription/data-model.md` — 5 new entities (provider_profiles, subscription_plans, provider_subscriptions, payment_requests, notifications)
-4. `specs/004-provider-subscription/contracts/api.md` — all 14 endpoint contracts
-5. `specs/004-provider-subscription/quickstart.md` — implementation order, code patterns, integration scenarios
+1. `specs/009-customer-package-booking/plan.md` — technical context, file structure, constitution check
+2. `specs/009-customer-package-booking/research.md` — 7 decisions: payment_tx schema, IPN routing, zero-total bypass, slot deduction timing, slot refund condition, public listing route, CustomerPackageStatus lifecycle
+3. `specs/009-customer-package-booking/data-model.md` — new CustomerPackage entity, modified booking/payment_transaction entities, migration plan
+4. `specs/009-customer-package-booking/contracts/api.md` — 6 endpoints: public package listing, purchase, list my packages, usage history, modified booking creation, IPN routing change; Zod schemas
+5. `specs/009-customer-package-booking/quickstart.md` — 8-phase implementation order + 5 E2E scenarios + unit test checklist
 <!-- SPECKIT END -->
