@@ -1,6 +1,6 @@
 # 00 — Project Overview
 
-**Last updated**: 2026-05-16                                                
+**Last updated**: 2026-06-23                                                
 **Status**: Active
 
 ---
@@ -96,7 +96,7 @@ Phase 1 giữ các nghiệp vụ chính của hệ thống. Đây không chỉ l
 - F&B: menu, pre-order khi đặt lịch, on-site order trong session.
 - Packages/gói chơi và lịch sử sử dụng gói.
 - Subscriptions/lịch chơi định kỳ sinh booking.
-- Contests/tournament và đăng ký tham gia.
+- Contests/tournament: Provider tạo event, Customer đăng ký, Staff/Provider check-in, match/result/leaderboard thủ công và audit monitoring.
 - Promotions cơ bản và usage audit.
 - Incident logging + policy-based resolution để xử lý hư hỏng/va chạm ở mức Phase 1.
 - Vehicle maintenance logs để theo dõi bảo trì/sửa chữa xe.
@@ -105,7 +105,7 @@ Phase 1 giữ các nghiệp vụ chính của hệ thống. Đây không chỉ l
 - Trust score hiện tại trên `users` và audit qua `trust_score_logs`.
 - Feature flags có `config` để bật/tắt module và chuẩn bị AI Phase 2.
 
-**Phase 1 database target:** 44 bảng vận hành. Bao gồm SaaS billing, staff assignment, cafe closures/announcements và dispute cơ bản. Multi-party dispute workflow nâng cao chuyển sang Phase 2.
+**Phase 1 database target:** 50 bảng vận hành. Bao gồm SaaS billing, staff assignment, cafe closures/announcements, dispute cơ bản và Contest compact tournament flow (`contest_matches`, `contest_match_participants`, `contest_audit_logs`). Multi-party dispute workflow nâng cao và contest live timing/multi-class/reward-claim lifecycle chuyển sang Phase 2+.
 
 ### Phase 2 — AI nâng cao + Business Expansion
 

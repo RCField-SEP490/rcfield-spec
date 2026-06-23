@@ -1,14 +1,11 @@
 # Sequence Flow: Contest Lifecycle
 
-**Last updated**: 2026-06-11  
-**Status**: Draft for business review  
+**Last updated**: 2026-06-23  
+**Status**: Active for compact contest implementation  
 **Related rules**: `docs/spec/business-rules/BR-contest.md`  
 **Architecture**: `docs/architecture/03-contest.md`
 
-Tài liệu này mô tả luồng end-to-end của Contest theo mô hình mới: Provider tạo
-contest ở cấp provider, chọn nhiều chi nhánh tham gia, customer đăng ký contest
-chung, staff/provider check-in tại một chi nhánh trong `contest_cafes`, sau đó
-vận hành race, nhập kết quả, publish leaderboard và hoàn tất hoặc hủy giải.
+Tài liệu này mô tả luồng end-to-end hiện tại: Provider tạo contest, Customer đăng ký, Staff/Provider check-in, Provider/Staff tạo match linh hoạt, nhập kết quả, advance winner và publish leaderboard. Schema dùng `contest_matches` và `contest_match_participants`, không dùng class/round/heat/result/reward tables cũ.
 
 ---
 
@@ -18,13 +15,13 @@ vận hành race, nhập kết quả, publish leaderboard và hoàn tất hoặc
 |---|---|---|
 | Contest owner | `provider_id` | Provider tạo và sở hữu contest |
 | Participating branches | `contest_cafes` | Một contest có nhiều cafe tham gia |
-| Registration scope | Contest-level | MVP không bắt customer chọn chi nhánh khi đăng ký |
+| Registration scope | Contest-level | Customer không chọn chi nhánh khi đăng ký |
 | Contest status | `DRAFT -> OPEN -> CLOSED -> RUNNING -> COMPLETED` | `CANCELLED` là terminal |
-| Registration status | `PENDING -> CONFIRMED -> CHECKED_IN` | Phase 1A chưa có `WAITLIST`, `NO_SHOW`, `DISQUALIFIED` |
-| Provider participant | Phase 1C | Provider được đăng ký contest của Provider khác |
-| Payment component | `CONTEST_ENTRY` | Không tạo booking giả để thu entry fee |
-| Schedule protection | `cafe_schedule_blocks` proposed | Phase 1B nếu contest chạy thật |
-| Result mode | Manual in Phase 1B, calculated in Phase 2 | Phase 2 có round/heat/result tables |
+| Registration status | `PENDING -> CONFIRMED -> CHECKED_IN` | `CANCELLED` cho hủy |
+| Schedule unit | `contest_matches` | Match/heat/time-attack/final đều là match |
+| Match participant | `contest_match_participants` | Không hard-code A/B, hỗ trợ nhiều driver |
+| Leaderboard | `contests.config.leaderboard` | Snapshot phase này |
+| Monitoring | `contest_audit_logs` | Ghi mọi mutation quan trọng |
 
 ---
 
@@ -36,28 +33,21 @@ sequenceDiagram
     participant P as Provider
     participant W as Web App
     participant API as API
-    participant Sub as Subscription Service
     participant DB as PostgreSQL
+    participant Audit as ContestAudit
 
     P->>W: Nhập contest config + participating_cafe_ids
     W->>API: POST /contests
-    API->>Sub: assertSubscriptionActive(providerId)
-    API->>DB: Validate cafes ACTIVE + owned by provider
-    alt Not allowed
-        API-->>W: 403 subscription/account/cafe error
-    else Allowed
+    API->>DB: Validate provider owns ACTIVE cafes
+    alt Invalid
+        API-->>W: 403/422 error
+    else Valid
         API->>DB: INSERT contests(status=DRAFT, provider_id)
         API->>DB: INSERT contest_cafes rows
+        API->>Audit: contest.created
         API-->>W: Contest DRAFT + participating cafes
     end
 ```
-
-Rules:
-
-- Chỉ Provider tạo contest.
-- Staff không tạo contest; staff chỉ hỗ trợ vận hành/check-in theo chi nhánh được assign.
-- `DRAFT` chưa hiển thị public.
-- Config có thể chưa hoàn chỉnh ở `DRAFT`, nhưng phải có ít nhất một cafe tham gia trước khi `OPEN`.
 
 ---
 
@@ -69,32 +59,23 @@ sequenceDiagram
     participant P as Provider
     participant API as API
     participant DB as PostgreSQL
-    participant S as Schedule Service
-    participant N as Notification Service
+    participant Audit as ContestAudit
 
     P->>API: POST /contests/:id/open
-    API->>DB: Load contest DRAFT owned by provider
-    API->>DB: Validate contest_cafes count > 0
-    API->>DB: Validate capacity, entry_fee, time range, registration window, vehicle_rule
-    API->>S: Check track/time conflict per participating cafe
-    alt Conflict
-        API-->>P: 409 CONTEST_SCHEDULE_CONFLICT
-    else Available
-        S->>DB: INSERT cafe_schedule_blocks per cafe (Phase 1B)
-        API->>DB: Contest DRAFT -> OPEN via transition service
-        API->>N: Notify / publish contest announcement
+    API->>DB: Load DRAFT contest owned by Provider
+    API->>DB: Validate cafes, time, capacity, registration window, vehicle_rule/config
+    alt Invalid config
+        API-->>P: 422 invalid contest config
+    else Valid
+        API->>DB: UPDATE contests.status OPEN
+        API->>Audit: contest.opened
         API-->>P: Contest OPEN
     end
 ```
 
-Notes:
-
-- Public listing bắt đầu hiển thị khi `OPEN`.
-- `/cafes/:cafeId/contests` chỉ trả contest có cafe đó trong `contest_cafes`.
-
 ---
 
-## 3. Customer đăng ký contest chung
+## 3. Customer đăng ký
 
 ```mermaid
 sequenceDiagram
@@ -103,96 +84,30 @@ sequenceDiagram
     participant W as Web App
     participant API as API
     participant DB as PostgreSQL
-    participant Pay as Payment Gateway
-    participant N as Notification Service
+    participant Audit as ContestAudit
 
     C->>W: Xem contest public
     W->>API: GET /contests/:id
-    API-->>W: Contest detail + participating cafes + remaining capacity
+    API-->>W: Contest detail + cafes + summary + rules/prizes
     C->>W: Chọn vehicle_source RENTAL/BYOC
     W->>API: POST /contests/:id/register
     API->>DB: BEGIN transaction
-    API->>DB: Lock contest row / capacity counter
-    API->>DB: Validate contest OPEN + registration window
-    API->>DB: Validate one registration per user
-    API->>DB: Validate vehicle_rule
-    API->>DB: INSERT contest_registrations(status=PENDING, participant_role_snapshot=CUSTOMER)
-    alt entry_fee = 0
-        API->>DB: registration PENDING -> CONFIRMED
+    API->>DB: Validate OPEN + window + capacity + duplicate + vehicle_rule
+    alt Reject
+        API->>DB: ROLLBACK
+        API-->>W: 409/422 error
+    else Accept
+        API->>DB: INSERT contest_registrations
+        API->>DB: Free contest -> status CONFIRMED
+        API->>Audit: registration.created
         API->>DB: COMMIT
-        API->>N: Send registration confirmation
-        API-->>W: Registration CONFIRMED + QR
-    else entry_fee > 0
-        API->>DB: COMMIT
-        API-->>W: Registration PENDING + manual payment required in MVP
-        Pay-->>API: Payment success callback in Phase 1B
-        API->>DB: registration PENDING -> CONFIRMED
-    end
-```
-
-Important:
-
-- Capacity check must be transactional.
-- Customer không chọn chi nhánh trong MVP.
-- `CONTEST_ENTRY` should link to `contest_registration_id` or a generic payment subject in Phase 1B.
-- Do not create fake `bookings` for contest payment.
-
----
-
-## 4. Provider participant registration — Phase 1C
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant RP as Registering Provider
-    participant W as Web App
-    participant API as API
-    participant DB as PostgreSQL
-
-    RP->>W: Chọn contest của Provider khác
-    W->>API: POST /contests/:id/register
-    API->>DB: Load contest
-    alt contest.provider_id == current user id
-        API-->>W: 403 CONTEST_SELF_REGISTRATION_FORBIDDEN
-    else Other Provider contest
-        API->>DB: Validate OPEN + capacity + registration window
-        API->>DB: INSERT contest_registrations(participant_role_snapshot=PROVIDER)
-        API-->>W: Registration status
+        API-->>W: Registration + check_in_code
     end
 ```
 
 ---
 
-## 5. Payment timeout / cancel registration
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Job as Scheduler Job
-    participant C as Participant
-    participant API as API
-    participant DB as PostgreSQL
-    participant Pay as Payment Engine
-    participant N as Notification Service
-
-    alt Payment timeout
-        Job->>DB: Find PENDING registrations past payment deadline
-        Job->>DB: registration PENDING -> CANCELLED
-        Job->>DB: Release capacity / promote waitlist if exists
-        Job->>N: Notify participant
-    else Participant cancels before cutoff
-        C->>API: POST /contest-registrations/:id/cancel
-        API->>DB: Validate cancellable status/window
-        API->>Pay: Refund by contest refund_policy in Phase 1B
-        API->>DB: registration -> CANCELLED
-        API->>DB: Release capacity / promote waitlist if exists
-        API->>N: Notify participant/provider
-    end
-```
-
----
-
-## 6. Close registration and prepare event
+## 4. Close registration
 
 ```mermaid
 sequenceDiagram
@@ -200,26 +115,18 @@ sequenceDiagram
     participant P as Provider
     participant API as API
     participant DB as PostgreSQL
-    participant N as Notification Service
+    participant Audit as ContestAudit
 
     P->>API: POST /contests/:id/close
-    API->>DB: Validate contest OPEN owned by provider
-    API->>DB: Contest OPEN -> CLOSED
-    API->>DB: Load CONFIRMED registrations
-    alt Phase 1A/1B manual schedule
-        API->>DB: Save simple schedule/config note
-    else Phase 2 race management
-        API->>DB: Generate contest_rounds
-        API->>DB: Generate contest_heats
-        API->>DB: Generate contest_heat_entries
-    end
-    API->>N: Notify participants event schedule/check-in instructions
-    API-->>P: Contest CLOSED + schedule ready
+    API->>DB: Validate contest OPEN owned by Provider
+    API->>DB: UPDATE contests.status CLOSED
+    API->>Audit: contest.closed
+    API-->>P: Contest CLOSED + registration closed
 ```
 
 ---
 
-## 7. Event day check-in
+## 5. Staff/Provider check-in
 
 ```mermaid
 sequenceDiagram
@@ -228,138 +135,141 @@ sequenceDiagram
     participant W as Staff App
     participant API as API
     participant DB as PostgreSQL
-    participant Store as Cloudinary
-    participant C as Participant
+    participant Audit as ContestAudit
 
-    C->>S: Đưa QR / mã registration
-    S->>W: Scan QR + select checked_in_cafe_id
+    S->>W: Nhập/quét check_in_code
+    W->>API: GET /contests/:id/registrations/lookup?check_in_code=...
+    API->>DB: Find registration in contest
+    API-->>W: Registration summary
+    S->>W: Confirm check-in cafe
     W->>API: POST /contest-registrations/:id/check-in
     API->>DB: Validate registration CONFIRMED
-    API->>DB: Validate checked_in_cafe_id belongs to contest_cafes
-    API->>DB: Validate Staff assigned to cafe if role STAFF
-    alt RENTAL
-        API->>DB: Assign rental car from contest/cafe pool
-    else BYOC
-        S->>API: Submit BYOC tech-check checklist
-    end
-    opt Evidence required
-        S->>Store: Upload photos/checklist
-        W->>API: Submit contest evidence metadata
-        API->>DB: Save inspection/tech-check metadata
-    end
-    API->>DB: registration CONFIRMED -> CHECKED_IN
-    API-->>W: Checked in + assigned vehicle/car number
+    API->>DB: Validate cafe in contest_cafes
+    API->>DB: If STAFF, validate assigned cafe
+    API->>DB: UPDATE registration CHECKED_IN
+    API->>Audit: registration.checked_in
+    API-->>W: Checked-in registration
 ```
-
-Notes:
-
-- For `RENTAL_SPEC_CUP`, assign at check-in to keep race fair.
-- `checked_in_cafe_id` is the actual branch where the participant arrives.
 
 ---
 
-## 8. Start contest and run heats/results
+## 6. Generate matches
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant RD as Race Director/Provider
+    participant O as Provider/Assigned Staff
     participant API as API
     participant DB as PostgreSQL
-    participant Board as Public Board
+    participant Audit as ContestAudit
 
-    RD->>API: POST /contests/:id/start
-    API->>DB: Contest CLOSED -> RUNNING
-    loop Each heat/run
-        RD->>API: Start heat/run
-        alt Phase 1B manual timing
-            RD->>API: POST /contests/:id/results manual result
-            API->>DB: Save result summary draft
-        else Phase 2 heat result
-            RD->>API: POST /contest-heats/:id/results
-            API->>DB: INSERT contest_results
-            API->>DB: Calculate rank by scoring_config
-        end
-        RD->>API: Verify result
-        API->>DB: Mark result verified
-        API-->>Board: Update leaderboard snapshot
-    end
+    O->>API: POST /contests/:id/matches/generate
+    API->>DB: Validate contest CLOSED/RUNNING
+    API->>DB: Validate registrations CONFIRMED/CHECKED_IN
+    API->>DB: Read format + drivers_per_match + seeding_mode
+    API->>DB: INSERT contest_matches
+    API->>DB: INSERT contest_match_participants
+    API->>Audit: match.schedule_generated
+    API-->>O: Matches + participants
 ```
 
 ---
 
-## 9. Complete contest and award prizes
+## 7. Drag/drop participants
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant RD as Race Director/Provider
+    participant O as Provider/Assigned Staff
     participant API as API
     participant DB as PostgreSQL
-    participant N as Notification Service
-    participant Board as Public Result Page
+    participant Audit as ContestAudit
 
-    RD->>API: POST /contests/:id/complete
-    API->>DB: Validate all required results verified
-    API->>DB: Compute final leaderboard / podium
-    API->>DB: Publish final leaderboard snapshot
-    API->>DB: Create contest_reward_claims from contest_rewards
-    API->>DB: Contest RUNNING -> COMPLETED
-    API->>N: Notify participants final result and rewards
-    API-->>Board: Publish final leaderboard/podium
+    O->>API: PATCH /contest-matches/:id/participants
+    API->>DB: Validate match belongs to contest and actor can operate
+    API->>DB: Replace/update slot_no, lane, grid_position
+    API->>Audit: match.participants_updated
+    API-->>O: Updated match participants
 ```
 
 ---
 
-## 10. Cancel contest and refund
+## 8. Submit result and advance
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant P as Provider
+    participant O as Provider/Assigned Staff
     participant API as API
     participant DB as PostgreSQL
-    participant Pay as Payment Engine
-    participant N as Notification Service
+    participant Audit as ContestAudit
 
-    P->>API: POST /contests/:id/cancel
-    API->>DB: Validate contest owned by provider and not COMPLETED
-    API->>DB: Contest -> CANCELLED
-    API->>DB: Load paid/confirmed registrations
-    loop Each paid registration
-        API->>Pay: Refund CONTEST_ENTRY 100% in Phase 1B
-        API->>DB: registration -> CANCELLED
+    O->>API: POST /contest-matches/:id/results
+    API->>DB: Validate participants belong to match
+    API->>DB: Update score/finish_position/best_lap/total_time/is_winner
+    API->>DB: Update contest_matches.result_summary + status COMPLETED
+    API->>Audit: match.result_submitted
+    API-->>O: Completed match
+
+    opt Winner advances
+        O->>API: POST /contest-matches/:id/advance
+        API->>DB: Load next_match_id and winners/qualified
+        API->>DB: Insert/update next contest_match_participants
+        API->>Audit: match.advanced
+        API-->>O: Next match updated
     end
-    API->>DB: Release schedule blocks per participating cafe
-    API->>N: Notify participants
 ```
 
 ---
 
-## 11. Edge sequence: result protest / incident
+## 9. Publish leaderboard
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant C as Participant
+    participant O as Provider/Assigned Staff
     participant API as API
-    participant DB as DB
-    participant Admin as Provider/Admin
+    participant DB as PostgreSQL
+    participant Audit as ContestAudit
+    participant Pub as Public Contest Page
 
-    C->>API: Report result/damage issue
-    API->>DB: Create incident/dispute or result protest record
-    Admin->>API: Review result/evidence
-    alt Correction accepted
-        API->>DB: Update result with audit before_json/after_json
-        API->>DB: Recalculate leaderboard
-    else Rejected
-        API->>DB: Mark protest rejected with reason
-    end
-    API-->>C: Notify decision
+    O->>API: POST /contests/:id/leaderboard/publish
+    API->>DB: Validate completed result/final exists
+    API->>DB: Compute standings from match participants
+    API->>DB: UPDATE contests.config.leaderboard
+    API->>Audit: leaderboard.published
+    API-->>O: Published leaderboard
+    Pub->>API: GET /contests/:id
+    API-->>Pub: Contest detail with leaderboard
 ```
 
-Phase 1 can handle this manually through incident/dispute notes. Phase 2 should add
-dedicated `contest_result_audits` and protest workflow.
+---
+
+## 10. Cancel contest or registration
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Actor
+    participant API as API
+    participant DB as PostgreSQL
+    participant Audit as ContestAudit
+
+    alt Cancel registration
+        A->>API: POST /contest-registrations/:id/cancel
+        API->>DB: Validate cancellable status/actor
+        API->>DB: UPDATE registration CANCELLED + reason
+        API->>Audit: registration.cancelled
+        API-->>A: Cancelled registration
+    else Cancel contest
+        A->>API: POST /contests/:id/cancel
+        API->>DB: Validate Provider owner and contest not COMPLETED
+        API->>DB: UPDATE contest CANCELLED
+        API->>DB: Optionally cancel active registrations
+        API->>Audit: contest.cancelled
+        API-->>A: Cancelled contest
+    end
+```
 
 ---
 
@@ -367,6 +277,6 @@ dedicated `contest_result_audits` and protest workflow.
 
 - `docs/architecture/03-contest.md` — module architecture
 - `docs/architecture/diagrams/contest-lifecycle-flow.md` — lifecycle flowchart
-- `docs/spec/business-rules/BR-contest.md` — full business rules and roadmap
-- `docs/spec/03-payment-engine.md` — payment component lifecycle
+- `docs/spec/business-rules/BR-contest.md` — business rules
+- `docs/spec/05-api-contracts.md` — endpoint contract
 - `docs/spec/06-database.md` — current contest schema

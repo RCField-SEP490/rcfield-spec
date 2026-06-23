@@ -1,111 +1,120 @@
-# Contest Lifecycle Flow — Provider Multi-Branch MVP
+# Contest Lifecycle Flow — Compact Tournament Phase
 
-> Happy path đi thẳng xuống. Nhánh rẽ phải là edge case hoặc phần cần Phase 1B/1C/2.
->
-> Case MVP: Provider tạo một contest ở cấp provider, chọn nhiều chi nhánh tham gia,
-> người chơi đăng ký vào contest chung, staff/provider check-in tại một chi nhánh
-> thuộc contest.
+> Happy path đi thẳng xuống. Nhánh rẽ phải là edge case hoặc phần backlog. Phase này dùng `contest_matches` + `contest_match_participants`, không dùng class/round/heat/result/reward tables cũ.
 
 ```mermaid
 flowchart TD
-    START([Provider muốn tổ chức contest]) --> PH0_START
+    START([Provider muốn tổ chức contest]) --> CFG
 
-    subgraph PH0 ["Phase 0 — Config"]
-        PH0_START[Nhập name, description, banner] --> PH0A[Chọn participating_cafe_ids]
-        PH0A --> PH0B{Tất cả cafe ACTIVE\nvà thuộc Provider?}
-        PH0B -->|No| PH0_BLOCK([Không cho tạo contest])
-        PH0B -->|Yes| PH0C[Chọn track_type_id + starts_at/ends_at]
-        PH0C --> PH0D[Cấu hình capacity, entry_fee, registration window]
-        PH0D --> PH0E[Cấu hình vehicle_rule/config]
-        PH0E --> PH0F["Save contests.status = DRAFT\n+ contest_cafes"]
+    subgraph PH0[Phase 0 — Config]
+        CFG[Nhập name, description, banner, rules_text] --> CAFES[Chọn participating_cafe_ids]
+        CAFES --> CAFECHECK{Cafe ACTIVE và thuộc Provider?}
+        CAFECHECK -->|No| BLOCK_CREATE([Reject create/update])
+        CAFECHECK -->|Yes| TIME[Chọn track_type_id + starts_at/ends_at]
+        TIME --> CAP[Cấu hình capacity, entry_fee, registration window]
+        CAP --> FORMAT[Cấu hình format + drivers_per_match + prizes]
+        FORMAT --> DRAFT[Save contests.status = DRAFT + contest_cafes]
+        DRAFT --> AUDIT_CREATED[Audit contest.created]
     end
 
-    PH0F --> PH1_START
+    AUDIT_CREATED --> OPEN_REQ
 
-    subgraph PH1 ["Phase 1 — Open Registration"]
-        PH1_START[Validate config đầy đủ] --> PH1A{Có ít nhất 1 cafe tham gia?}
-        PH1A -->|No| PH1_BLOCK([Không cho open])
-        PH1A -->|Yes| PH1B{Track/time conflict?\nPhase 1B}
-        PH1B -->|Yes| PH1_CONFLICT([Yêu cầu đổi lịch])
-        PH1B -->|No| PH1C["Create schedule blocks per cafe\nPhase 1B"]
-        PH1C --> PH1D[contest DRAFT -> OPEN]
+    subgraph PH1[Phase 1 — Open Registration]
+        OPEN_REQ[Provider gọi open] --> VALID_OPEN{Config đầy đủ?}
+        VALID_OPEN -->|No| BLOCK_OPEN([Reject open])
+        VALID_OPEN -->|Yes| OPEN[Contest DRAFT -> OPEN]
+        OPEN --> AUDIT_OPEN[Audit contest.opened]
     end
 
-    PH1D --> PH2_START
+    AUDIT_OPEN --> REG_START
 
-    subgraph PH2 ["Phase 2 — Participant Register"]
-        PH2_START[Customer xem contest public] --> PH2A[POST /contests/:id/register]
-        PH2A --> PH2B{Capacity tổng còn chỗ?}
-        PH2B -->|No| PH2_FULL([Reject hoặc WAITLIST\nPhase 1B])
-        PH2B -->|Yes| PH2C[contest_registrations.status = PENDING]
-        PH2C --> PH2D{entry_fee > 0?}
-        PH2D -->|No| PH2_OK[registration -> CONFIRMED]
-        PH2D -->|Yes| PH2PAY["Manual payment MVP\nCONTEST_ENTRY online Phase 1B"]
-        PH2PAY --> PH2PAYQ{Payment success/manual confirm?}
-        PH2PAYQ -->|No / timeout| PH2_FAIL([registration -> CANCELLED\nrelease capacity])
-        PH2PAYQ -->|Yes| PH2_OK
+    subgraph PH2[Phase 2 — Participant Registration]
+        REG_START[Customer xem contest public] --> REG_POST[POST /contests/:id/register]
+        REG_POST --> REG_VALID{OPEN + còn chỗ + đúng rule xe?}
+        REG_VALID -->|No| REG_REJECT([Reject registration])
+        REG_VALID -->|Yes| REG_CREATED[contest_registrations created]
+        REG_CREATED --> FREE{entry_fee = 0?}
+        FREE -->|Yes| CONFIRMED[registration CONFIRMED]
+        FREE -->|No| PAYMENT_GAP[PENDING/manual payment until CONTEST_ENTRY phase]
+        CONFIRMED --> AUDIT_REG[Audit registration.created]
     end
 
-    PH2_START --> PH2_PROVIDER
-    PH2_PROVIDER{Phase 1C:\nProvider registers?} -->|Contest owner| PH2_SELF_BLOCK([Reject self-registration])
-    PH2_PROVIDER -->|Other Provider contest| PH2A
+    AUDIT_REG --> CLOSE_REQ
 
-    PH2_OK --> PH3_CHECK
-
-    subgraph PH3 ["Phase 3 — Close and Prepare"]
-        PH3_CHECK{registration_closes_at\nhoặc Provider close?} -->|Not yet| PH2_START
-        PH3_CHECK -->|Closed| PH3A[contest OPEN -> CLOSED]
-        PH3A --> PH3B[Chốt danh sách CONFIRMED]
-        PH3B --> PH3C["Prepare check-in list\nHeat/schedule Phase 2"]
+    subgraph PH3[Phase 3 — Close Registration]
+        CLOSE_REQ{Provider close hoặc registration_closes_at tới?} -->|Not yet| REG_START
+        CLOSE_REQ -->|Close| CLOSED[Contest OPEN -> CLOSED]
+        CLOSED --> AUDIT_CLOSED[Audit contest.closed]
     end
 
-    PH3C --> PH4_SCAN
+    AUDIT_CLOSED --> CHECKIN
 
-    subgraph PH4 ["Phase 4 — Event Day"]
-        PH4_SCAN[Staff/Provider scan QR] --> PH4A{registration CONFIRMED?}
-        PH4A -->|No| PH4_REJECT([Reject / resolve payment])
-        PH4A -->|Yes| PH4B{checked_in_cafe_id\nthuộc contest_cafes?}
-        PH4B -->|No| PH4_BRANCH_REJECT([Reject wrong branch])
-        PH4B -->|Yes| PH4C{Vehicle source}
-        PH4C -->|RENTAL| PH4D[Assign rental car from pool]
-        PH4C -->|BYOC| PH4E[Run BYOC tech check]
-        PH4D --> PH4F[registration -> CHECKED_IN]
-        PH4E --> PH4F
-        PH4F --> PH4G[Safety briefing + staging]
-        PH4G --> PH4H[contest CLOSED -> RUNNING]
+    subgraph PH4[Phase 4 — Event Check-in]
+        CHECKIN[Staff/Provider lookup check_in_code] --> LOOKUP{Registration CONFIRMED?}
+        LOOKUP -->|No| CHECKIN_REJECT([Reject check-in])
+        LOOKUP -->|Yes| CAFE_VALID{Cafe check-in thuộc contest_cafes?}
+        CAFE_VALID -->|No| WRONG_CAFE([Reject wrong branch])
+        CAFE_VALID -->|Yes| STAFF_VALID{Nếu STAFF: assigned cafe hợp lệ?}
+        STAFF_VALID -->|No| STAFF_REJECT([Reject staff permission])
+        STAFF_VALID -->|Yes| CHECKED_IN[registration -> CHECKED_IN]
+        CHECKED_IN --> AUDIT_CHECKIN[Audit registration.checked_in]
     end
 
-    PH4H --> PH5_RUN
+    AUDIT_CHECKIN --> GENERATE
 
-    subgraph PH5 ["Phase 5 — Race and Result"]
-        PH5_RUN[Practice / qualifying / final] --> PH5A[Staff records manual result\nPhase 1B/2]
-        PH5A --> PH5B{Result verified?}
-        PH5B -->|No| PH5_EDIT[Edit with audit note]
-        PH5_EDIT --> PH5B
-        PH5B -->|Yes| PH5C[Publish leaderboard snapshot / podium]
+    subgraph PH5[Phase 5 — Generate Schedule]
+        GENERATE[Provider/Staff generate matches] --> GEN_VALID{Contest CLOSED/RUNNING và registrations hợp lệ?}
+        GEN_VALID -->|No| GEN_REJECT([Reject generate])
+        GEN_VALID -->|Yes| MATCHES[Create contest_matches]
+        MATCHES --> PARTICIPANTS[Create contest_match_participants]
+        PARTICIPANTS --> AUDIT_GEN[Audit match.schedule_generated]
     end
 
-    PH5C --> DONE
+    AUDIT_GEN --> RUN_MATCH
 
-    subgraph PH6 ["Phase 6 — Complete / Cancel"]
-        DONE[contest RUNNING -> COMPLETED] --> PH6A[Issue contest_reward_claims]
-        PH6A --> PH6B[Public result page]
+    subgraph PH6[Phase 6 — Race Operation]
+        RUN_MATCH[Run match/heat/final] --> REORDER{Cần drag/drop slot?}
+        REORDER -->|Yes| PATCH_PARTICIPANTS[PATCH participants lane/slot/grid]
+        PATCH_PARTICIPANTS --> AUDIT_PARTICIPANTS[Audit match.participants_updated]
+        REORDER -->|No| RESULT
+        AUDIT_PARTICIPANTS --> RESULT[Submit manual result]
+        RESULT --> RESULT_VALID{Result hợp lệ?}
+        RESULT_VALID -->|No| RESULT_REJECT([Reject result])
+        RESULT_VALID -->|Yes| COMPLETE_MATCH[Update participant results + match COMPLETED]
+        COMPLETE_MATCH --> AUDIT_RESULT[Audit match.result_submitted]
+        AUDIT_RESULT --> ADVANCE{Có next_match_id?}
+        ADVANCE -->|Yes| ADVANCE_WINNER[Advance winner/qualified]
+        ADVANCE_WINNER --> AUDIT_ADVANCE[Audit match.advanced]
+        AUDIT_ADVANCE --> RUN_MATCH
+        ADVANCE -->|No| PUBLISH
     end
 
-    PH1D --> CANCELQ{Provider cancels?}
-    CANCELQ -->|Yes| CANCEL["contest -> CANCELLED\nrefund/manual payment policy\nnotify participants"]
-    CANCELQ -->|No| PH2_START
+    subgraph PH7[Phase 7 — Leaderboard]
+        PUBLISH[Publish leaderboard] --> LEADER_VALID{Có completed result/final?}
+        LEADER_VALID -->|No| PUBLISH_REJECT([Reject publish])
+        LEADER_VALID -->|Yes| LEADERBOARD[Update contests.config.leaderboard]
+        LEADERBOARD --> AUDIT_LEADER[Audit leaderboard.published]
+        AUDIT_LEADER --> COMPLETED[Contest RUNNING -> COMPLETED when finalized]
+    end
 
-    style PH0_BLOCK fill:#fee2e2,stroke:#ef4444
-    style PH1_BLOCK fill:#fee2e2,stroke:#ef4444
-    style PH1_CONFLICT fill:#fee2e2,stroke:#ef4444
-    style PH2_FULL fill:#fef9c3,stroke:#eab308
-    style PH2_FAIL fill:#fee2e2,stroke:#ef4444
-    style PH2_SELF_BLOCK fill:#fee2e2,stroke:#ef4444
-    style PH4_REJECT fill:#fee2e2,stroke:#ef4444
-    style PH4_BRANCH_REJECT fill:#fee2e2,stroke:#ef4444
-    style DONE fill:#dcfce7,stroke:#22c55e
-    style CANCEL fill:#fee2e2,stroke:#ef4444
+    OPEN --> CANCELQ{Provider cancels?}
+    CLOSED --> CANCELQ
+    CANCELQ -->|Yes| CANCELLED[contest -> CANCELLED + optional registration cancel]
+    CANCELLED --> AUDIT_CANCEL[Audit contest.cancelled]
+    CANCELQ -->|No| REG_START
+
+    style BLOCK_CREATE fill:#fee2e2,stroke:#ef4444
+    style BLOCK_OPEN fill:#fee2e2,stroke:#ef4444
+    style REG_REJECT fill:#fee2e2,stroke:#ef4444
+    style PAYMENT_GAP fill:#fef9c3,stroke:#eab308
+    style CHECKIN_REJECT fill:#fee2e2,stroke:#ef4444
+    style WRONG_CAFE fill:#fee2e2,stroke:#ef4444
+    style STAFF_REJECT fill:#fee2e2,stroke:#ef4444
+    style GEN_REJECT fill:#fee2e2,stroke:#ef4444
+    style RESULT_REJECT fill:#fee2e2,stroke:#ef4444
+    style PUBLISH_REJECT fill:#fee2e2,stroke:#ef4444
+    style COMPLETED fill:#dcfce7,stroke:#22c55e
+    style CANCELLED fill:#fee2e2,stroke:#ef4444
 ```
 
 ---
@@ -114,18 +123,18 @@ flowchart TD
 
 | Phase | Tables / services |
 |---|---|
-| Config | `contests`, `contest_cafes`, provider subscription guard |
-| Open | `contests.status`, proposed per-cafe schedule blocks |
-| Register | `contest_registrations`, later `payment_components(CONTEST_ENTRY)` |
-| Prepare | `contest_registrations`, proposed heat/schedule tables |
-| Event day | `contest_registrations.status`, `checked_in_cafe_id`, rental pool, optional inspection/tech-check |
-| Result | proposed `contest_results`, `contest_leaderboard_snapshots`, `contest_result_audits` |
-| Complete | `contests.status`, `contest_rewards`, `contest_reward_claims` |
+| Config | `contests`, `contest_cafes`, `contest_audit_logs` |
+| Open/Close/Cancel | `contests.status`, `contest_audit_logs` |
+| Register | `contest_registrations`, `contest_audit_logs` |
+| Event day | `contest_registrations.checked_in_*`, `contest_audit_logs` |
+| Generate schedule | `contest_matches`, `contest_match_participants`, `contest_audit_logs` |
+| Result/advance | `contest_match_participants`, `contest_matches.result_summary`, `contest_audit_logs` |
+| Leaderboard | `contests.config.leaderboard`, `contest_audit_logs` |
 
 ---
 
 ## Related files
 
-- [`../03-contest.md`](../03-contest.md) — architecture narrative
-- [`../../spec/business-rules/BR-contest.md`](../../spec/business-rules/BR-contest.md) — full business rules
-- [`../../diagrams/sequence/sequence-flow-contest-lifecycle.md`](../../diagrams/sequence/sequence-flow-contest-lifecycle.md) — sequence diagrams
+- [../03-contest.md](../03-contest.md) — architecture narrative
+- [../../spec/business-rules/BR-contest.md](../../spec/business-rules/BR-contest.md) — business rules
+- [../../diagrams/sequence/sequence-flow-contest-lifecycle.md](../../diagrams/sequence/sequence-flow-contest-lifecycle.md) — sequence diagrams

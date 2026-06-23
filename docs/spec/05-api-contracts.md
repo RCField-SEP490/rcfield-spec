@@ -1,6 +1,6 @@
 # 05 — API Contracts
 
-**Last updated**: 2026-06-11
+**Last updated**: 2026-06-23
 > Convention: tất cả response đều wrap trong `{ data, meta?, error? }`
 > Auth header: `Authorization: Bearer <jwt_token>`
 
@@ -175,28 +175,42 @@ pre_existing_flag: boolean
 | POST | `/packages/:id/purchase` | CUSTOMER | Mua package |
 | GET | `/me/packages` | CUSTOMER | Gói đã mua |
 | POST | `/subscriptions` | CUSTOMER/STAFF | Tạo lịch định kỳ |
-| GET | `/contests` | Public | List contests public, filter theo status/upcoming/notify window |
-| GET | `/cafes/:cafeId/contests` | Public | List contests có chi nhánh này tham gia |
-| GET | `/contests/:id` | Public/Auth | Chi tiết contest + participating cafes + registration summary |
+
+### Contest Core
+
+| Method | Endpoint | Actor | Mô tả |
+|--------|----------|-------|-------|
+| GET | `/contests` | Public/Auth | List contests public; Provider có thể dùng filter riêng để xem contest của mình |
+| GET | `/cafes/:cafeId/contests` | Public/Auth | List contests có chi nhánh này tham gia |
+| GET | `/contests/:id` | Public/Auth | Chi tiết contest + participating cafes + registration summary + published leaderboard |
 | POST | `/contests` | PROVIDER | Tạo contest DRAFT ở cấp Provider |
-| PATCH | `/contests/:id` | PROVIDER | Sửa DRAFT/OPEN fields được phép |
-| POST | `/contests/:id/open` | PROVIDER | Mở đăng ký contest |
-| POST | `/contests/:id/register` | CUSTOMER | Đăng ký contest; phase sau cho PROVIDER đăng ký contest của Provider khác |
-| GET | `/contests/:id/registrations` | PROVIDER | Danh sách người đăng ký |
-| POST | `/contest-registrations/:id/check-in` | PROVIDER/STAFF | Check-in tại một chi nhánh tham gia contest |
-| POST | `/contest-registrations/:id/cancel` | CUSTOMER/PROVIDER | Hủy registration |
-| POST | `/contests/:id/cancel` | PROVIDER | Hủy contest |
-| POST | `/contests/:id/classes` | PROVIDER | Phase 1B/2: tạo hạng mục thi |
-| POST | `/contests/:id/rounds` | PROVIDER | Phase 1B/2: tạo round thủ công |
-| POST | `/contest-rounds/:id/heats` | PROVIDER/STAFF | Phase 1B/2: tạo heat/lượt chạy |
-| POST | `/contest-heats/:id/results` | PROVIDER/STAFF | Phase 1B/2: nhập result thủ công |
-| POST | `/contest-results/:id/verify` | PROVIDER/STAFF | Phase 1B/2: verify result |
-| GET | `/contests/:id/leaderboard` | Public | Phase 1B/2: xem leaderboard public |
-| POST | `/contests/:id/leaderboard/publish` | PROVIDER/STAFF | Phase 1B/2: publish leaderboard snapshot |
-| POST | `/contests/:id/rewards` | PROVIDER | Phase 1B/2: cấu hình reward non-cash |
-| GET | `/contests/:id/rewards` | Public/Auth | Phase 1B/2: xem rewards đã publish |
-| POST | `/contests/:id/rewards/issue` | PROVIDER | Phase 1B/2: tạo reward claims từ final leaderboard |
-| GET | `/me/contest-reward-claims` | CUSTOMER/PROVIDER | Phase 1B/2: xem phần thưởng được assign |
+| PATCH | `/contests/:id` | PROVIDER owner | Sửa DRAFT/OPEN fields được phép |
+| POST | `/contests/:id/open` | PROVIDER owner | DRAFT -> OPEN |
+| POST | `/contests/:id/close` | PROVIDER owner | OPEN -> CLOSED, khóa form đăng ký |
+| POST | `/contests/:id/cancel` | PROVIDER owner | Hủy contest chưa COMPLETED |
+
+### Registration & Check-In
+
+| Method | Endpoint | Actor | Mô tả |
+|--------|----------|-------|-------|
+| POST | `/contests/:id/register` | CUSTOMER | Đăng ký contest khi OPEN |
+| GET | `/contests/:id/registrations` | PROVIDER owner | Danh sách người đăng ký để dashboard/monitoring |
+| GET | `/contests/:id/registrations/lookup?check_in_code=...` | PROVIDER/STAFF | Lookup một registration bằng mã check-in |
+| GET | `/me/contest-registrations` | CUSTOMER | Danh sách contest đã đăng ký của user hiện tại |
+| POST | `/contest-registrations/:id/check-in` | PROVIDER/STAFF | CONFIRMED -> CHECKED_IN tại một chi nhánh tham gia contest |
+| POST | `/contest-registrations/:id/cancel` | CUSTOMER/PROVIDER | Hủy registration với reason |
+
+### Tournament Schedule & Results
+
+| Method | Endpoint | Actor | Mô tả |
+|--------|----------|-------|-------|
+| GET | `/contests/:id/matches` | Public/Auth | Lịch match/heat/final của contest |
+| POST | `/contests/:id/matches/generate` | PROVIDER owner / STAFF assigned | Tạo lịch thi đấu sau khi contest CLOSED/RUNNING |
+| PATCH | `/contest-matches/:id/participants` | PROVIDER owner / STAFF assigned | Cập nhật người tham gia trong match, hỗ trợ drag/drop slot |
+| POST | `/contest-matches/:id/results` | PROVIDER owner / STAFF assigned | Nhập kết quả thủ công cho match |
+| POST | `/contest-matches/:id/advance` | PROVIDER owner / STAFF assigned | Đẩy winner/qualified registrations sang next match |
+| POST | `/contests/:id/leaderboard/publish` | PROVIDER owner / STAFF assigned | Publish leaderboard vào `contests.config.leaderboard` |
+| GET | `/contests/:id/audit-logs` | PROVIDER owner | Xem business audit logs của contest |
 
 **POST /contests body:**
 ```json
@@ -217,21 +231,85 @@ pre_existing_flag: boolean
     "assignment_policy": "AT_CHECK_IN"
   },
   "config": {
-    "format": "RENTAL_SPEC_CUP",
-    "notify_lead_days": 7
+    "format": "KNOCKOUT",
+    "drivers_per_match": 2,
+    "seeding_mode": "MANUAL",
+    "rules_text": "The le giai...",
+    "prizes": [
+      { "rank": 1, "title": "Champion", "description": "Voucher 500k" }
+    ]
+  }
+}
+```
+
+**POST /contests/:id/matches/generate body:**
+```json
+{
+  "format": "KNOCKOUT",
+  "drivers_per_match": 2,
+  "registration_ids": ["registration-1", "registration-2", "registration-3", "registration-4"],
+  "seeding_mode": "MANUAL"
+}
+```
+
+**PATCH /contest-matches/:id/participants body:**
+```json
+{
+  "participants": [
+    { "registration_id": "registration-1", "slot_no": 1, "lane": "A", "grid_position": 1 },
+    { "registration_id": "registration-2", "slot_no": 2, "lane": "B", "grid_position": 2 }
+  ]
+}
+```
+
+**POST /contest-matches/:id/results body:**
+```json
+{
+  "results": [
+    {
+      "registration_id": "registration-1",
+      "finish_position": 1,
+      "score": 10,
+      "best_lap_ms": 18234,
+      "total_time_ms": 120000,
+      "is_winner": true,
+      "result_note": "Won final"
+    }
+  ],
+  "reason": "Manual staff entry"
+}
+```
+
+**Leaderboard response:**
+```json
+{
+  "data": {
+    "standings": [
+      {
+        "rank": 1,
+        "registration_id": "uuid",
+        "user_id": "uuid",
+        "fullName": "Nguyen Van A",
+        "email": "driver@example.com",
+        "score": 10,
+        "best_lap_ms": 18234,
+        "source_match_id": "uuid"
+      }
+    ]
   }
 }
 ```
 
 Rules:
 
-- Chỉ `PROVIDER` tạo contest. `STAFF` có thể hỗ trợ check-in ở chi nhánh được assign nhưng không tạo contest.
+- Chỉ `PROVIDER` owner tạo/sửa/open/close/cancel contest.
+- `STAFF` không gọi full provider registration list; staff lookup/check-in bằng code và chỉ tại cafe được assign.
 - `participating_cafe_ids` chỉ nhận cafe ACTIVE thuộc Provider hiện tại.
-- Customer đăng ký contest chung; không chọn chi nhánh ở MVP.
-- Provider registration phase: role `PROVIDER` có thể đăng ký contest của Provider khác, nhưng không được tự đăng ký contest do chính mình tạo.
-- Contest có phí không tạo booking giả; `CONTEST_ENTRY` payment subject là phase payment sau.
-- Leaderboard public phải được publish từ result đã verify và lưu snapshot.
-- Reward trong phase đồ án chỉ là non-cash: `VOUCHER`, `PACKAGE_SLOT`, `FNB_COUPON`, `TROPHY_MANUAL`, `POINTS`, `CUSTOM`.
+- Không tạo booking giả cho contest entry fee; `CONTEST_ENTRY` payment subject là phase payment sau.
+- Schedule generation chỉ sau `CLOSED` hoặc `RUNNING`, và chỉ dùng registration `CONFIRMED`/`CHECKED_IN`.
+- Một match không cố định A/B; dùng `contest_match_participants` để hỗ trợ 1, 2, 4 hoặc nhiều driver.
+- Leaderboard phase này lưu trong `contests.config.leaderboard`; reward/prize là config hiển thị, không phát voucher tự động.
+- Mọi mutation phải ghi `contest_audit_logs`.
 
 ---
 

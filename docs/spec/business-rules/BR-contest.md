@@ -1,1128 +1,333 @@
-# BR-Contest — Quy tắc nghiệp vụ: Contest, tournament và race event
+# BR-Contest — Quy tắc nghiệp vụ Contest & Race Event
 
-**Last updated**: 2026-06-11  
-**Status**: Draft for business review  
-**Owner**: Product / Backend / Operations
+**Last updated**: 2026-06-23  
+**Status**: Active for current implementation  
+**Owner**: Product / Backend / Frontend / Operations
 
-> Tài liệu này phân tích đầy đủ luồng Contest cho RCField: tạo giải, mở đăng ký,
-> quản lý người đua, luật xe, chia vòng, scoring, leaderboard, giải thưởng và
-> lộ trình phase. Mục tiêu không chỉ là "có contest" trong database, mà là biến
-> contest thành hoạt động cộng đồng đúng với tinh thần đề tài: kết nối người chơi
-> RC lại với nhau qua các sự kiện do Provider tổ chức và các chi nhánh tham gia.
+> Contest trong RCField là event domain riêng: Provider tạo giải, Customer đăng ký, Provider/Staff monitoring và check-in, sau khi đóng đăng ký thì tạo lịch thi đấu dạng match/heat linh hoạt, nhập kết quả thủ công, publish leaderboard và ghi audit log. Phase này cố ý giữ schema gọn để khả thi cho đồ án.
 
 ---
 
-## 1. Source of truth
+## 1. Current Scope
 
-| Nguồn | Nội dung dùng để suy luận |
+### Now — Phase hiện tại
+
+| Capability | Làm trong phase này |
 |---|---|
-| `docs/spec/00-overview.md` | Contest nằm trong Phase 1 Operational Core; RCField là SaaS multi-branch cho cafe xe RC |
-| `docs/spec/01-domain-model.md` | Entity `Contest`, `ContestRegistration`, enum status, `PaymentComponentType.CONTEST_ENTRY` |
-| `docs/spec/02-state-machine.md` | Cách tổ chức state machine bắt buộc đi qua service layer |
-| `docs/spec/03-payment-engine.md` | Ledger component-based, immutable amount, snapshot-first |
-| `docs/spec/04-inspection-flow.md` | Digital evidence khi bàn giao rental/BYOC vehicle |
-| `docs/spec/05-api-contracts.md` | API hiện có: list contests, create contest, register |
-| `docs/spec/06-database.md` | Schema hiện tại của `contests`, `contest_registrations` và các giới hạn Phase 1 |
-| `docs/spec/business-rules/BR-booking.md` | Slot, availability, vehicle/BYOC capacity |
-| `docs/spec/business-rules/BR-fleet.md` | Fleet per-branch, vehicle status, tier, track compatibility |
-| `docs/developer/provider-subscription-enforcement.md` | Provider write operation phải kiểm tra subscription |
-| `docs/adr/001-tenant-ui-model.md` | Mỗi chi nhánh có config riêng; ADR ghi contest advanced/multi-branch ở Phase 2 |
-| IFMAR / ROAR / MYLAPS / RC cafe references | Mô hình thực tế: qualifying heats, mains, referees, lap timing, rental/event race |
-
-**Ghi chú về mâu thuẫn scope:**  
-`00-overview.md`, `05-api-contracts.md`, `06-database.md` đưa contest vào Phase 1.
-`ADR-001` cũ ghi contest management single-branch và multi-branch ở Phase 2.
-Quyết định mới:
-
-- Phase 1: contest do Provider tạo ở cấp provider, chọn nhiều chi nhánh tham gia, customer đăng ký contest chung và staff/provider check-in tại chi nhánh tham gia.
-- Phase 1C: Provider role có thể đăng ký contest của Provider khác như racer, nhưng không tự đăng ký contest do chính mình tạo.
-- Phase 2+: race management nâng cao: multi-class, multi-round, leaderboard, transponder, championship/series.
-
----
-
-## 2. Tại sao Contest phức tạp
-
-Contest không phải một booking lớn. Contest là một event vận hành của Provider và các chi nhánh tham gia,
-đụng đồng thời vào discovery, capacity, fleet, BYOC, thanh toán, check-in, luật thi
-đấu, lịch chạy, nhân sự, bằng chứng hư hỏng và kết quả công khai.
-
-Nếu làm quá đơn giản, hệ thống chỉ có "form đăng ký" nhưng không tổ chức được cuộc
-thi thật. Nếu làm quá lớn ngay từ đầu, team sẽ bị kéo vào live timing, bracket,
-multi-branch ranking, payout giải thưởng và dispute luật thi đấu. Vì vậy phải tách
-phase rõ.
-
-**BR-CT-001 — Contest là event, không phải booking thường**  
-IF: Provider tạo cuộc thi cho một hoặc nhiều chi nhánh  
-THEN: System tạo `Contest` do Provider sở hữu và các dòng `contest_cafes` để quản lý chi nhánh tham gia.  
-NOTE: Không nên tạo một booking thường cho từng người đua chỉ để "giữ chỗ thi", vì
-booking/session hiện tại là mô hình khách chơi theo slot, không phải race event.
-
-**BR-CT-002 — Contest phải biết chi nhánh tham gia và block capacity khi chạy thật**  
-IF: Contest chạy trong khung `starts_at` -> `ends_at` trên một `track_type`  
-THEN: Hệ thống phải biết các chi nhánh tham gia qua `contest_cafes`; Phase 1B phải ngăn booking thường làm trùng tài nguyên sân/xe trong khung đó.  
-NOTE: Schema hiện tại chưa có bảng block lịch theo track/time. Đây là gap cần xử lý
-ở phase vận hành thật.
-
-**BR-CT-003 — Contest cần config riêng theo từng giải**  
-IF: Mỗi giải có luật xe, format, vòng đấu, scoring và giải thưởng khác nhau  
-THEN: Contest phải có `vehicle_rule`, `format_config`, `scoring_config`, `prize_config`
-hoặc một `config` JSONB đủ rõ.  
-NOTE: Schema hiện tại chỉ có `vehicle_rule JSONB`; có thể dùng tạm nhưng tên field
-không phản ánh đầy đủ nghiệp vụ.
-
----
-
-## 3. Gap analysis của schema/API hiện tại
-
-Baseline RCField đã có:
-
-- `contests`: cần chuyển từ `cafe_id` sang `provider_id` và dùng `contest_cafes` để gắn nhiều chi nhánh tham gia.
-- `contest_registrations`: `contest_id`, `user_id`, `vehicle_source`, `vehicle_id`,
-  `customer_vehicle_id`, `status`.
-- Status: `ContestStatus { DRAFT, OPEN, CLOSED, RUNNING, COMPLETED, CANCELLED }`.
-- Registration status: `PENDING, CONFIRMED, CANCELLED, CHECKED_IN`.
-- API cơ bản: list contests, create contest, customer register.
-- Payment enum có `CONTEST_ENTRY`.
-
-Nhưng để tổ chức cuộc thi thật còn thiếu:
-
-| Gap | Hệ quả | Phase xử lý |
-|---|---|---|
-| Contest cũ gắn trực tiếp một `cafe_id` | Không thể để Provider mở một contest cho nhiều chi nhánh tham gia | Phase 1A |
-| Thiếu `contest_cafes` | Public listing theo cafe và check-in theo chi nhánh không có nguồn dữ liệu chuẩn | Phase 1A |
-| Không có registration window (`registration_opens_at`, `registration_closes_at`) | Không biết khi nào được đăng ký/hủy | Phase 1A |
-| `contest_registrations` unique `(contest_id, user_id)` | Một user không thể đăng ký nhiều hạng mục/class trong cùng contest | Phase 2 |
-| `contests` chỉ có một `track_type` | Không tổ chức được event nhiều phân khúc: drift + circuit + offroad | Phase 2 |
-| Không có `contest_classes` | Không tách beginner/open/spec/rental/BYOC | Phase 2 |
-| Không có waitlist | Full capacity là hết, không xử lý thay người | Phase 1B |
-| Không có schedule block | Contest có thể trùng booking thường | Phase 1B |
-| Không có round/heat/run/result | Không lưu được vòng loại, vòng chung kết, kết quả từng heat | Phase 2 |
-| Không có leaderboard | Không công khai bảng xếp hạng đúng nghĩa | Phase 2 |
-| `payment_components.booking_id` đang required | `CONTEST_ENTRY` không gắn được trực tiếp vào registration nếu không tạo booking giả | Phase 1B |
-| Không có staff/official assignment | Không phân vai race director/timekeeper/tech inspector | Phase 2 |
-| Không có prize table | Không quản lý cơ cấu giải và trao thưởng | Phase 2 |
-| Không có audit chỉnh kết quả | Dễ tranh cãi khi staff sửa điểm/penalty | Phase 2 |
-
-**Kết luận:** Phase 1A cần tối thiểu ba bảng `contests`, `contest_cafes`,
-`contest_registrations` để đúng mô hình Provider tạo contest multi-branch. Các bảng
-race management nâng cao vẫn để Phase 2.
-
----
-
-## 4. Mô hình thực tế nên học theo
-
-### 4.1 RC racing chuyên nghiệp
-
-Từ IFMAR/ROAR và các CLB RC:
-
-- Event có người điều hành: Race Director, Referee, Timekeeper, Marshal.
-- Thường có practice trước khi race.
-- Qualifying heats dùng để seed starting grid hoặc chia A/B/C mains.
-- Kết quả race phổ biến là "most laps, least elapsed time".
-- Mains/finals xác định người thắng; A-main là nhóm top, B/C-main là nhóm dưới.
-- Một số giải dùng triple A-main hoặc qual-points.
-- Xe có thể bị technical inspection trước/sau race.
-- Timing chuyên nghiệp thường dùng transponder + detection loop để ghi lap time tự động.
-
-### 4.2 RC cafe / event entertainment
-
-Từ mô hình RC cafe và mobile RC event:
-
-- Người mới cần format dễ tham gia: rental/spec car, short heat, staff hướng dẫn.
-- Event có thể là birthday/private/corporate/team-building, không phải lúc nào cũng là giải chuyên nghiệp.
-- Cafe thường bán trải nghiệm theo thời lượng, training, party, subscription hoặc event package.
-- Điểm hấp dẫn không chỉ là thắng thua, mà là tụ tập, xem nhau chạy, bảng thành tích, podium, ảnh/video sau giải.
-
-### 4.3 Cách áp dụng vào RCField
-
-RCField nên bắt đầu từ "social contest" theo chi nhánh:
-
-1. Rental-only/spec race để người mới tham gia được ngay.
-2. BYOC open race cho cộng đồng đã có xe.
-3. Time attack leaderboard để tổ chức thường xuyên mà ít tốn nhân sự.
-4. Qualifying + mains cho giải lớn hơn.
-5. Drift/crawler/endurance/team chỉ đưa vào khi đã có scoring engine.
-
----
-
-## 5. Product principle
-
-**BR-CT-010 — Contest phục vụ cộng đồng trước, competition sau**  
-IF: Thiết kế feature Contest  
-THEN: Ưu tiên làm rõ public event page, đăng ký dễ, check-in nhanh, bảng kết quả minh bạch,
-và lịch sử thành tích để người chơi quay lại.  
-NOTE: Đây là phần gắn trực tiếp với tên đề tài "kết nối mọi người lại với nhau".
-
-**BR-CT-011 — Rental/spec race là format mở đầu tốt nhất**  
-IF: Cafe muốn tổ chức contest cho nhiều người mới  
-THEN: Nên dùng rental-only hoặc spec rental class: cùng loại xe, cùng track, short heats,
-entry fee rõ ràng, staff điều phối.  
-NOTE: BYOC open class hấp dẫn với cộng đồng RC nhưng phức tạp hơn vì luật xe, tech check
-và tranh cãi cấu hình.
-
-**BR-CT-012 — Không trộn người mới và pro nếu không có class**  
-IF: Contest có cả khách mới và tay đua quen  
-THEN: Tách class như `BEGINNER`, `OPEN`, `RENTAL_SPEC`, `BYOC_OPEN`.  
-NOTE: Tách class giúp công bằng và tăng khả năng giữ chân người mới.
-
-**BR-CT-013 — Mọi kết quả công khai phải trace được**  
-IF: Leaderboard hoặc podium được publish  
-THEN: Phải truy vết được kết quả đến heat/run, người nhập, thời điểm xác nhận và penalty.
-
----
-
-## 6. Phase roadmap đề xuất
-
-### Phase 0 — Alignment & spec cleanup
-
-Mục tiêu: thống nhất Contest nằm ở scope nào, tránh BE/FE hiểu khác nhau.
-
-| Hạng mục | Việc cần làm |
-|---|---|
-| Chốt scope | Phase 1 đã hỗ trợ Provider tạo contest với nhiều chi nhánh tham gia; series/championship để Phase 2+ |
-| Chốt payment | Không tạo booking giả cho contest entry; cần ledger support cho contest registration |
-| Chốt schedule block | Contest phải block track/time trước khi mở đăng ký |
-| Chốt MVP format | Rental-only social cup + BYOC simple registration |
-| Chốt naming | `Contest` = event, `ContestClass` = hạng mục, `ContestEntry` = lượt đăng ký |
-
-**Deliverable:** cập nhật spec/API/database trước khi implement lớn.
-
-### Phase 1A — Contest Registration MVP
-
-Mục tiêu: Provider tạo được contest multi-branch, public listing, customer đăng ký contest chung, staff/provider xem danh sách và check-in.
-
-Fit với schema hiện tại:
-
-- Provider tạo contest ở cấp provider và chọn các cafe ACTIVE của mình vào `contest_cafes`.
-- Staff không tạo contest.
-- Public xem contest ở `/contests` hoặc theo cafe tham gia.
-- Customer đăng ký một lần cho một contest.
-- Chọn `vehicle_source = RENTAL` hoặc `BYOC`.
-- `ContestRegistration.status`: `PENDING -> CONFIRMED -> CHECKED_IN`.
-- Staff check-in người tham gia thủ công.
-- Result/leaderboard có thể ghi ngoài platform hoặc trong note tạm, chưa gọi là scoring engine.
-
-Không nên hứa:
-
-- Chưa có chia heat tự động.
-- Chưa có leaderboard chính thức.
-- Chưa có multi-class.
-- Chưa có transponder/live timing.
-
-### Phase 1C — Provider Participant Registration
-
-Mục tiêu: khi hệ thống có nhiều Provider cùng tổ chức contest, Provider cũng có thể
-tham gia contest của Provider khác như racer.
-
-- Cho role `PROVIDER` gọi `POST /contests/:id/register` nếu contest không thuộc `provider_id` của họ.
-- Lưu `participant_role_snapshot = PROVIDER`.
-- Không cho Provider tự đăng ký contest do chính mình tạo.
-- Staff vẫn không đăng ký bằng role staff; nếu một người muốn đua thì dùng tài khoản customer/provider riêng theo policy tài khoản.
-
-### Phase 1B — Operational Contest Core
-
-Mục tiêu: contest chạy thật tại chi nhánh mà không phá booking/fleet/payment, và
-đủ sâu cho đồ án có result, leaderboard và reward đơn giản.
-
-Nên bổ sung:
-
-- Registration window.
-- Schedule block theo `cafe_id`, `track_type`, time range, `source_type = CONTEST`.
-- Entry payment gắn với `contest_registration_id`.
-- Waitlist.
-- Cancellation/refund rules.
-- Staff check-in screen.
-- Rental vehicle pool cho contest.
-- BYOC tech check checklist.
-- Manual result entry đơn giản: fastest lap hoặc final rank.
-- `contest_classes` tối thiểu một class mặc định nếu Provider không tách hạng mục.
-- `contest_rounds` + `contest_heats` tạo thủ công để staff nhập kết quả.
-- `contest_results` verified trước khi publish.
-- `contest_leaderboard_snapshots` cho public board.
-- `contest_rewards` + `contest_reward_claims` cho phần thưởng non-cash.
-
-### Phase 2 — Race Management Core
-
-Mục tiêu: tổ chức giải đúng nghĩa.
-
-Nên bổ sung:
-
-- `contest_classes`: hạng mục trong contest.
-- `contest_entries`: một customer có thể tham gia nhiều class.
-- `contest_rounds`: practice, qualifying, semi-final, final.
-- `contest_heats`: heat/mains trong từng round.
-- `contest_heat_entries`: người đua trong heat, grid position.
-- `contest_results`: lap count, elapsed time, best lap, rank, penalty, DQ.
-- `contest_leaderboard_snapshots`: bảng xếp hạng per class/round/final đã publish.
-- `contest_rewards`: phần thưởng theo rank/best-lap/participation.
-- `contest_reward_claims`: phần thưởng đã assign/claimed.
-- Audit chỉnh kết quả.
-
-Format nên hỗ trợ:
-
-- Time attack.
-- Qualifying + mains.
-- Points-based rounds.
-- Bracket head-to-head.
-- Drift judged score.
-- Crawler/obstacle penalty.
-
-### Phase 2B — Large Tournament Controls
-
-Mục tiêu: xử lý giải lớn có nhiều tranh chấp, nhiều official, nhiều bảng đấu.
-
-Nên bổ sung:
-
-- `contest_result_audits`: mọi sửa kết quả phải có before/after/reason.
-- `contest_protests`: participant khiếu nại kết quả trong deadline.
-- `contest_officials`: Race Director, Referee, Timekeeper, Tech Inspector.
-- `contest_brackets` / `contest_bracket_matches`: knockout/head-to-head.
-- `contest_laps`: lap-by-lap timing hoặc import.
-- `contest_teams`: endurance/team race.
-
-### Phase 3 — Community & Multi-Branch Expansion
-
-Mục tiêu: đúng tinh thần "kết nối mọi người".
-
-Nên bổ sung:
-
+| Provider tạo/sửa/open/close/cancel contest | Có |
+| Public xem thông tin giải, luật, địa điểm, giải thưởng | Có |
+| Customer đăng ký contest khi OPEN | Có |
+| Provider xem dashboard người tham gia | Có |
+| Staff lookup/check-in bằng code | Có |
+| Close registration | Có |
+| Generate schedule sau khi CLOSED/RUNNING | Có |
+| Match linh hoạt 1, 2, 4 hoặc nhiều người | Có |
+| Staff/Provider nhập result thủ công | Có |
+| Advance winner/qualified sang match sau | Có |
+| Publish leaderboard cuối | Có |
+| Business monitoring bằng audit log DB | Có |
+
+### Next — Làm sau khi phase này ổn
+
+- Schedule block để contest không trùng booking thường.
+- Payment subject `CONTEST_ENTRY` thật, không tạo booking giả.
+- BYOC tech-check checklist structured.
+- Rental vehicle assignment đầy đủ tại check-in.
+- Reward claim lifecycle nếu muốn phát voucher/package tự động.
+- Official roles: race director, timekeeper, tech inspector.
+
+### Backlog — Không mở scope đồ án hiện tại
+
+- Multi-class trong một contest.
+- Live timing/transponder/lap-by-lap.
+- Protest workflow.
+- Auto bracket phức tạp.
 - Series/championship nhiều contest.
-- Cross-branch leaderboard.
-- Season points.
-- Team entry/endurance race.
-- Profile thành tích của racer.
-- Public result page, shareable podium, ảnh/video recap.
-- Sponsor/prize management nâng cao.
-
-### Phase 4 — Automation & Advanced Integrations
-
-Mục tiêu: nâng cấp vận hành chuyên nghiệp.
-
-Nên bổ sung:
-
-- MYLAPS/RC timing import hoặc integration.
-- Live leaderboard.
-- Auto heat generation theo seed/ranking.
-- Auto bump-up từ B-main lên A-main.
-- AI hỗ trợ phân tích lap/performance.
-- Analytics về retention, event revenue, participant return rate.
+- Cash prize/payout.
 
 ---
 
-## 7. Contest types nên hỗ trợ
+## 2. Data Model Boundary
 
-| Type | Mô tả | Người phù hợp | Scoring | Độ khó |
-|---|---|---|---|---|
-| `RENTAL_SPEC_CUP` | Cafe cung cấp xe giống nhau, người chơi chỉ cần đăng ký | Người mới, party, community day | Laps/time hoặc fastest lap | Thấp |
-| `TIME_ATTACK` | Chạy lấy best lap trong một cửa sổ thời gian | Mọi người, weekly leaderboard | Best lap thấp nhất | Thấp-vừa |
-| `BYOC_OPEN_RACE` | Người chơi mang xe cá nhân | Cộng đồng RC | Laps/time qua heats/finals | Vừa |
-| `QUALIFYING_MAINS` | Practice -> qualifying -> A/B/C mains | Giải nghiêm túc | Most laps, least time | Cao |
-| `DRIFT_JUDGED` | Chấm line, angle, style, penalty | Drift community | Judge score | Cao |
-| `CRAWLER_TRIAL` | Vượt obstacle, tính penalty/time | Offroad/crawler | Penalty thấp nhất | Vừa |
-| `ENDURANCE_TEAM` | Team thay driver/xe trong thời gian dài | Nhóm bạn, community | Total laps | Cao |
-| `PRIVATE_PARTY_RACE` | Event riêng cho sinh nhật/team-building | Nhóm private | Short heats + podium | Thấp |
-| `MULTI_BRANCH_SERIES` | Chuỗi giải nhiều chi nhánh | Advanced community | Season points | Rất cao |
-
----
-
-## 8. Luồng end-to-end
-
-### 8.1 Provider tạo contest
-
-```mermaid
-flowchart TD
-    A([Provider muốn tổ chức giải]) --> B[Chọn các chi nhánh ACTIVE tham gia]
-    B --> C[Chọn track_type và thời gian]
-    C --> D{Có trùng booking/closure/contest khác?}
-    D -->|Có| D1[Từ chối hoặc yêu cầu đổi lịch]
-    D -->|Không| E[Nhập tên, mô tả, ảnh/banner]
-    E --> F[Chọn format_template]
-    F --> G[Cấu hình vehicle_rule]
-    G --> H[Cấu hình capacity, entry_fee, prize]
-    H --> I[Cấu hình registration window]
-    I --> J[Save Contest DRAFT]
-    J --> K{Provider mở đăng ký?}
-    K -->|Có| L[Validate đầy đủ rule + schedule block]
-    L --> M[Contest OPEN]
-    K -->|Chưa| N[Giữ DRAFT]
-```
-
-**BR-CT-020 — Cafe phải ACTIVE**  
-IF: Một chi nhánh trong `participating_cafe_ids` không `ACTIVE` hoặc không thuộc Provider hiện tại  
-THEN: Không cho tạo/open contest.
-
-**BR-CT-021 — Provider subscription active**  
-IF: PROVIDER tạo hoặc mở contest  
-THEN: Service phải gọi `assertSubscriptionActive(providerId)`.  
-NOTE: Tạo contest là write operation tạo doanh thu/hoạt động mới, nên block khi grace/expired.
-
-**BR-CT-022 — Chỉ Provider tạo contest**  
-IF: User role là `STAFF`, `CUSTOMER` hoặc `ADMIN` gọi API tạo contest  
-THEN: Từ chối với `FORBIDDEN`.  
-NOTE: Admin có thể hỗ trợ qua tooling riêng sau này, nhưng không nằm trong API vận hành Provider.
-
-**BR-CT-023 — Contest DRAFT chưa public**  
-IF: `contest.status = DRAFT`  
-THEN: Chỉ Provider sở hữu contest xem được; public listing không hiển thị.
-
-**BR-CT-024 — OPEN chỉ khi config đủ**  
-IF: Contest thiếu participating cafe, time range, capacity, entry_fee policy, vehicle_rule hoặc registration window  
-THEN: Không cho chuyển `DRAFT -> OPEN`.
-
-**BR-CT-025 — Staff chỉ check-in tại chi nhánh được assign**  
-IF: Staff check-in contest registration  
-THEN: Staff phải thuộc `checked_in_cafe_id` và cafe đó phải nằm trong `contest_cafes`.
-
-### 8.2 Customer đăng ký contest
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant C as Customer
-    participant App as Web App
-    participant API as API
-    participant DB as DB
-    participant Pay as Payment Gateway
-
-    C->>App: Xem contest public hoặc contest của một chi nhánh
-    App->>API: GET /contests hoặc GET /cafes/:cafeId/contests
-    API-->>App: Contest OPEN
-    C->>App: Chọn tham gia
-    App->>API: POST /contests/:id/register
-    API->>DB: Validate contest OPEN, registration window, capacity, vehicle_rule
-    API->>DB: Validate rental/BYOC vehicle
-    API->>DB: Validate user chưa đăng ký contest này
-    API->>DB: INSERT contest_registrations(PENDING)
-    alt entry_fee > 0
-        API->>Pay: Create contest entry payment
-        Pay-->>API: Payment success
-        API->>DB: registration CONFIRMED
-    else free contest
-        API->>DB: registration CONFIRMED
-    end
-    API-->>App: Vé tham gia / QR check-in
-```
-
-**BR-CT-030 — Chỉ đăng ký khi Contest OPEN**  
-IF: Contest không ở `OPEN`  
-THEN: Customer hoặc Provider participant không được đăng ký mới.
-
-**BR-CT-031 — Một user một registration trong schema hiện tại**  
-IF: Dùng bảng `contest_registrations` hiện tại  
-THEN: Một `user_id` chỉ đăng ký một lần cho một `contest_id`.  
-NOTE: Muốn cho user tham gia nhiều hạng mục cần Phase 2 `contest_entries`.
-
-**BR-CT-032 — Capacity phải lock bằng transaction**  
-IF: Customer đăng ký contest có giới hạn capacity  
-THEN: Count confirmed/pending registrations phải chạy trong DB transaction/row lock để tránh overbook.  
-NOTE: MVP tính capacity ở cấp contest tổng, không chia capacity theo chi nhánh.
-
-**BR-CT-033 — Entry fee > 0 thì registration bắt đầu PENDING**  
-IF: Contest có `entry_fee > 0`  
-THEN: Tạo registration `PENDING`, chỉ chuyển `CONFIRMED` khi payment thành công hoặc staff xác nhận payment manual theo policy.
-
-**BR-CT-034 — Entry fee = 0 có thể auto-confirm**  
-IF: Contest miễn phí và capacity còn chỗ  
-THEN: Registration có thể chuyển ngay `CONFIRMED`.
-
-**BR-CT-034A — Provider participant phase**  
-IF: Role `PROVIDER` đăng ký contest ở Phase 1C  
-THEN: Chỉ cho đăng ký contest có `provider_id` khác user đó; lưu `participant_role_snapshot = PROVIDER`.  
-IF: Provider đăng ký contest do chính mình tạo  
-THEN: Từ chối với `CONTEST_SELF_REGISTRATION_FORBIDDEN`.
-
-**BR-CT-035 — Rental vehicle trong contest không giống rental booking thường**  
-IF: Contest dùng xe rental của quán  
-THEN: `vehicle_rule` phải nói rõ xe được assign lúc đăng ký hay lúc check-in.  
-NOTE: Với rental spec cup, nên assign xe lúc check-in để cân bằng và tránh lock từng xe quá sớm.
-
-**BR-CT-036 — BYOC phải qua tech check**  
-IF: Customer đăng ký bằng BYOC  
-THEN: Trước khi `CHECKED_IN`, Staff phải xác nhận xe đạt rule an toàn/class: pin, kích thước,
-motor, lốp, trọng lượng hoặc rule tối thiểu mà contest đặt ra.
-
-### 8.3 Pre-event: đóng đăng ký và chia lịch
-
-```mermaid
-flowchart TD
-    A[Contest OPEN] --> B{registration_closes_at tới hạn?}
-    B -->|Chưa| A
-    B -->|Rồi| C[Contest CLOSED]
-    C --> D[Chốt danh sách CONFIRMED]
-    D --> E[Đánh dấu unpaid/cancelled/no-show risk]
-    E --> F{Format có heat/round?}
-    F -->|Không| G[Chuẩn bị check-in list]
-    F -->|Có| H[Generate rounds/heats/grid]
-    H --> I[Publish schedule]
-    G --> I
-```
-
-**BR-CT-040 — CLOSED nghĩa là ngừng nhận đăng ký mới**  
-IF: Contest chuyển `OPEN -> CLOSED`  
-THEN: Không cho đăng ký mới, trừ staff override có audit.
-
-**BR-CT-041 — Waitlist xử lý sau capacity**  
-IF: Contest full nhưng vẫn cho customer quan tâm  
-THEN: Phase 1B nên có `WAITLIST`; khi có người hủy, promote theo thứ tự đăng ký.  
-NOTE: Enum hiện tại chưa có `WAITLIST`.
-
-**BR-CT-042 — Heat generation không thuộc schema hiện tại**  
-IF: Contest cần chia heat/final  
-THEN: Phase 2 phải có bảng `contest_rounds`, `contest_heats`, `contest_heat_entries`.
-
-### 8.4 Event day: check-in và vận hành race
-
-```mermaid
-flowchart TD
-    A[Customer đến cafe] --> B[Staff scan QR / tìm registration]
-    B --> C{Registration CONFIRMED?}
-    C -->|Không| C1[Từ chối hoặc xử lý payment]
-    C -->|Có| D[Verify identity]
-    D --> E{Vehicle source}
-    E -->|RENTAL| F[Assign rental car / transponder]
-    E -->|BYOC| G[Tech check BYOC]
-    F --> H[Contest check-in]
-    G --> H
-    H --> I[Briefing luật an toàn]
-    I --> J[Practice / staging]
-    J --> K[Run heats/rounds]
-    K --> L[Record result]
-    L --> M[Verify result]
-    M --> N{Còn vòng tiếp?}
-    N -->|Có| K
-    N -->|Không| O[Compute final leaderboard]
-    O --> P[Podium / prize / publish result]
-    P --> Q[Contest COMPLETED]
-```
-
-**BR-CT-050 — CHECKED_IN là trạng thái có mặt, chưa phải đang chạy heat**  
-IF: Registration chuyển `CONFIRMED -> CHECKED_IN`  
-THEN: Nghĩa là customer đã có mặt và đủ điều kiện tham gia event.
-
-**BR-CT-050A — Check-in gắn với chi nhánh tham gia**  
-IF: Staff/Provider check-in registration  
-THEN: `checked_in_cafe_id` phải nằm trong `contest_cafes` và `check_in_enabled = true`.
-
-**BR-CT-051 — Rental handover vẫn cần evidence nếu có rủi ro damage**  
-IF: Contest giao xe rental cho customer điều khiển  
-THEN: Provider phải chọn một trong hai policy:
-- Contest includes normal wear: không tính damage nhỏ trong racing, chỉ charge gross negligence.
-- Contest uses deposit: cần inspection/checklist tương tự booking/session.
-
-**BR-CT-052 — BYOC damage chủ yếu là trách nhiệm customer**  
-IF: BYOC bị hỏng do chính người chơi điều khiển  
-THEN: Platform không tự tính damage charge cho xe BYOC.  
-IF: BYOC gây hư hỏng facility hoặc xe người khác  
-THEN: Ghi incident theo `BR-dispute.md` ở mức vận hành chi nhánh.
-
-**BR-CT-053 — Result chỉ publish sau verify**  
-IF: Staff nhập kết quả heat/run  
-THEN: Result ở trạng thái draft/pending verify; Race Director hoặc Timekeeper xác nhận mới publish.
-
----
-
-## 9. State machine đề xuất
-
-### 9.1 ContestStatus
-
-```mermaid
-stateDiagram-v2
-    [*] --> DRAFT: create
-    DRAFT --> OPEN: open registration
-    OPEN --> CLOSED: registration closes
-    CLOSED --> RUNNING: event starts
-    RUNNING --> COMPLETED: results verified
-    DRAFT --> CANCELLED: cancel draft
-    OPEN --> CANCELLED: cancel before event
-    CLOSED --> CANCELLED: cancel before running
-    RUNNING --> CANCELLED: abort event
-    COMPLETED --> [*]
-    CANCELLED --> [*]
-```
-
-**BR-CT-060 — Không update status trực tiếp**  
-IF: Contest đổi status  
-THEN: Phải qua `ContestService.transition(contestId, event)` giống pattern booking/session.
-
-**BR-CT-061 — RUNNING không được sửa rule chính**  
-IF: Contest đã `RUNNING`  
-THEN: Không cho sửa `track_type`, `vehicle_rule`, `entry_fee`, capacity, scoring rule, prize rule.  
-NOTE: Nếu bắt buộc sửa vì sự cố, phải có admin/staff override audit.
-
-**BR-CT-062 — COMPLETED là terminal**  
-IF: Contest đã `COMPLETED`  
-THEN: Không mở đăng ký, không đổi kết quả final nếu không có correction workflow/audit.
-
-### 9.2 ContestRegistrationStatus
-
-```mermaid
-stateDiagram-v2
-    [*] --> PENDING: register/payment pending
-    PENDING --> CONFIRMED: payment success/manual confirm
-    PENDING --> CANCELLED: payment timeout/customer cancel
-    CONFIRMED --> CHECKED_IN: event check-in
-    CONFIRMED --> CANCELLED: cancel before cutoff
-    CHECKED_IN --> [*]
-    CANCELLED --> [*]
-```
-
-Nên bổ sung ở Phase 1B/2:
-
-- `WAITLIST`: customer đứng chờ khi full.
-- `NO_SHOW`: đã confirmed nhưng không đến.
-- `DISQUALIFIED`: bị loại do rule/tech/sportsmanship.
-
----
-
-## 10. Vehicle rule
-
-`vehicle_rule` hiện là JSONB duy nhất trong `contests`. Trong Phase 1A có thể dùng
-tạm để lưu rule tổng hợp.
-
-Ví dụ:
-
-```json
-{
-  "vehicle_policy": "RENTAL_ONLY",
-  "assignment_policy": "AT_CHECK_IN",
-  "allowed_vehicle_tiers": ["STANDARD"],
-  "rental_pool_vehicle_ids": ["uuid-1", "uuid-2"],
-  "requires_deposit": false,
-  "damage_policy": "NORMAL_WEAR_INCLUDED_GROSS_NEGLIGENCE_CHARGED",
-  "byoc_rules": null,
-  "tech_check_required": true,
-  "safety_briefing_required": true
-}
-```
-
-Policy nên hỗ trợ:
-
-| Policy | Ý nghĩa | Gợi ý phase |
-|---|---|---|
-| `RENTAL_ONLY` | Chỉ dùng xe quán | Phase 1A |
-| `BYOC_ONLY` | Chỉ xe cá nhân | Phase 1A |
-| `MIXED_SEPARATE_CLASSES` | Rental và BYOC tách class | Phase 2 |
-| `MIXED_OPEN` | Rental/BYOC chạy chung | Phase 2, cần rule rất rõ |
-| `SPEC_RENTAL` | Xe quán cùng spec để công bằng | Phase 1B |
-| `SPEC_BYOC` | BYOC phải đúng spec | Phase 2 |
-
-**BR-CT-070 — Không cho rental vehicle MAINTENANCE/RETIRED vào pool**  
-IF: Provider chọn rental pool cho contest  
-THEN: Chỉ xe `AVAILABLE` hoặc xe được plan reserved mới được chọn; không chọn xe `MAINTENANCE`/`RETIRED`.
-
-**BR-CT-071 — Rental pool phải cùng track compatibility**  
-IF: Contest `track_type = DRIFT`  
-THEN: Xe trong rental pool phải compatible với DRIFT hoặc `compatible_track_types = []`.
-
-**BR-CT-072 — BYOC rule không nên quá chi tiết ở MVP**  
-IF: Phase 1A chưa có tech-check engine  
-THEN: BYOC rule chỉ nên ở mức safety/class text + staff manual verification.  
-NOTE: Đừng cố implement đầy đủ motor/battery/tire homologation ngay.
-
----
-
-## 11. Format và scoring
-
-### 11.1 Time attack
-
-Người chơi chạy một hoặc nhiều run, lấy best lap.
-
-Sort:
-
-```text
-best_lap_time ASC
-tie_breaker: second_best_lap ASC, then earliest_recorded_at ASC
-```
-
-Phù hợp:
-
-- Weekly leaderboard.
-- Contest cafe nhỏ.
-- Người mới vì không cần race đông cùng lúc.
-
-### 11.2 Qualifying + mains
-
-Mô hình chuẩn RC racing:
-
-1. Practice.
-2. Qualifying heats.
-3. Seed drivers theo best qualifying result hoặc points.
-4. Chia A-main, B-main, C-main nếu đông.
-5. Run final/mains.
-6. Winner theo final result.
-
-Sort race result:
-
-```text
-lap_count DESC
-elapsed_time ASC
-penalty_count ASC
-```
-
-**BR-CT-080 — Result race chính là driver result**  
-IF: Một heat/run hoàn tất  
-THEN: Scoring nên gắn với entry/driver, không chỉ vehicle.  
-NOTE: ROAR cũng xem driver là đối tượng được score; RCField vẫn cần snapshot vehicle
-để quản lý rental/BYOC và tech check.
-
-### 11.3 Points-based rounds
-
-Mỗi round cho điểm theo rank. Có thể dùng:
-
-- Lower-is-better: rank 1 = 1 point, rank 2 = 2 points.
-- Higher-is-better: rank 1 = 100 points, rank 2 = 95 points.
-
-RCField nên chọn một kiểu trong `scoring_config`, không mix.
-
-### 11.4 Drift judged
-
-Chấm theo:
-
-- Line.
-- Angle.
-- Style.
-- Clipping zone.
-- Penalty/zero run.
-
-Sort:
-
-```text
-total_score DESC
-penalty ASC
-best_single_run_score DESC
-```
-
-### 11.5 Crawler/obstacle trial
-
-Chấm theo:
-
-- Penalty thấp nhất.
-- Thời gian thấp nhất nếu cùng penalty.
-- Gate cleared / DNF.
-
-Sort:
-
-```text
-penalty_points ASC
-elapsed_time ASC
-gates_completed DESC
-```
-
----
-
-## 12. Payment và refund
-
-**BR-CT-090 — Contest entry fee là component riêng**  
-IF: Contest có `entry_fee > 0`  
-THEN: Payment ledger phải tạo component `CONTEST_ENTRY`.  
-NOTE: Schema hiện tại `payment_components.booking_id NOT NULL` không phù hợp. Nên mở rộng
-payment subject: `booking_id` nullable + `contest_registration_id` nullable, hoặc dùng
-`subject_type`, `subject_id`.
-
-**BR-CT-091 — Không tạo booking giả chỉ để thu entry fee**  
-IF: Cần thu phí contest  
-THEN: Không nên tạo booking giả vì sẽ làm sai booking lifecycle, settlement, no-show và doanh thu slot.
-
-**BR-CT-092 — Provider hủy contest thì refund 100%**  
-IF: Contest bị Provider sở hữu hủy trước hoặc trong event  
-THEN: Hoàn 100% `CONTEST_ENTRY` cho registrations đã paid/confirmed.
-
-**BR-CT-093 — Customer hủy trước cutoff**  
-IF: Customer hủy trước `registration_closes_at` hoặc trước cutoff config  
-THEN: Refund theo `refund_policy` của contest.  
-Gợi ý MVP:
-
-| Thời điểm hủy | Refund entry fee |
-|---|---:|
-| Trước registration close | 100% |
-| Sau registration close, trước event | 50% hoặc 0% theo config |
-| Sau check-in | 0% |
-
-**BR-CT-094 — Prize cash không thuộc Phase 1**  
-IF: Contest có giải thưởng  
-THEN: Phase 1 nên dùng non-cash prize: voucher, package slots, trophy, F&B coupon.  
-NOTE: Cash prize/payout liên quan pháp lý, ví, thuế, fraud; nên để Phase 2+ hoặc manual outside platform.
-
----
-
-## 13. Leaderboard
-
-Leaderboard cần ba cấp:
-
-| Cấp | Mô tả | Phase |
-|---|---|---|
-| Contest leaderboard | Kết quả trong một contest/class | Phase 2 |
-| Branch leaderboard | Best lap/points theo chi nhánh/track theo tuần/tháng | Phase 3 |
-| Series leaderboard | Điểm mùa giải nhiều contest/multi-branch | Phase 3+ |
-
-**BR-CT-100 — Leaderboard phải có scope**  
-IF: Publish leaderboard  
-THEN: Phải ghi rõ scope: contest, class, track type, date range, format.
-
-**BR-CT-101 — Leaderboard không thay thế result audit**  
-IF: Leaderboard hiển thị rank  
-THEN: Nó phải được tính từ result đã verify; không nhập rank tay nếu có thể tránh.
-
-**BR-CT-102 — Tie-breaker phải công khai trước race**  
-IF: Có thể có hòa điểm/lap  
-THEN: `scoring_config.tie_breakers` phải được publish trước khi contest RUNNING.
-
-**BR-CT-103 — Leaderboard snapshot là bản public ổn định**  
-IF: Provider publish leaderboard  
-THEN: System lưu `contest_leaderboard_snapshots.payload` chứa ordered standings, scoring format,
-tie-breaker đã áp dụng và timestamp publish.  
-NOTE: Không nên render public leaderboard trực tiếp từ query động nếu result còn đang được sửa.
-
-**BR-CT-104 — Không publish result chưa verify**  
-IF: `contest_results.status != VERIFIED`  
-THEN: Result đó không được tính vào leaderboard public.
-
-**BR-CT-105 — Scope leaderboard bắt buộc rõ ràng**  
-IF: Leaderboard được publish  
-THEN: Scope phải là một trong `CONTEST_FINAL`, `CONTEST_CLASS`, `ROUND`, `HEAT`, `BRANCH_MONTHLY`, `SERIES`.
-
----
-
-## 14. Prize config
-
-Ví dụ Phase 1/2:
-
-```json
-{
-  "prize_type": "NON_CASH",
-  "awards": [
-    { "rank": 1, "title": "Champion", "reward": "5 free slots + trophy" },
-    { "rank": 2, "title": "Runner-up", "reward": "3 free slots" },
-    { "rank": 3, "title": "Third place", "reward": "1 free slot" },
-    { "special": "BEST_LAP", "reward": "F&B coupon 100k" }
-  ],
-  "publish_prize": true
-}
-```
-
-Reward type nên hỗ trợ:
-
-| Type | Ý nghĩa | Gợi ý phase |
-|---|---|---|
-| `VOUCHER` | Mã giảm giá hoặc coupon | Phase 1B |
-| `PACKAGE_SLOT` | Tặng slot/gói chơi | Phase 1B |
-| `FNB_COUPON` | Coupon đồ uống/món ăn | Phase 1B |
-| `TROPHY_MANUAL` | Cúp/huy chương trao ngoài hệ thống | Phase 1B |
-| `POINTS` | Điểm mùa giải/community score | Phase 3 |
-| `CUSTOM` | Mô tả thủ công | Phase 1B |
-
-**BR-CT-110 — Reward không được thấp hơn rule đã publish**  
-IF: Contest đã OPEN  
-THEN: Provider không được giảm reward đã công bố, trừ khi cancel contest hoặc có admin override audit.
-
-**BR-CT-111 — Award cần gắn với final standing**  
-IF: Contest COMPLETED  
-THEN: Award được tính từ final leaderboard đã verify.
-
-**BR-CT-112 — Reward claim chỉ tạo từ nguồn đã verify**  
-IF: System tạo `contest_reward_claims`  
-THEN: Claim phải tham chiếu reward config và registration/user thắng giải; nếu reward dựa trên result thì result phải `VERIFIED`.
-
-**BR-CT-113 — Cash prize không nằm trong platform phase đầu**  
-IF: Provider muốn trao tiền mặt  
-THEN: Hệ thống chỉ ghi chú `CUSTOM`/manual outside platform, không xử lý ví, payout, thuế hoặc fraud trong Phase 1/2 đồ án.
-
----
-
-## 14A. Competition structure cho đồ án và giải lớn
-
-Đồ án nên làm một Competition Core đủ sâu nhưng kiểm soát scope:
-
-| Capability | Nên làm trong đồ án? | Ghi chú |
-|---|---|---|
-| Contest multi-branch registration | Có | Đã là Phase 1A |
-| Check-in theo chi nhánh tham gia | Có | Dựa trên `checked_in_cafe_id` |
-| One default class | Có | Tự tạo `DEFAULT` nếu Provider không tách class |
-| Manual rounds/heats | Có | Provider tạo thủ công, không auto seed phức tạp |
-| Manual result entry | Có | TIME_ATTACK hoặc RACE_FINAL |
-| Verified result | Có | Trước khi publish leaderboard |
-| Leaderboard snapshot | Có | Public board ổn định |
-| Non-cash rewards | Có | Voucher/package/F&B/manual trophy |
-| Reward claims | Có | Tạo khi complete contest |
-| Result audit | Nên có | Ít nhất khi sửa result đã verify |
-| Protest workflow | Backlog | Có thể mô tả, chưa cần implement |
-| Auto bracket generation | Backlog | Phase 2B/3 |
-| Live transponder timing | Backlog | Phase 4 |
-
-**BR-CT-120 — Default class giúp MVP không bị kẹt bởi multi-class**  
-IF: Provider không tạo class riêng  
-THEN: System có thể tạo `contest_classes(code=DEFAULT)` khi contest chuyển OPEN hoặc khi tạo heat đầu tiên.
-
-**BR-CT-121 — Heat là đơn vị nhập kết quả thủ công**  
-IF: Staff nhập result  
-THEN: Result phải gắn với `contest_heat_entries`, không nhập rank lẻ trực tiếp vào registration.
-
-**BR-CT-122 — Scoring format quyết định field bắt buộc**  
-IF: `scoring_format = TIME_ATTACK`  
-THEN: `best_lap_ms` là field bắt buộc để rank.  
-IF: `scoring_format = RACE_FINAL`  
-THEN: `lap_count` và `elapsed_ms` là field bắt buộc để rank.  
-IF: `scoring_format = DRIFT_JUDGED`  
-THEN: `judge_score` và penalty config là field bắt buộc.  
-
-**BR-CT-123 — Sửa kết quả cần audit**  
-IF: Result đã `VERIFIED` bị sửa hoặc void  
-THEN: Phải tạo `contest_result_audits` với before/after JSON và reason.
-
-**BR-CT-124 — Large tournament cần official roles**  
-IF: Contest dùng protest, bracket hoặc multi-round serious race  
-THEN: Nên assign official roles trước event để biết ai được verify result, resolve protest, hoặc publish final.
-
----
-
-## 15. Data model đề xuất theo phase
-
-### Phase 1A registration multi-branch MVP
+Schema mục tiêu phase này:
 
 ```text
 contests
 contest_cafes
 contest_registrations
+contest_matches
+contest_match_participants
+contest_audit_logs
 ```
 
-Schema tối thiểu:
-
-```text
-contests.provider_id
-contests.track_type_id
-contests.registration_opens_at
-contests.registration_closes_at
-contests.banner_image_url
-contests.config jsonb
-contest_cafes.contest_id
-contest_cafes.cafe_id
-contest_cafes.check_in_enabled
-contest_registrations.participant_role_snapshot
-contest_registrations.check_in_code
-contest_registrations.checked_in_cafe_id
-contest_registrations.checked_in_by
-contest_registrations.checked_in_at
-contest_registrations.cancelled_at
-contest_registrations.metadata jsonb
-```
-
-### Phase 1B operational
-
-```text
-cafe_schedule_blocks
-  id, cafe_id, track_type, starts_at, ends_at, source_type, source_id, created_by
-
-contest_payments hoặc payment_components mở rộng subject
-  contest_registration_id nullable
-
-contest_waitlist
-  contest_id, user_id, requested_vehicle_source, status, promoted_at
-```
-
-### Phase 2 race management
+Không dùng trong phase này:
 
 ```text
 contest_classes
-  id, contest_id, name, track_type, vehicle_policy, capacity, scoring_config
-
-contest_entries
-  id, contest_id, contest_class_id, user_id, vehicle_source,
-  vehicle_id, customer_vehicle_id, status, seed, car_number, transponder_id
-
 contest_rounds
-  id, contest_id, contest_class_id, type, round_no, status, starts_at
-
 contest_heats
-  id, contest_round_id, heat_no, name, status, scheduled_at
-
 contest_heat_entries
-  id, heat_id, entry_id, grid_position, lane, status
-
 contest_results
-  id, heat_id, entry_id, lap_count, elapsed_ms, best_lap_ms,
-  points, penalty_points, judge_score, rank, status, verified_by
-
-contest_laps optional
-  id, result_id, lap_no, lap_time_ms, recorded_at, source
-
-contest_leaderboard_snapshots
-  id, contest_id, contest_class_id, scope, payload, published_at
-
-contest_rewards
-  id, contest_id, contest_class_id, reward_scope, rank, title, reward_type, reward_payload, is_published
-
-contest_reward_claims
-  id, contest_reward_id, contest_id, registration_id, user_id, source_result_id, status, issued_at, claimed_at
-
 contest_result_audits
-  id, result_id, changed_by, reason, before_json, after_json, created_at
+contest_leaderboard_snapshots
+contest_rewards
+contest_reward_claims
+contest_bracket_matches
+```
 
-contest_protests optional
-  id, contest_id, result_id, opened_by, reason, status, resolution_note, resolved_by
+**BR-CT-001 — Contest không phải booking thường**  
+IF: Provider tổ chức một giải RC  
+THEN: Tạo `Contest`, `ContestCafe`, `ContestRegistration`, `ContestMatch` thay vì tạo booking giả.
+
+**BR-CT-002 — Một contest phase này là một hạng mục**  
+IF: Provider muốn tách Beginner/Open/BYOC/Rental Spec trong cùng event  
+THEN: Tạo nhiều contest riêng hoặc đưa multi-class vào backlog.
+
+**BR-CT-003 — Config linh hoạt nằm trong `contests.config`**  
+IF: Format, rule, prize, leaderboard cần thay đổi theo từng giải  
+THEN: Dùng JSON config, không tạo bảng riêng trừ khi có workflow thật sự cần.
+
+Config khuyến nghị:
+
+```json
+{
+  "format": "KNOCKOUT | MULTI_DRIVER_HEAT | TIME_ATTACK",
+  "drivers_per_match": 2,
+  "seeding_mode": "MANUAL | CHECK_IN_ORDER",
+  "rules_text": "The le giai...",
+  "prizes": [
+    { "rank": 1, "title": "Champion", "description": "Voucher 500k" }
+  ],
+  "leaderboard": []
+}
 ```
 
 ---
 
-## 16. API surface đề xuất
+## 3. Actors & Permissions
 
-### Phase 1A
-
-| Method | Endpoint | Actor | Mô tả |
-|---|---|---|---|
-| GET | `/contests` | Public | List contest public across participating cafes |
-| GET | `/cafes/:cafeId/contests` | Public | List contest OPEN/CLOSED/RUNNING/COMPLETED |
-| GET | `/contests/:id` | Public/Auth | Contest detail + registration summary |
-| POST | `/contests` | PROVIDER | Tạo contest DRAFT với `participating_cafe_ids` |
-| PATCH | `/contests/:id` | PROVIDER | Sửa DRAFT/OPEN fields được phép |
-| POST | `/contests/:id/open` | PROVIDER | DRAFT -> OPEN |
-| POST | `/contests/:id/register` | CUSTOMER | Đăng ký contest |
-| GET | `/contests/:id/registrations` | PROVIDER | Danh sách người đăng ký |
-| POST | `/contest-registrations/:id/check-in` | PROVIDER/STAFF | CONFIRMED -> CHECKED_IN tại cafe tham gia |
-| POST | `/contest-registrations/:id/cancel` | CUSTOMER/PROVIDER | Hủy registration |
-| POST | `/contests/:id/cancel` | PROVIDER | Hủy contest |
-
-### Phase 1C provider participant
-
-| Method | Endpoint | Actor | Mô tả |
-|---|---|---|---|
-| POST | `/contests/:id/register` | PROVIDER | Đăng ký contest của Provider khác như racer |
-
-### Phase 2
-
-| Method | Endpoint | Actor | Mô tả |
-|---|---|---|---|
-| POST | `/contests/:id/classes` | PROVIDER/STAFF | Tạo class |
-| POST | `/contests/:id/generate-heats` | PROVIDER/STAFF | Chia heat/round |
-| GET | `/contests/:id/schedule` | Public/Auth | Lịch heat/final |
-| POST | `/contest-heats/:id/start` | STAFF | Start heat |
-| POST | `/contest-heats/:id/results` | STAFF | Nhập/import result |
-| POST | `/contest-results/:id/verify` | STAFF/PROVIDER | Verify result |
-| GET | `/contests/:id/leaderboard` | Public | Public leaderboard |
-| POST | `/contests/:id/leaderboard/publish` | PROVIDER/STAFF | Publish leaderboard snapshot |
-| POST | `/contests/:id/rewards` | PROVIDER | Cấu hình reward |
-| GET | `/contests/:id/rewards` | Public/Auth | Xem reward đã publish |
-| POST | `/contests/:id/rewards/issue` | PROVIDER | Tạo reward claims từ final leaderboard |
-| GET | `/me/contest-reward-claims` | CUSTOMER/PROVIDER | Xem phần thưởng đã được assign |
-| POST | `/contests/:id/complete` | PROVIDER/STAFF | RUNNING -> COMPLETED |
-
----
-
-## 17. Edge cases bắt buộc nghĩ tới
-
-| Case | Cách xử lý đề xuất |
+| Actor | Quyền |
 |---|---|
-| Customer thanh toán fail | Registration vẫn `PENDING`; timeout thì `CANCELLED`; release capacity |
-| Capacity full | Từ chối hoặc đưa vào waitlist |
-| Customer no-show | Mark `NO_SHOW` ở Phase 1B/2; entry fee theo refund policy |
-| Provider tự đăng ký contest mình tạo | Từ chối `CONTEST_SELF_REGISTRATION_FORBIDDEN` ở Phase 1C |
-| Check-in tại cafe không tham gia | Từ chối vì `checked_in_cafe_id` không nằm trong `contest_cafes` |
-| Provider hủy contest | Refund 100%, notify participants |
-| Mưa/mất điện/sự cố sân | Contest `CANCELLED` hoặc reschedule với audit |
-| Rental car hỏng trước event | Staff đổi xe trong rental pool; nếu không đủ xe thì giảm capacity/notify |
-| BYOC fail tech check | Không cho check-in; refund theo policy |
-| Người chơi tranh cãi kết quả | Result audit + Race Director decision; Phase 2 có protest workflow |
-| Transponder lỗi | Timekeeper nhập manual result với reason |
-| Hai người bằng điểm | Áp tie-breaker đã publish |
-| Người chơi nhỏ tuổi | Cần guardian/waiver policy ở registration |
-| Damage trong race | Dùng contest damage policy + incident/dispute nếu cần |
+| Customer | Xem contest public, đăng ký, xem mã check-in, hủy đăng ký nếu còn hợp lệ |
+| Provider owner | Tạo/sửa/open/close/cancel contest, xem full registrations, generate schedule, update participants, submit result, advance, publish leaderboard, xem audit logs |
+| Staff | Lookup/check-in bằng code, update match/result nếu staff được assign vào cafe tham gia contest |
+| Admin | Không nằm trong API vận hành phase này; can thiệp admin riêng nếu cần |
+
+**BR-CT-010 — Provider owner là người sở hữu contest**  
+IF: User thao tác contest core  
+THEN: `contest.provider_id` phải bằng user id, trừ endpoint staff event-day được phép.
+
+**BR-CT-011 — Staff không xem full provider registration list**  
+IF: Staff vận hành event-day  
+THEN: Staff dùng lookup bằng check-in code và chỉ thao tác tại cafe staff được assign.
+
+**BR-CT-012 — Staff chỉ thao tác ở cafe tham gia contest**  
+IF: Staff check-in hoặc nhập result  
+THEN: Staff phải thuộc một cafe trong `contest_cafes`.
 
 ---
 
-## 18. Implementation checklist
+## 4. Contest State Machine
 
-### Phase 1A checklist
+```text
+DRAFT -> OPEN -> CLOSED -> RUNNING -> COMPLETED
+   \       \        \          \
+    \       \        \          -> CANCELLED
+     \       \        -> CANCELLED
+      \       -> CANCELLED
+       -> CANCELLED
+```
 
-- [ ] Contest CRUD DRAFT/OPEN.
-- [ ] Provider tạo contest với nhiều participating cafes.
-- [ ] Public contest listing tổng và theo cafe tham gia.
-- [ ] Register contest với transaction capacity lock.
-- [ ] Registration QR/check-in.
-- [ ] Validate vehicle_source RENTAL/BYOC.
-- [ ] Basic notification/log.
-- [ ] Manual cancel/refund policy documented.
+Rules:
 
-### Phase 1C checklist
+- `DRAFT`: Provider cấu hình, public không thấy.
+- `OPEN`: Public thấy và Customer được đăng ký nếu trong registration window.
+- `CLOSED`: Khóa form đăng ký, chuẩn bị/generate lịch thi đấu.
+- `RUNNING`: Event đang chạy, nhập result/advance/publish leaderboard.
+- `COMPLETED`: Terminal cho event hoàn tất.
+- `CANCELLED`: Terminal cho event hủy.
 
-- [ ] Cho Provider đăng ký contest của Provider khác.
-- [ ] Chặn Provider tự đăng ký contest do mình tạo.
-- [ ] Lưu `participant_role_snapshot`.
-- [ ] Test public multi-provider contest listing.
+**BR-CT-020 — OPEN cần config đủ**  
+IF: Provider gọi open  
+THEN: Contest phải có cafe tham gia, time range hợp lệ, capacity > 0, registration window, vehicle_rule/config tối thiểu.
 
-### Phase 1B checklist
+**BR-CT-021 — CLOSE khóa registration**  
+IF: Contest chuyển `OPEN -> CLOSED`  
+THEN: Không nhận registration mới.
 
-- [ ] Schedule block để contest không trùng booking.
-- [ ] Contest entry payment không dùng booking giả.
-- [ ] Registration window.
-- [ ] Waitlist.
-- [ ] Staff event-day check-in dashboard.
-- [ ] BYOC tech-check checklist.
-- [ ] Rental pool assignment.
-- [ ] Manual result entry đơn giản.
-
-### Phase 2 checklist
-
-- [ ] Contest classes.
-- [ ] Entries thay registrations nếu cần multi-class.
-- [ ] Rounds/heats/grid generation.
-- [ ] Results + verification.
-- [ ] Leaderboard.
-- [ ] Prize assignment.
-- [ ] Result audit.
+**BR-CT-022 — Generate schedule chỉ sau close**  
+IF: Provider/Staff generate matches  
+THEN: Contest phải ở `CLOSED` hoặc `RUNNING`.
 
 ---
 
-## 19. Đề xuất MVP hợp lý nhất cho RCField
+## 5. Registration Rules
 
-Nếu cần chọn một luồng đầu tiên để demo tốt với mentor, nên làm:
+```text
+PENDING -> CONFIRMED -> CHECKED_IN
+    \          \
+     -> CANCELLED
+```
 
-**"RCField Rental Spec Cup"**
+**BR-CT-030 — Chỉ đăng ký khi OPEN**  
+IF: Contest không ở `OPEN` hoặc ngoài registration window  
+THEN: Reject registration.
 
-- Một chi nhánh.
-- Một track type: `CIRCUIT` hoặc `DRIFT`.
-- Cafe chuẩn bị 4-8 xe rental STANDARD giống nhau.
-- Capacity 8-16 người.
-- Entry fee cố định.
-- Registration online.
-- Staff check-in bằng QR.
-- Chạy 2 qualifying heats + 1 final hoặc time attack nếu chưa có heat engine.
-- Staff nhập kết quả thủ công.
-- Public leaderboard/podium.
-- Prize là voucher/package slots.
+**BR-CT-031 — Capacity tính registration active**  
+IF: Capacity đã full  
+THEN: Reject registration trong phase này. Waitlist là backlog.
 
-Lý do:
+**BR-CT-032 — Một user một registration**  
+IF: User đã có registration chưa cancelled trong contest  
+THEN: Reject duplicate.
 
-- Người mới tham gia được ngay, không cần BYOC.
-- Dễ gắn với cafe/F&B/social event.
-- Ít tranh cãi cấu hình xe hơn.
-- Thể hiện rõ "kết nối cộng đồng" thay vì chỉ booking cá nhân.
-- Có thể mở rộng tự nhiên lên BYOC open, class, heat, leaderboard, series.
+**BR-CT-033 — Vehicle source phải theo rule**  
+IF: Contest `vehicle_rule.vehicle_policy = RENTAL_ONLY`  
+THEN: Reject BYOC. Tương tự cho `BYOC_ONLY`.
+
+**BR-CT-034 — Check-in chỉ cho CONFIRMED**  
+IF: Registration không ở `CONFIRMED`  
+THEN: Reject check-in.
+
+**BR-CT-035 — Cancel cần reason khi Provider/Staff cancel**  
+IF: Provider hủy registration  
+THEN: Bắt buộc reason để audit.
 
 ---
 
-## 20. Open decisions cần chốt
+## 6. Match / Heat / Tournament Rules
 
-| Decision | Đề xuất |
+Phase này dùng `contest_matches` thay cho class/round/heat/bracket cũ.
+
+Match types:
+
+| Type | Ý nghĩa |
 |---|---|
-| Contest có nằm trong Phase 1 demo không? | Có, nhưng chỉ registration + event-day MVP |
-| Multi-branch contest | Phase 3, không làm ngay |
-| Payment contest entry | Mở rộng payment subject, không tạo booking giả |
-| Contest có tạo session không? | Không dùng booking/session thường; tạo contest-specific operation tables ở Phase 2 |
-| Schedule block | Cần Phase 1B nếu contest chạy thật |
-| Refund policy | Config theo contest, default: provider cancel 100%, customer cancel trước close 100% |
-| Prize cash | Không làm Phase 1; dùng voucher/package/trophy |
-| BYOC tech rules | Phase 1 manual checklist, Phase 2 structured class rules |
-| Leaderboard | Phase 1B manual simple result, Phase 2 calculated leaderboard |
-| Transponder | Phase 4 integration/import, không phụ thuộc MVP |
+| `HEAD_TO_HEAD` | 1v1 kiểu knockout/world cup |
+| `MULTI_DRIVER` | Một heat có nhiều driver, ví dụ 4 xe chạy cùng vòng |
+| `TIME_ATTACK` | Một hoặc nhiều driver chạy lấy best lap/time |
+| `FINAL` | Match/vòng cuối để xác định podium |
+
+**BR-CT-040 — Drivers per match là config**  
+IF: Provider generate schedule  
+THEN: `drivers_per_match` quyết định số participant tối đa mỗi match, không hard-code 2 người.
+
+**BR-CT-041 — Registration hợp lệ để đưa vào match**  
+IF: Registration status không phải `CONFIRMED` hoặc `CHECKED_IN`  
+THEN: Không được đưa vào match.
+
+**BR-CT-042 — Drag/drop participants không đổi identity**  
+IF: Provider/Staff reorder slot/lane/grid  
+THEN: Chỉ update `slot_no`, `lane`, `grid_position`, `seed_no`; không tạo registration mới.
+
+**BR-CT-043 — Result thủ công phải có reason**  
+IF: Staff submit result  
+THEN: Ghi reason và audit `match.result_submitted`.
+
+**BR-CT-044 — Advance dựa trên winner/finish position**  
+IF: Advance winner sang next match  
+THEN: Chỉ advance participant có `is_winner=true` hoặc thỏa `advancement_rule`.
 
 ---
 
-## 21. External references
+## 7. Leaderboard & Prize
 
-- [IFMAR rules page](https://www.ifmar.org/ifmar-rules/) — danh sách rulebook theo hạng mục RC world championship.
-- [IFMAR General WC Rules 2021 PDF](https://www.ifmar.org/wp-content/uploads/2021/08/2021%20IFMAR_WC_General_Rules%20V1.pdf) — vai trò referee, controlled practice, qualifying heats, finals.
-- [ROAR Rule Book PDF](https://www.roarracing.com/downloads/ROAR_Rule_Book.pdf) — qualifying, mains, scoring theo laps/time, starting procedure.
-- [MYLAPS RC & Drone Timing System](https://mylaps.com/motorsports/timing/rc-drone-system/?noredirect=en-US) — transponder, detection loop, lap timing.
-- [Remote Racers RC cafe model](https://www.remoteracers.in/) — mô hình indoor RC racing track, cafe, training, party, subscriptions.
-- [Lakeshore Micro RC event model](https://www.lakeshoremicrorc.com/) — mô hình mobile Mini-Z/RC event có setup, cars, timing và hướng dẫn.
-- [Velox Motorsports event model](https://www.veloxracingevents.com/) — mô hình hosted RC racing event với heats, final, scoreboard và awards.
+**BR-CT-050 — Leaderboard phase này là snapshot trong contest config**  
+IF: Publish leaderboard  
+THEN: Ghi ordered standings vào `contests.config.leaderboard` và audit `leaderboard.published`.
 
+**BR-CT-051 — Không publish nếu chưa có result hoàn tất**  
+IF: Không có completed final/result hợp lệ  
+THEN: Reject publish leaderboard.
+
+**BR-CT-052 — Prize chỉ là config hiển thị**  
+IF: Contest có prize  
+THEN: Lưu trong `contests.config.prizes`; không phát voucher/package tự động trong phase này.
+
+**BR-CT-053 — Cash prize nằm ngoài platform**  
+IF: Provider trao tiền mặt  
+THEN: Hệ thống chỉ ghi mô tả manual, không xử lý payout/thuế/fraud.
+
+---
+
+## 8. Monitoring & Audit
+
+Audit events bắt buộc:
+
+```text
+contest.created
+contest.updated
+contest.opened
+contest.closed
+contest.cancelled
+registration.created
+registration.cancelled
+registration.checked_in
+match.schedule_generated
+match.participants_updated
+match.result_submitted
+match.advanced
+leaderboard.published
+```
+
+**BR-CT-060 — Audit log nằm trong cùng transaction**  
+IF: Business mutation ghi DB  
+THEN: Audit row phải được ghi cùng transaction với mutation đó.
+
+**BR-CT-061 — Audit payload nhỏ và hữu ích**  
+IF: Ghi `before_json`/`after_json`  
+THEN: Chỉ lưu fields thay đổi, không lưu payload quá lớn.
+
+**BR-CT-062 — Logger vẫn cần cho vận hành runtime**  
+IF: Ghi audit DB  
+THEN: Vẫn log `ContestAudit` bằng logger để debug production.
+
+---
+
+## 9. Payment & Schedule Gaps
+
+**BR-CT-070 — Không tạo booking giả cho entry fee**  
+IF: Contest có `entry_fee > 0`  
+THEN: Phase payment sau phải dùng `CONTEST_ENTRY` subject riêng hoặc `contest_registration_id` nullable trong payment component.
+
+**BR-CT-071 — Schedule block là next phase quan trọng**  
+IF: Contest chạy thật trong khung giờ sân  
+THEN: Cần block lịch track/cafe để booking thường không trùng.
+
+**BR-CT-072 — BYOC tech-check là next phase**  
+IF: Contest cho BYOC  
+THEN: Phase sau cần checklist structured; phase này có thể ghi manual note trong registration metadata.
+
+---
+
+## 10. Acceptance Checklist
+
+- [ ] Provider tạo/sửa/open/close/cancel contest được.
+- [ ] Public không thấy DRAFT.
+- [ ] Customer đăng ký khi OPEN và bị chặn sau CLOSED.
+- [ ] Provider dashboard xem registrations, counts, status, vehicle source, check-in info.
+- [ ] Staff lookup/check-in bằng code, không lộ full list.
+- [ ] Generate 1v1 knockout và multi-driver heat bằng cùng model match.
+- [ ] Patch participants hỗ trợ reorder slot/lane/grid.
+- [ ] Submit result và advance winner/qualified được audit.
+- [ ] Publish leaderboard vào config và public detail đọc được.
+- [ ] Audit logs có row cho mọi mutation quan trọng.
+- [ ] Legacy advanced endpoints/model cũ không còn là contract phase này.
+
+---
+
+## 11. Recommended Demo Flow
+
+Demo hợp lý nhất cho capstone:
+
+1. Provider tạo `RCField Rental Spec Cup`.
+2. Chọn 1-2 cafe tham gia, capacity 8 hoặc 16.
+3. Config `format=KNOCKOUT`, `drivers_per_match=2`, rule rental-only, prize manual.
+4. Open contest.
+5. Customer đăng ký.
+6. Staff check-in bằng mã.
+7. Provider close registration.
+8. Generate bracket 1v1.
+9. Staff nhập result từng match và advance winner.
+10. Publish leaderboard/podium.
+11. Xem audit log để chứng minh monitoring.

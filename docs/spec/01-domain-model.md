@@ -1,6 +1,6 @@
 # 01 — Domain Model
 
-**Last updated**: 2026-06-11  
+**Last updated**: 2026-06-23  
 **Status**: Active
 
 > Đây là file nguồn định nghĩa entity và enum. Xem `06-database.md` để biết schema chi tiết và indexes.
@@ -378,16 +378,16 @@ ExtensionProposal
 
 ### Contests
 
+Contest là event domain riêng, không phải booking/session thường. Phase hiện tại giữ luồng gọn nhưng đủ vận hành giải RC nhỏ: Provider tạo sự kiện, Customer đăng ký, Provider/Staff monitoring/check-in, sau khi đóng đăng ký thì tạo lịch thi đấu linh hoạt bằng match/participant, nhập kết quả thủ công và publish leaderboard.
+
 - `Contest`: giải đua/sự kiện do Provider tạo ở cấp provider, có thể chọn nhiều chi nhánh tham gia.
 - `ContestCafe`: bảng nối giữa contest và các chi nhánh tham gia; chi nhánh phải thuộc cùng Provider và đang ACTIVE.
-- `ContestRegistration`: user đăng ký contest chung bằng rental vehicle hoặc BYOC vehicle; MVP cho Customer, phase sau cho Provider đăng ký contest của Provider khác.
-- `ContestClass`: hạng mục thi trong contest, ví dụ Beginner, Rental Spec, BYOC Open.
-- `ContestRound`: vòng thi của một class, ví dụ Practice, Qualifying, Final.
-- `ContestHeat`: lượt chạy hoặc trận trong một round.
-- `ContestResult`: kết quả đã nhập cho một người trong heat.
-- `ContestLeaderboardSnapshot`: bảng xếp hạng đã publish, tính từ result đã verify.
-- `ContestReward`: cấu hình phần thưởng.
-- `ContestRewardClaim`: phần thưởng đã assign cho người thắng hoặc người đạt điều kiện.
+- `ContestRegistration`: user đăng ký contest chung bằng rental vehicle hoặc BYOC vehicle; phase này một user đăng ký một lần cho một contest.
+- `ContestMatch`: một trận, heat, lượt chạy time attack hoặc final. Một match có thể có 1, 2, 4 hoặc nhiều người tùy `config.drivers_per_match`.
+- `ContestMatchParticipant`: người tham gia trong một match, gồm slot/lane/grid/seed và result thủ công.
+- `ContestAuditLog`: business audit log cho mọi mutation quan trọng: create/open/close/register/check-in/generate schedule/submit result/publish leaderboard/cancel.
+
+Các model cũ như `ContestClass`, `ContestRound`, `ContestHeat`, `ContestResult`, `ContestLeaderboardSnapshot`, `ContestReward`, `ContestRewardClaim`, `ContestBracketMatch` không thuộc phase hiện tại. Nếu cần multi-class, live timing, protest, transponder hoặc reward claim lifecycle thì đưa vào backlog sau.
 
 ```
 Contest
@@ -403,6 +403,12 @@ Contest
 ├── status: ContestStatus
 ├── banner_image_url?
 ├── config: JSON
+│   ├── format: KNOCKOUT | MULTI_DRIVER_HEAT | TIME_ATTACK
+│   ├── drivers_per_match: number
+│   ├── seeding_mode: MANUAL | CHECK_IN_ORDER
+│   ├── rules_text: string
+│   ├── prizes: [{ rank, title, description }]
+│   └── leaderboard: published standings snapshot
 ├── created_by: UUID -> User
 ├── created_at / updated_at / deleted_at
 
@@ -433,101 +439,61 @@ ContestRegistration
 ├── metadata: JSON
 ├── created_at / updated_at
 
-ContestClass
+ContestMatch
 ├── id: UUID
 ├── contest_id: UUID -> Contest
-├── name / code
-├── track_type_id?: UUID -> TrackType
-├── vehicle_policy
-├── vehicle_rule: JSON
-├── scoring_format
-├── scoring_config: JSON
-├── capacity?
-├── sort_order
+├── round_no / match_no
+├── name
+├── match_type: HEAD_TO_HEAD | MULTI_DRIVER | TIME_ATTACK | FINAL
+├── status: DRAFT | READY | RUNNING | COMPLETED | CANCELLED
+├── scheduled_at? / started_at? / ended_at?
+├── next_match_id?: UUID -> ContestMatch
+├── advancement_rule: JSON
+├── result_summary: JSON
+├── metadata: JSON
+├── created_by?: UUID -> User
+├── decided_by?: UUID -> User
+├── decided_at?
 ├── created_at / updated_at
 
-ContestRound
+ContestMatchParticipant
 ├── id: UUID
-├── contest_id: UUID -> Contest
-├── contest_class_id: UUID -> ContestClass
-├── round_type
-├── round_no
-├── name?
-├── status
-├── scheduled_at?
-├── created_at / updated_at
-
-ContestHeat
-├── id: UUID
-├── contest_id: UUID -> Contest
-├── contest_round_id: UUID -> ContestRound
-├── heat_no
-├── name?
-├── status
-├── scheduled_at?
-├── started_at? / ended_at?
+├── match_id: UUID -> ContestMatch
+├── registration_id: UUID -> ContestRegistration
+├── slot_no / lane / grid_position / seed_no
+├── status: READY | STARTED | FINISHED | DNS | DNF | DQ
+├── score? / finish_position? / best_lap_ms? / total_time_ms?
+├── is_winner
+├── result_note?
 ├── metadata: JSON
 ├── created_at / updated_at
 
-ContestResult
+ContestAuditLog
 ├── id: UUID
 ├── contest_id: UUID -> Contest
-├── heat_id: UUID -> ContestHeat
-├── registration_id: UUID -> ContestRegistration
-├── lap_count? / elapsed_ms? / best_lap_ms?
-├── points? / penalty_points? / judge_score?
-├── rank?
-├── status
-├── verified_by? / verified_at?
-├── raw_payload: JSON
-├── created_by: UUID -> User
-├── created_at / updated_at
-
-ContestLeaderboardSnapshot
-├── id: UUID
-├── contest_id: UUID -> Contest
-├── contest_class_id?: UUID -> ContestClass
-├── scope
-├── payload: JSON
-├── is_public
-├── published_by? / published_at?
+├── registration_id?: UUID -> ContestRegistration
+├── match_id?: UUID -> ContestMatch
+├── actor_id?: UUID -> User
+├── actor_role?
+├── event_type
+├── before_json? / after_json?
+├── reason?
+├── metadata: JSON
 ├── created_at
-
-ContestReward
-├── id: UUID
-├── contest_id: UUID -> Contest
-├── contest_class_id?: UUID -> ContestClass
-├── reward_scope
-├── rank?
-├── title
-├── reward_type
-├── reward_payload: JSON
-├── is_published
-├── created_by: UUID -> User
-├── created_at / updated_at
-
-ContestRewardClaim
-├── id: UUID
-├── contest_reward_id: UUID -> ContestReward
-├── contest_id: UUID -> Contest
-├── registration_id: UUID -> ContestRegistration
-├── user_id: UUID -> User
-├── source_result_id?: UUID -> ContestResult
-├── status
-├── issued_by? / issued_at? / claimed_at? / expires_at?
-├── metadata: JSON
-├── created_at / updated_at
 ```
 
 Rules:
 
-- Chỉ Provider tạo contest; Staff không tạo contest.
+- Chỉ Provider tạo/sửa/open/close/cancel contest; Staff không tạo contest.
 - Public cafe contest listing dựa trên `contest_cafes`, không dựa trên `contests.cafe_id`.
 - Registration MVP ở cấp contest chung, không bắt customer chọn chi nhánh.
-- `checked_in_cafe_id` phải là một cafe trong `contest_cafes`.
-- Provider registration phase chỉ cho Provider tham gia contest của Provider khác, không tự đăng ký contest do mình tạo.
-- Leaderboard public phải được tính từ `ContestResult` đã verify và lưu thành snapshot.
-- Reward claim chỉ được tạo sau khi contest có final leaderboard hoặc result nguồn đã verify.
+- Không nhận đăng ký mới sau `OPEN -> CLOSED`.
+- `checked_in_cafe_id` phải là một cafe trong `contest_cafes`; Staff chỉ check-in tại cafe được assign.
+- Provider sở hữu contest được thao tác toàn bộ; Staff chỉ thao tác match/result/check-in nếu thuộc một cafe tham gia contest.
+- Schedule generation chỉ dùng registration `CONFIRMED` hoặc `CHECKED_IN`; không dùng registration `CANCELLED`.
+- Leaderboard phase này lưu snapshot cuối trong `contests.config.leaderboard`; không có bảng leaderboard riêng.
+- Prize phase này là config hiển thị trong `contests.config.prizes`; không phát voucher/reward claim tự động.
+- Mọi mutation nghiệp vụ phải ghi `contest_audit_logs` và logger vận hành.
 
 ### Incident Policy Resolution & Disputes
 
