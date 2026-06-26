@@ -353,3 +353,38 @@ EXTENSION_FEE_EXCEEDED    422 — vượt 50% deposit cap
 INSPECTION_INCOMPLETE     422 — thiếu ảnh hoặc checklist
 PAYMENT_REQUIRED          402 — chưa thanh toán
 ```
+
+### Contest Vehicle Flow Addendum
+
+Customer vehicles:
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| GET | `/me/customer-vehicles` | CUSTOMER | List active/archived BYOC car records owned by current customer |
+| POST | `/me/customer-vehicles` | CUSTOMER | Create BYOC car record with `name`, `scale`, `chassis_type`, `frequency` |
+| PATCH | `/me/customer-vehicles/:id` | CUSTOMER owner | Update own BYOC car record |
+| DELETE | `/me/customer-vehicles/:id` | CUSTOMER owner | Soft delete own BYOC car record |
+
+Contest registration vehicle payload:
+
+```json
+{
+  "vehicle_source": "BYOC",
+  "customer_vehicle_id": "uuid",
+  "metadata": { "note": "optional" }
+}
+```
+
+```json
+{
+  "vehicle_source": "RENTAL",
+  "booking_id": "uuid",
+  "vehicle_id": "uuid",
+  "metadata": { "note": "optional" }
+}
+```
+
+- `BYOC` registration is created as `PENDING`; Provider/Staff reviews it through `POST /contest-registrations/:id/approve` or `POST /contest-registrations/:id/reject`.
+- `RENTAL` registration should link to the normal Booking flow using `booking_id`; that booking owns payment, rental hold, session check-in/check-out and inspection.
+- `POST /contest-matches/:id/results/correct` is the stable result correction endpoint. `force_cascade=true` is Provider-only behavior when downstream matches were already completed.
+- `GET /contests/:id/audit-logs` and `GET /contests/:id/metrics` support operational monitoring of registration review, check-in, match result and correction activity.
