@@ -384,7 +384,21 @@ Contest registration vehicle payload:
 }
 ```
 
-- `BYOC` registration is created as `PENDING`; Provider/Staff reviews it through `POST /contest-registrations/:id/approve` or `POST /contest-registrations/:id/reject`.
+- `BYOC` registration is created as `PENDING`; Provider/Staff reviews it through `POST /contest-registrations/:id/approve` or `POST /contest-registrations/:id/reject` with optional `reason_code` (`TRACK_INCOMPATIBLE | RULESET_INCOMPATIBLE | UNVERIFIED_VEHICLE | OTHER`).
 - `RENTAL` registration should link to the normal Booking flow using `booking_id`; that booking owns payment, rental hold, session check-in/check-out and inspection.
 - `POST /contest-matches/:id/results/correct` is the stable result correction endpoint. `force_cascade=true` is Provider-only behavior when downstream matches were already completed.
 - `GET /contests/:id/audit-logs` and `GET /contests/:id/metrics` support operational monitoring of registration review, check-in, match result and correction activity.
+
+### Contest banner upload
+
+`POST /api/v1/contests/:id/banner` `[auth]` accepts `multipart/form-data` with field `file` and returns:
+
+```json
+{
+  "success": true,
+  "data": {
+    "banner_image_url": "https://res.cloudinary.com/.../contest-banner.png",
+    "public_id": "rcfield/contests/.../contest-banner"
+  }
+}
+```

@@ -22,7 +22,7 @@ Contest la module van hanh giai dau rieng cua RCField. Module nay khong thay the
 
 ### Trong phase hien tai
 
-- Contest CRUD: create, edit, open, close, cancel, detail, public listing
+- Contest CRUD: create, edit, open, close, cancel, detail, public listing, banner upload
 - Multi-branch contest qua `contest_cafes`
 - Dang ky theo contest-level, moi user mot lan/contest
 - `vehicle_rule.vehicle_policy = RENTAL_ONLY | BYOC_ONLY | MIXED`
@@ -189,7 +189,7 @@ Happy path:
 3. Registration tao `PENDING`.
 4. Provider/Staff review xe theo the le va track.
 5. Neu phu hop -> approve `CONFIRMED`.
-6. Neu khong phu hop -> reject `CANCELLED` + `rejection_reason`.
+6. Neu khong phu hop -> reject `CANCELLED` + `rejection_reason` + `reason_code`.
 7. Neu contest la `MIXED`, UI nen goi y chuyen sang rental flow.
 
 Rui ro can chan:
@@ -335,3 +335,4 @@ Can co it nhat:
   - `results/correct`
   - `audit-logs`
   - `metrics`
+
