@@ -331,3 +331,25 @@ Demo hợp lý nhất cho capstone:
 9. Staff nhập result từng match và advance winner.
 10. Publish leaderboard/podium.
 11. Xem audit log để chứng minh monitoring.
+
+## 7. Contest Vehicle Review & Rental Link Finalization
+
+**BR-CT-090 — Rental contest uses Booking/Session, not fake contest rental**  
+IF: Contest requires organizer rental car (`vehicle_rule.vehicle_policy = RENTAL_ONLY`) or a `MIXED` contest registration chooses `vehicle_source = RENTAL`  
+THEN: Customer must use the normal Booking flow for rental payment, vehicle hold, session check-in/check-out, and inspection. Contest registration stores `booking_id`/`vehicle_id` only as a link to that operational flow. Contest must not create a fake booking or duplicate rental payment/inspection logic.
+
+**BR-CT-091 — BYOC review is per contest registration**  
+IF: Customer chooses `vehicle_source = BYOC`  
+THEN: Customer must submit/select a `customer_vehicle_id`; the contest registration starts as `PENDING`. Provider or assigned Staff reviews whether that car is acceptable for this contest/track, then approves to `CONFIRMED` or rejects to `CANCELLED` with a reason. This is not a global permanent vehicle certification.
+
+**BR-CT-092 — Rejected BYOC should offer a rental path when allowed**  
+IF: BYOC is rejected in a `MIXED` contest  
+THEN: UI should show the rejection reason and guide the customer to register again with organizer rental. If contest is `BYOC_ONLY`, UI only shows the rejection reason.
+
+**BR-CT-093 — Staff operation is localized by match cafe**  
+IF: Staff checks in a registration, reorders match participants, submits results, or corrects results  
+THEN: Staff must be assigned to the exact cafe used by that registration/match. Provider owner can operate across their contest cafes.
+
+**BR-CT-094 — Result correction and leaderboard guard**  
+IF: A result is corrected after downstream matches are completed  
+THEN: only Provider can force cascade, and the correction must be audit logged. Leaderboard cannot be published while any contest match is still non-terminal (`DRAFT`, `READY`, `RUNNING`).

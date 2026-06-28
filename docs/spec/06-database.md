@@ -1209,3 +1209,10 @@ CREATE INDEX idx_cafe_announcements_cafe_id ON cafe_announcements(cafe_id, is_ac
 ---
 
 *Last updated: 2026-06-23 · 50 tables (contest compact tournament flow included)*
+
+### Contest Vehicle Flow Schema Notes
+
+- `customer_vehicles` is the customer's BYOC registry. It keeps Phase 1 ownership through `customer_id` and adds contest-friendly RC fields: `name`, `scale`, `chassis_type`, `frequency`, `status`, `image_url`, `metadata`.
+- `contest_registrations.booking_id` links rental contest participation to a normal booking. Rental payment, vehicle hold, session check-in/check-out and inspection remain owned by booking/session tables.
+- `contest_registrations.customer_vehicle_id` is required for BYOC registration, but approval is stored on the contest registration status (`PENDING -> CONFIRMED/CANCELLED`) rather than as a global approval on the vehicle.
+- `contest_matches.cafe_id` and `contest_matches.track_config_id` localize staff operations. Staff match mutations must be scoped to `staff_cafe_assignments.cafe_id = contest_matches.cafe_id`.
