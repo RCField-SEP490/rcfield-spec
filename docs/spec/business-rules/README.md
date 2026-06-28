@@ -20,6 +20,7 @@
 | [BR-fnb.md](./BR-fnb.md) | F&B pre-order và on-site | — |
 | [BR-dispute.md](./BR-dispute.md) | Incident policy resolution Phase 1; dispute workflow nhiều bên Phase 2 | — |
 | [BR-booking-lifecycle.md](./BR-booking-lifecycle.md) | Luồng booking end-to-end: đặt giờ, thuê xe, check-in, F&B, extension, checkout | — |
+| [BR-contest.md](./BR-contest.md) | Contest, tournament, race event, phases, scoring, leaderboard | — |
 | [BR-revenue-payment-provider.md](./BR-revenue-payment-provider.md) | Doanh thu chi nhánh, commission, payout provider, lý do không làm ví Phase 1 | — |
 
 ---

@@ -1,6 +1,6 @@
 # 01 — Domain Model
 
-**Last updated**: 2026-05-25  
+**Last updated**: 2026-06-23  
 **Status**: Active
 
 > Đây là file nguồn định nghĩa entity và enum. Xem `06-database.md` để biết schema chi tiết và indexes.
@@ -19,7 +19,6 @@ erDiagram
     cafes ||--o{ menu_items : "menu"
     cafes ||--o{ packages : "offers"
     cafes ||--o{ subscriptions : "supports"
-    cafes ||--o{ contests : "organizes"
     cafes ||--o{ bookings : "receives"
     cafes ||--o{ sessions : "runs"
     vehicles ||--o{ vehicle_images : "images"
@@ -47,6 +46,9 @@ erDiagram
     customer_packages ||--o{ package_usages : "usage history"
     bookings ||--o{ package_usages : "uses package"
     subscriptions ||--o{ bookings : "generates"
+    users ||--o{ contests : "provider creates"
+    contests ||--o{ contest_cafes : "participating branches"
+    cafes ||--o{ contest_cafes : "hosts event"
     contests ||--o{ contest_registrations : "registrations"
     cafes ||--o{ promotions : "promotions"
     promotions ||--o{ promotion_usages : "usage history"
@@ -376,8 +378,122 @@ ExtensionProposal
 
 ### Contests
 
-- `Contest`: giải đua/sự kiện theo cafe.
-- `ContestRegistration`: customer đăng ký contest bằng rental vehicle hoặc BYOC vehicle.
+Contest là event domain riêng, không phải booking/session thường. Phase hiện tại giữ luồng gọn nhưng đủ vận hành giải RC nhỏ: Provider tạo sự kiện, Customer đăng ký, Provider/Staff monitoring/check-in, sau khi đóng đăng ký thì tạo lịch thi đấu linh hoạt bằng match/participant, nhập kết quả thủ công và publish leaderboard.
+
+- `Contest`: giải đua/sự kiện do Provider tạo ở cấp provider, có thể chọn nhiều chi nhánh tham gia.
+- `ContestCafe`: bảng nối giữa contest và các chi nhánh tham gia; chi nhánh phải thuộc cùng Provider và đang ACTIVE.
+- `ContestRegistration`: user đăng ký contest chung bằng rental vehicle hoặc BYOC vehicle; phase này một user đăng ký một lần cho một contest.
+- `ContestMatch`: một trận, heat, lượt chạy time attack hoặc final. Một match có thể có 1, 2, 4 hoặc nhiều người tùy `config.drivers_per_match`.
+- `ContestMatchParticipant`: người tham gia trong một match, gồm slot/lane/grid/seed và result thủ công.
+- `ContestAuditLog`: business audit log cho mọi mutation quan trọng: create/open/close/register/check-in/generate schedule/submit result/publish leaderboard/cancel.
+
+Các model cũ như `ContestClass`, `ContestRound`, `ContestHeat`, `ContestResult`, `ContestLeaderboardSnapshot`, `ContestReward`, `ContestRewardClaim`, `ContestBracketMatch` không thuộc phase hiện tại. Nếu cần multi-class, live timing, protest, transponder hoặc reward claim lifecycle thì đưa vào backlog sau.
+
+```
+Contest
+├── id: UUID
+├── provider_id: UUID -> User
+├── name / description
+├── track_type_id: UUID -> TrackType
+├── vehicle_rule: JSON
+├── starts_at / ends_at
+├── registration_opens_at / registration_closes_at
+├── capacity
+├── entry_fee
+├── status: ContestStatus
+├── banner_image_url?
+├── config: JSON
+│   ├── format: KNOCKOUT | MULTI_DRIVER_HEAT | TIME_ATTACK
+│   ├── drivers_per_match: number
+│   ├── seeding_mode: MANUAL | CHECK_IN_ORDER
+│   ├── rules_text: string
+│   ├── prizes: [{ rank, title, description }]
+│   └── leaderboard: published standings snapshot
+├── created_by: UUID -> User
+├── created_at / updated_at / deleted_at
+
+ContestCafe
+├── id: UUID
+├── contest_id: UUID -> Contest
+├── cafe_id: UUID -> Cafe
+├── role
+├── capacity_override?
+├── check_in_enabled
+├── display_order
+├── created_at / updated_at
+
+ContestRegistration
+├── id: UUID
+├── contest_id: UUID -> Contest
+├── user_id: UUID -> User
+├── participant_role_snapshot: UserRole
+├── vehicle_source: VehicleSource
+├── vehicle_id?: UUID -> Vehicle
+├── customer_vehicle_id?: UUID -> CustomerVehicle
+├── status: ContestRegistrationStatus
+├── check_in_code
+├── checked_in_cafe_id?: UUID -> Cafe
+├── checked_in_by?: UUID -> User
+├── checked_in_at?
+├── cancelled_by? / cancelled_at? / cancellation_reason?
+├── metadata: JSON
+├── created_at / updated_at
+
+ContestMatch
+├── id: UUID
+├── contest_id: UUID -> Contest
+├── round_no / match_no
+├── name
+├── match_type: HEAD_TO_HEAD | MULTI_DRIVER | TIME_ATTACK | FINAL
+├── status: DRAFT | READY | RUNNING | COMPLETED | CANCELLED
+├── scheduled_at? / started_at? / ended_at?
+├── next_match_id?: UUID -> ContestMatch
+├── advancement_rule: JSON
+├── result_summary: JSON
+├── metadata: JSON
+├── created_by?: UUID -> User
+├── decided_by?: UUID -> User
+├── decided_at?
+├── created_at / updated_at
+
+ContestMatchParticipant
+├── id: UUID
+├── match_id: UUID -> ContestMatch
+├── registration_id: UUID -> ContestRegistration
+├── slot_no / lane / grid_position / seed_no
+├── status: READY | STARTED | FINISHED | DNS | DNF | DQ
+├── score? / finish_position? / best_lap_ms? / total_time_ms?
+├── is_winner
+├── result_note?
+├── metadata: JSON
+├── created_at / updated_at
+
+ContestAuditLog
+├── id: UUID
+├── contest_id: UUID -> Contest
+├── registration_id?: UUID -> ContestRegistration
+├── match_id?: UUID -> ContestMatch
+├── actor_id?: UUID -> User
+├── actor_role?
+├── event_type
+├── before_json? / after_json?
+├── reason?
+├── metadata: JSON
+├── created_at
+```
+
+Rules:
+
+- Chỉ Provider tạo/sửa/open/close/cancel contest; Staff không tạo contest.
+- Public cafe contest listing dựa trên `contest_cafes`, không dựa trên `contests.cafe_id`.
+- Registration MVP ở cấp contest chung, không bắt customer chọn chi nhánh.
+- Không nhận đăng ký mới sau `OPEN -> CLOSED`.
+- `checked_in_cafe_id` phải là một cafe trong `contest_cafes`; Staff chỉ check-in tại cafe được assign.
+- Provider sở hữu contest được thao tác toàn bộ; Staff chỉ thao tác match/result/check-in nếu thuộc một cafe tham gia contest.
+- Schedule generation chỉ dùng registration `CONFIRMED` hoặc `CHECKED_IN`; không dùng registration `CANCELLED`.
+- Leaderboard phase này lưu snapshot cuối trong `contests.config.leaderboard`; không có bảng leaderboard riêng.
+- Prize phase này là config hiển thị trong `contests.config.prizes`; không phát voucher/reward claim tự động.
+- Mọi mutation nghiệp vụ phải ghi `contest_audit_logs` và logger vận hành.
 
 ### Incident Policy Resolution & Disputes
 
