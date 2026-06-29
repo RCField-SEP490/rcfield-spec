@@ -30,19 +30,21 @@ erDiagram
     users ||--o{ bookings : "customer makes"
     users ||--o{ customer_vehicles : "owns BYOC"
     cafes ||--o{ cafe_images : "images"
-    cafes ||--o{ vehicles : "fleet"
-    cafes ||--o{ menu_items : "menu"
-    cafes ||--o{ packages : "offers"
-    cafes ||--o{ subscriptions : "supports"
     cafes ||--o{ bookings : "receives"
     cafes ||--o{ sessions : "runs"
+    cafes ||--o{ packages : "offers"
+    cafes ||--o{ subscriptions : "supports"
 
-    vehicles ||--o{ vehicle_images : "images"
+    %% Vehicle Catalog and Physical Units
+    cafes ||--o{ vehicle_catalogs : "has catalogs"
+    vehicle_catalogs ||--o{ vehicles : "physical units"
+    vehicle_catalogs ||--o{ vehicle_catalog_images : "catalog images"
     vehicles ||--o{ vehicle_maintenance_logs : "maintenance"
     vehicles ||--o{ booking_vehicles : "planned"
     vehicles ||--o{ session_vehicles : "actual use"
     customer_vehicles ||--o{ session_vehicles : "BYOC use"
 
+    %% Bookings & Sessions
     bookings ||--o{ booking_participants : "planned people"
     bookings ||--o{ booking_vehicles : "planned rental vehicles"
     bookings ||--o{ sessions : "actual sessions"
@@ -65,18 +67,26 @@ erDiagram
     packages ||--o{ customer_packages : "purchased"
     customer_packages ||--o{ package_usages : "usage history"
     subscriptions ||--o{ bookings : "generates"
-    users ||--o{ contests : "provider creates"
+
+    %% Contests
+    cafes ||--o{ contests : "hosts event"
     contests ||--o{ contest_cafes : "participating branches"
     cafes ||--o{ contest_cafes : "hosts event"
     contests ||--o{ contest_registrations : "registrations"
+    contests ||--o{ contest_matches : "matches"
+    contest_matches ||--o{ contest_match_participants : "match participants"
+    contest_registrations ||--o{ contest_match_participants : "participates"
+    contests ||--o{ contest_audit_logs : "logs"
 
+    %% Promotions
     cafes ||--o{ promotions : "promotions"
     promotions ||--o{ promotion_usages : "usage history"
     bookings ||--o| promotion_usages : "applies promo"
 
+    %% Identity & Notifications
     users ||--o{ refresh_tokens : "sessions"
     users ||--o{ password_reset_tokens : "resets"
-    users ||--o{ notification_logs : "notifications"
+    users ||--o{ notification_logs : "notifications logs"
     users ||--o{ trust_score_logs : "trust audit"
     bookings ||--o{ trust_score_logs : "triggered by"
     sessions ||--o{ trust_score_logs : "triggered by"
@@ -87,16 +97,48 @@ erDiagram
     users ||--o{ notifications : "notifications"
     provider_subscriptions ||--o{ subscription_plans : "plan"
     payment_requests ||--o{ subscription_plans : "plan"
+
+    %% Staff & Scheduling (New)
+    cafes ||--o{ staff_cafe_assignments : "has staff"
+    users ||--o{ staff_cafe_assignments : "assigned as staff"
+    cafes ||--o{ staff_invite_tokens : "invites staff"
+    cafes ||--o{ shift_positions : "defines positions"
+    cafes ||--o{ shift_time_presets : "defines presets"
+    cafes ||--o{ staff_shifts : "has shifts"
+    users ||--o{ staff_shifts : "staff shifts"
+    shift_positions ||--o{ staff_shifts : "shift position"
+    shift_time_presets ||--o{ staff_shifts : "shift preset"
+
+    %% Track configurations & Bookings (New)
+    track_types ||--o{ cafe_track_configs : "configured tracks"
+    cafes ||--o{ cafe_track_configs : "track configs"
+    bookings ||--o{ cafe_track_configs : "uses track config"
+
+    %% AI / KB & Widgets (New)
+    cafes ||--o{ kb_documents : "has KB docs"
+    kb_documents ||--o{ kb_chunks : "chunked into"
+    cafes ||--o| cafe_widget_configs : "has widget config"
+    cafes ||--o{ cafe_channels : "has channels"
+    cafes ||--o{ amenity_catalog : "has amenities"
+
+    %% Holiday overrides (New)
+    cafes ||--o{ cafe_holiday_overrides : "holiday overrides"
+    holiday_dates ||--o{ cafe_holiday_overrides : "overridden dates"
+    cafes ||--o{ cafe_pricing_rules : "pricing rules"
+
+    %% Customer Package integration (New)
+    bookings ||--o{ customer_packages : "uses package"
+    payment_transactions ||--o{ customer_packages : "pays for package"
 ```
 
 ---
 
-## 3. Phase 1 Schema Scope — 50 Tables
+## 3. Phase 1 Schema Scope — 65 Tables
 
-Phase 1 chỉ tạo schema/migration cho **50 bảng vận hành cốt lõi** dưới đây. Contest phase hiện tại giữ 5 bảng chính và 1 bảng audit log: `contests`, `contest_cafes`, `contest_registrations`, `contest_matches`, `contest_match_participants`, `contest_audit_logs`.
+Phase 1 chỉ tạo schema/migration cho **65 bảng vận hành cốt lõi** dưới đây.
 
 > Không cộng thêm bảng Phase 2 vào scope này. Chỉ các bảng multi-party dispute workflow nâng cao
-> (`dispute_evidences`, `dispute_parties`), AI và analytics nâng cao **không được tạo trong Phase 1**.
+> (`dispute_evidences`, `dispute_parties`), AI và analytics nâng cao (không bao gồm chatbot AI / Knowledge Base cơ bản đã thiết kế ở Phase 1) **không được tạo trong Phase 1**.
 
 | # | Bảng | Mô tả |
 |---|------|-------|
@@ -105,56 +147,71 @@ Phase 1 chỉ tạo schema/migration cho **50 bảng vận hành cốt lõi** d�
 | 3 | `password_reset_tokens` | Reset password tokens |
 | 4 | `cafes` | Chi nhánh/sân RC |
 | 5 | `cafe_images` | Gallery ảnh chi nhánh |
-| 6 | `vehicles` | Xe thuê của quán |
-| 7 | `vehicle_images` | Ảnh xe thuê |
-| 8 | `vehicle_maintenance_logs` | Lịch sử bảo trì/sửa chữa xe |
-| 9 | `customer_vehicles` | Xe BYOC của khách |
-| 10 | `bookings` | Đơn đặt lịch dự kiến |
-| 11 | `booking_participants` | Người chơi dự kiến |
-| 12 | `booking_vehicles` | Xe thuê dự kiến |
-| 13 | `sessions` | Phiên chơi thực tế |
-| 14 | `session_participants` | Người chơi thực tế |
-| 15 | `session_vehicles` | Xe thực tế dùng trong session |
-| 16 | `payment_components` | Ledger thanh toán |
-| 17 | `payment_transactions` | Log gateway |
-| 18 | `inspections` | Biên bản kiểm tra |
-| 19 | `inspection_photos` | Ảnh inspection |
-| 20 | `inspection_checklists` | Checklist inspection |
-| 21 | `extension_proposals` | Đề xuất gia hạn |
-| 22 | `incidents` | Sự cố + log xử lý theo policy |
-| 23 | `menu_items` | Menu F&B |
-| 24 | `fnb_orders` | Đơn F&B |
-| 25 | `fnb_order_items` | Line items F&B |
-| 26 | `packages` | Định nghĩa gói chơi |
-| 27 | `customer_packages` | Gói khách đã mua |
-| 28 | `package_usages` | Audit sử dụng gói |
-| 29 | `subscriptions` | Lịch chơi định kỳ |
-| 30 | `contests` | Giải đua/sự kiện do Provider tạo |
-| 31 | `contest_cafes` | Chi nhánh tham gia contest |
-| 32 | `contest_registrations` | Đăng ký giải đua |
-| 33 | `contest_matches` | Match/heat/lượt chạy/final linh hoạt của contest |
-| 34 | `contest_match_participants` | Người tham gia trong từng match |
-| 35 | `contest_audit_logs` | Business audit log của contest |
-| 36 | `promotions` | Mã khuyến mãi |
-| 37 | `promotion_usages` | Audit dùng mã |
-| 38 | `reviews` | Đánh giá |
-| 39 | `notification_logs` | Log thông báo |
-| 40 | `trust_score_logs` | Audit trust score |
-| 41 | `feature_flags` | Bật/tắt module, config Phase 2 |
-| 42 | `staff_cafe_assignments` | Staff assign vào chi nhánh |
-| 43 | `disputes` | Tranh chấp booking |
-| 44 | `cafe_closures` | Ngày đóng cửa đặc biệt |
-| 45 | `cafe_announcements` | Thông báo/banner chi nhánh |
-| 46 | `provider_profiles` | Hồ sơ đăng ký Provider, trạng thái duyệt |
-| 47 | `subscription_plans` | Định nghĩa các gói: Trial, Starter, Growth, Pro |
-| 48 | `provider_subscriptions` | Subscription đang active của từng Provider, quota AI |
-| 49 | `payment_requests` | Yêu cầu thanh toán thủ công (chuyển khoản) |
-| 50 | `notifications` | In-app notifications cho Provider |
+| 6 | `vehicle_catalogs` | Danh mục xe thuê |
+| 7 | `vehicles` | Xe thuê vật lý của quán |
+| 8 | `vehicle_catalog_images` | Ảnh danh mục xe |
+| 9 | `vehicle_maintenance_logs` | Lịch sử bảo trì/sửa chữa xe |
+| 10 | `customer_vehicles` | Xe BYOC của khách |
+| 11 | `bookings` | Đơn đặt lịch dự kiến |
+| 12 | `booking_participants` | Người chơi dự kiến |
+| 13 | `booking_vehicles` | Xe thuê dự kiến |
+| 14 | `sessions` | Phiên chơi thực tế |
+| 15 | `session_participants` | Người chơi thực tế |
+| 16 | `session_vehicles` | Xe thực tế dùng trong session |
+| 17 | `payment_components` | Ledger thanh toán |
+| 18 | `payment_transactions` | Log gateway |
+| 19 | `inspections` | Biên bản kiểm tra |
+| 20 | `inspection_photos` | Ảnh inspection |
+| 21 | `inspection_checklists` | Checklist inspection |
+| 22 | `extension_proposals` | Đề xuất gia hạn |
+| 23 | `incidents` | Sự cố + log xử lý theo policy |
+| 24 | `menu_items` | Menu F&B |
+| 25 | `fnb_orders` | Đơn F&B |
+| 26 | `fnb_order_items` | Line items F&B |
+| 27 | `packages` | Định nghĩa gói chơi |
+| 28 | `customer_packages` | Gói khách đã mua |
+| 29 | `package_usages` | Audit sử dụng gói |
+| 30 | `subscriptions` | Lịch chơi định kỳ |
+| 31 | `contests` | Giải đua/sự kiện do Provider tạo |
+| 32 | `contest_cafes` | Chi nhánh tham gia contest |
+| 33 | `contest_registrations` | Đăng ký giải đua |
+| 34 | `contest_matches` | Match/heat/lượt chạy/final linh hoạt của contest |
+| 35 | `contest_match_participants` | Người tham gia trong từng match |
+| 36 | `contest_audit_logs` | Business audit log của contest |
+| 37 | `promotions` | Mã khuyến mãi |
+| 38 | `promotion_usages` | Audit dùng mã |
+| 39 | `reviews` | Đánh giá |
+| 40 | `notification_logs` | Log thông báo |
+| 41 | `trust_score_logs` | Audit trust score |
+| 42 | `feature_flags` | Bật/tắt module, config Phase 2 |
+| 43 | `staff_cafe_assignments` | Staff assign vào chi nhánh |
+| 44 | `disputes` | Tranh chấp booking |
+| 45 | `cafe_closures` | Ngày đóng cửa đặc biệt |
+| 46 | `cafe_announcements` | Thông báo/banner chi nhánh |
+| 47 | `provider_profiles` | Hồ sơ đăng ký Provider, trạng thái duyệt |
+| 48 | `subscription_plans` | Định nghĩa các gói: Trial, Starter, Growth, Pro |
+| 49 | `provider_subscriptions` | Subscription đang active của từng Provider, quota AI |
+| 50 | `payment_requests` | Yêu cầu thanh toán thủ công (chuyển khoản) |
+| 51 | `notifications` | In-app notifications cho Provider |
+| 52 | `kb_documents` | Tài liệu Knowledge Base AI |
+| 53 | `kb_chunks` | Các đoạn dữ liệu text cắt nhỏ từ KB document |
+| 54 | `cafe_widget_configs` | Cấu hình widget chatbot AI theo chi nhánh |
+| 55 | `track_types` | Các loại đường đua (Drift, Circuit, Offroad...) |
+| 56 | `cafe_track_configs` | Cấu hình đường đua cụ thể của chi nhánh |
+| 57 | `staff_invite_tokens` | Token mời nhân viên qua email |
+| 58 | `shift_positions` | Các vị trí làm việc của nhân viên |
+| 59 | `shift_time_presets` | Khung giờ ca làm việc định sẵn |
+| 60 | `staff_shifts` | Lịch phân ca và chấm công thực tế của nhân viên |
+| 61 | `amenity_catalog` | Danh mục các tiện ích của chi nhánh |
+| 62 | `cafe_channels` | Cấu hình kênh liên lạc (Facebook, Zalo...) |
+| 63 | `cafe_holiday_overrides` | Cấu hình hoạt động chi nhánh vào ngày lễ |
+| 64 | `cafe_pricing_rules` | Cấu hình quy tắc định giá chi tiết theo khung giờ/ngày |
+| 65 | `holiday_dates` | Danh sách các ngày lễ chính thức |
 
 Các nghiệp vụ bị loại khỏi schema Phase 1:
 
-- AI job/detail tables.
-- Analytics nâng cao, dynamic pricing, loyalty và native mobile app.
+- AI job/detail tables nâng cao (trừ tính năng chatbot AI / Knowledge Base cơ bản ở trên).
+- Analytics nâng cao, dynamic pricing nâng cao, loyalty và native mobile app.
 
 ---
 
@@ -222,6 +279,15 @@ enum NotificationType {
   TRIAL_EXPIRING_SOON, GRACE_PERIOD_STARTED, SUBSCRIPTION_EXPIRED,
   SUBSCRIPTION_ACTIVATED, PAYMENT_REQUEST_CONFIRMED, PAYMENT_REQUEST_REJECTED
 }
+
+enum KbContentType { FILE, URL, RAW_TEXT }
+enum KbDocumentStatus { PENDING, PROCESSING, SUCCESS, FAILED }
+enum MaintenanceType { SCHEDULED, REPAIR, INSPECTION }
+enum StaffInviteStatus { PENDING, ACCEPTED, EXPIRED }
+enum CafeChannelType { FACEBOOK, ZALO, TELEGRAM }
+enum PricingType { FLAT, MULTIPLIER }
+enum DisputeStatus { OPEN, IN_PROGRESS, RESOLVED, CANCELLED }
+enum DisputeFavor { CUSTOMER, PROVIDER }
 ```
 
 ---
@@ -290,12 +356,13 @@ CREATE INDEX idx_users_role ON users(role);
 | `address` | `text` | NOT NULL | |
 | `district` | `varchar(100)` | NOT NULL | |
 | `city` | `varchar(100)` | NOT NULL | |
-| `latitude`, `longitude` | `numeric(10,7)` | NULL | |
+| `latitude`, `longitude` | `decimal(10,7)` | NULL | |
 | `operating_hours` | `jsonb` | NOT NULL | |
 | `track_types` | `text[]` | NOT NULL, DEFAULT `{}` | |
 | `slot_duration_minutes` | `integer` | NOT NULL, DEFAULT `60` | |
-| `slot_fee_rate` | `numeric(15,2)` | NOT NULL | Booking dùng snapshot |
+| `slot_fee_rate` | `decimal(15,2)` | NOT NULL | Booking dùng snapshot |
 | `max_concurrent_bookings` | `integer` | NOT NULL, DEFAULT `10` | |
+| `min_booking_notice_minutes` | `integer` | NOT NULL, DEFAULT `60` | Khoảng thời gian đặt trước tối thiểu |
 | `byoc_capacity` | `integer` | NOT NULL, DEFAULT `5` | |
 | `created_at`, `updated_at` | `timestamptz` | | |
 
@@ -309,11 +376,112 @@ CREATE INDEX idx_users_role ON users(role);
 | `sort_order` | `integer` | NOT NULL, DEFAULT `0` |
 | `created_at` | `timestamptz` | NOT NULL |
 
+#### `track_types`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `code` | `varchar(50)` | NOT NULL, UNIQUE | Mã loại track (DRIFT, CIRCUIT...) |
+| `name` | `varchar(100)` | NOT NULL | Tên hiển thị |
+| `description` | `text` | NULL | |
+| `is_active` | `boolean` | NOT NULL, DEFAULT `true` | |
+| `sort_order` | `integer` | NOT NULL, DEFAULT `0` | |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+#### `cafe_track_configs`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) ON DELETE CASCADE | |
+| `track_type_id` | `uuid` | NOT NULL, FK -> track_types(id) | |
+| `byoc_capacity` | `integer` | NOT NULL, DEFAULT `5` | Sức chứa xe cá nhân tối đa |
+| `images` | `text[]` | NOT NULL, DEFAULT `'{}'` | Gallery ảnh sân |
+| `description` | `text` | NULL | |
+| `sort_order` | `integer` | NOT NULL, DEFAULT `0` | |
+| `is_active` | `boolean` | NOT NULL, DEFAULT `true` | |
+| `created_at`, `updated_at`, `deleted_at` | `timestamptz` | | |
+
+#### `cafe_widget_configs`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, UNIQUE, FK -> cafes(id) ON DELETE CASCADE | 1:1 với cafes |
+| `greeting_message` | `text` | NULL | Tin nhắn chào |
+| `welcome_message` | `text` | NULL | Tin nhắn mở đầu hội thoại |
+| `position` | `varchar(20)` | NOT NULL, DEFAULT `'bottom-right'` | Vị trí hiển thị bong bóng chat |
+| `primary_color` | `varchar(20)` | NOT NULL, DEFAULT `'#111827'` | Tông màu chủ đạo widget |
+| `avatar_url` | `text` | NULL | Ảnh đại diện chatbot |
+| `quick_replies` | `jsonb` | NOT NULL, DEFAULT `'[]'` | Câu trả lời nhanh định sẵn |
+| `is_enabled` | `boolean` | NOT NULL, DEFAULT `true` | Trạng thái bật/tắt widget |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+#### `amenity_catalog`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) ON DELETE CASCADE | |
+| `name` | `varchar(255)` | NOT NULL | Tên tiện ích (Wifi, Điều hòa, Bãi đỗ xe...) |
+| `icon` | `varchar(100)` | NULL | Mã icon hoặc class name |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+#### `cafe_channels`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) ON DELETE CASCADE | |
+| `channel_type` | `CafeChannelType` | NOT NULL | Loại kênh (FACEBOOK, ZALO...) |
+| `channel_name` | `varchar(255)` | NOT NULL | Tên kênh kết nối |
+| `page_id` | `varchar(255)` | NULL | ID trang mạng xã hội kết nối |
+| `access_token` | `text` | NULL | Token API kết nối |
+| `is_active` | `boolean` | NOT NULL, DEFAULT `true` | |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+#### `holiday_dates`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `name` | `varchar(255)` | NOT NULL | Tên ngày lễ (Tết Dương Lịch, Quốc Khánh...) |
+| `holiday_date` | `date` | NOT NULL, UNIQUE | Ngày lễ |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+#### `cafe_holiday_overrides`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) ON DELETE CASCADE | |
+| `holiday_id` | `uuid` | NOT NULL, FK -> holiday_dates(id) ON DELETE CASCADE | |
+| `is_closed` | `boolean` | NOT NULL, DEFAULT `false` | Có đóng cửa ngày này không |
+| `operating_hours` | `jsonb` | NULL | Giờ hoạt động thay đổi nếu mở cửa |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+#### `cafe_pricing_rules`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) ON DELETE CASCADE | |
+| `name` | `varchar(255)` | NOT NULL | Tên quy tắc giá |
+| `track_type` | `varchar(50)` | NOT NULL | Áp dụng cho loại đường đua |
+| `day_of_week` | `integer[]` | NOT NULL, DEFAULT `'{}'` | Các ngày trong tuần áp dụng (0: CN, 1: Thứ 2...) |
+| `start_time` | `time` | NOT NULL | Giờ bắt đầu áp dụng |
+| `end_time` | `time` | NOT NULL | Giờ kết thúc áp dụng |
+| `pricing_type` | `PricingType` | NOT NULL | Định giá dạng FLAT hay MULTIPLIER |
+| `pricing_value` | `decimal(15,2)` | NOT NULL | Giá trị tăng thêm hoặc hệ số nhân |
+| `priority` | `integer` | NOT NULL, DEFAULT `0` | Thứ tự ưu tiên áp dụng |
+| `is_active` | `boolean` | NOT NULL, DEFAULT `true` | |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
 ---
 
 ### 5.3 Fleet & BYOC
 
-#### `vehicles`
+#### `vehicle_catalogs`
 
 | Column | Type | Constraints | Ghi chú |
 |--------|------|-------------|---------|
@@ -321,22 +489,36 @@ CREATE INDEX idx_users_role ON users(role);
 | `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) | |
 | `name` | `varchar(255)` | NOT NULL | |
 | `description` | `text` | NULL | |
-| `tier` | `VehicleTier` | NOT NULL | |
-| `status` | `VehicleStatus` | NOT NULL, DEFAULT `AVAILABLE` | |
-| `hourly_rate` | `numeric(15,2)` | NOT NULL | |
-| `security_deposit` | `numeric(15,2)` | NOT NULL | |
-| `damage_multiplier` | `numeric(4,2)` | NOT NULL, DEFAULT `1.00` | |
+| `tier` | `varchar(50)` | NOT NULL | Tier của xe (STANDARD, PREMIUM, RESTRICTED...) |
+| `hourly_rate` | `decimal(15,2)` | NOT NULL | |
+| `security_deposit` | `decimal(15,2)` | NOT NULL | |
+| `damage_multiplier` | `decimal(3,2)` | NOT NULL, DEFAULT `1.00` | |
 | `compatible_track_types` | `text[]` | NOT NULL, DEFAULT `{}` | |
 | `cover_image_url` | `text` | NULL | |
-| `last_maintenance_at` | `timestamptz` | NULL | |
 | `created_at`, `updated_at`, `deleted_at` | `timestamptz` | | |
 
-#### `vehicle_images`
+#### `vehicles` (physical units)
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) | |
+| `catalog_id` | `uuid` | NOT NULL, FK -> vehicle_catalogs(id) | Tham chiếu đến danh mục xe |
+| `status` | `VehicleStatus` | NOT NULL, DEFAULT `AVAILABLE` | |
+| `last_maintenance_at` | `timestamptz` | NULL | |
+| `identifier` | `varchar(100)` | NOT NULL | Mã định danh xe vật lý |
+| `color` | `varchar(50)` | NULL | |
+| `distinctive_image_url` | `text` | NULL | |
+| `notes` | `text` | NULL | |
+| `metadata` | `jsonb` | NOT NULL, DEFAULT `{}` | |
+| `created_at`, `updated_at`, `deleted_at` | `timestamptz` | | |
+
+#### `vehicle_catalog_images`
 
 | Column | Type | Constraints |
 |--------|------|-------------|
 | `id` | `uuid` | PK |
-| `vehicle_id` | `uuid` | NOT NULL, FK -> vehicles(id) ON DELETE CASCADE |
+| `catalog_id` | `uuid` | NOT NULL, FK -> vehicle_catalogs(id) ON DELETE CASCADE |
 | `url` | `text` | NOT NULL |
 | `sort_order` | `integer` | NOT NULL, DEFAULT `0` |
 | `created_at` | `timestamptz` | NOT NULL |
@@ -360,9 +542,9 @@ CREATE INDEX idx_users_role ON users(role);
 |--------|------|-------------|---------|
 | `id` | `uuid` | PK | |
 | `vehicle_id` | `uuid` | NOT NULL, FK -> vehicles(id) | |
-| `type` | `varchar(50)` | NOT NULL | `SCHEDULED`, `REPAIR`, `INSPECTION` |
+| `type` | `MaintenanceType` | NOT NULL | `SCHEDULED`, `REPAIR`, `INSPECTION` |
 | `description` | `text` | NOT NULL | |
-| `cost` | `numeric(15,2)` | NULL | |
+| `cost` | `decimal(15,2)` | NULL | |
 | `performed_by` | `uuid` | NULL, FK -> users(id) | Staff hoặc NULL nếu gửi ngoài |
 | `performed_at` | `timestamptz` | NOT NULL | |
 | `next_scheduled_at` | `timestamptz` | NULL | |
@@ -393,11 +575,13 @@ CREATE INDEX idx_users_role ON users(role);
 | `payment_expires_at` | `timestamptz` | NOT NULL | |
 | `snapshot` | `jsonb` | NOT NULL | Giá/policy bất biến |
 | `promotion_id` | `uuid` | NULL, FK -> promotions(id) | |
-| `discount_amount` | `numeric(15,2)` | NULL | |
+| `discount_amount` | `decimal(15,2)` | NULL | |
 | `notes` | `text` | NULL | |
 | `cancelled_by` | `uuid` | NULL, FK -> users(id) | |
 | `cancelled_at` | `timestamptz` | NULL | |
 | `cancellation_reason` | `text` | NULL | |
+| `track_config_id` | `uuid` | NULL, FK -> cafe_track_configs(id) | Cấu hình sân chơi cụ thể (Mới) |
+| `customer_package_id` | `uuid` | NULL, FK -> customer_packages(id) | Gói chơi được sử dụng (Mới) |
 | `created_at`, `updated_at` | `timestamptz` | | |
 
 ```sql
@@ -520,9 +704,10 @@ CREATE UNIQUE INDEX idx_booking_vehicles_unique ON booking_vehicles(booking_id, 
 | `gateway` | `varchar(50)` | NOT NULL |
 | `gateway_transaction_id` | `varchar(255)` | NULL |
 | `type` | `PaymentTransactionType` | NOT NULL |
-| `amount` | `numeric(15,2)` | NOT NULL |
+| `amount` | `decimal(15,2)` | NOT NULL |
 | `status` | `varchar(50)` | NOT NULL |
 | `raw_request`, `raw_response` | `jsonb` | NULL |
+| `customer_package_id` | `uuid` | NULL, FK -> customer_packages(id) | Gói chơi được mua trong giao dịch này (Mới) |
 | `created_at` | `timestamptz` | NOT NULL |
 
 ---
@@ -730,22 +915,18 @@ Rules:
 | Column | Type | Constraints | Ghi chú |
 |--------|------|-------------|---------|
 | `id` | `uuid` | PK | |
-| `provider_id` | `uuid` | NOT NULL, FK -> users(id) | Provider sở hữu contest |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) | Chi nhánh tổ chức |
 | `name` | `varchar(255)` | NOT NULL | |
 | `description` | `text` | NULL | |
-| `track_type_id` | `uuid` | NOT NULL, FK -> track_types(id) | Track chính của contest MVP |
+| `track_type` | `varchar(50)` | NOT NULL | Loại đường đua (Drift, Circuit...) |
 | `vehicle_rule` | `jsonb` | NOT NULL, DEFAULT `{}` | Rule rental/BYOC/spec |
 | `starts_at` | `timestamptz` | NOT NULL | Thời điểm bắt đầu event |
 | `ends_at` | `timestamptz` | NOT NULL | Thời điểm kết thúc event |
-| `registration_opens_at` | `timestamptz` | NOT NULL | Public registration mở từ thời điểm này |
-| `registration_closes_at` | `timestamptz` | NOT NULL | Sau thời điểm này không nhận đăng ký mới |
 | `capacity` | `integer` | NOT NULL | Capacity tổng của contest MVP |
-| `entry_fee` | `numeric(15,2)` | NOT NULL, DEFAULT `0` | Không tạo booking giả để thu phí |
+| `entry_fee` | `decimal(15,2)` | NOT NULL, DEFAULT `0.00` | Lệ phí tham gia giải đấu |
 | `status` | `ContestStatus` | NOT NULL, DEFAULT `DRAFT` | |
-| `banner_image_url` | `text` | NULL | Ảnh/banner public |
-| `config` | `jsonb` | NOT NULL, DEFAULT `{}` | Format/rules/prizes/leaderboard |
-| `created_by` | `uuid` | NOT NULL, FK -> users(id) | Bằng `provider_id` trong MVP |
-| `created_at`, `updated_at`, `deleted_at` | `timestamptz` | | |
+| `created_by` | `uuid` | NOT NULL, FK -> users(id) | |
+| `created_at`, `updated_at` | `timestamptz` | | |
 
 Config shape khuyến nghị:
 
@@ -1027,6 +1208,36 @@ CREATE INDEX idx_notifications_user_read_at ON notifications (user_id, read_at);
 
 ---
 
+### 5.14 Knowledge Base (AI)
+
+#### `kb_documents`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) ON DELETE CASCADE | |
+| `title` | `varchar(255)` | NOT NULL | Tiêu đề tài liệu |
+| `original_filename` | `varchar(255)` | NULL | Tên file gốc tải lên |
+| `content_type` | `KbContentType` | NOT NULL | Loại nội dung (FILE, URL, RAW_TEXT) |
+| `raw_content` | `text` | NULL | Dữ liệu text thô trích xuất từ file |
+| `status` | `KbDocumentStatus` | NOT NULL, DEFAULT `'PENDING'` | Trạng thái xử lý vector |
+| `created_by` | `uuid` | NOT NULL, FK -> users(id) | |
+| `created_at`, `updated_at`, `deleted_at` | `timestamptz` | | |
+
+#### `kb_chunks`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) ON DELETE CASCADE | |
+| `document_id` | `uuid` | NOT NULL, FK -> kb_documents(id) ON DELETE CASCADE | |
+| `chunk_text` | `text` | NOT NULL | Nội dung text cắt nhỏ |
+| `chunk_index` | `integer` | NOT NULL | Thứ tự của chunk |
+| `embedding` | `vector(768)` | NOT NULL | Vector nhúng (embedding) của chunk |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+---
+
 ## 6. Redis — Slot Locking
 
 Redis chỉ giữ slot tạm trong checkout. DB là nguồn sự thật sau khi booking được tạo.
@@ -1127,6 +1338,53 @@ CREATE UNIQUE INDEX idx_staff_cafe_staff_id ON staff_cafe_assignments(staff_id);
 CREATE INDEX idx_staff_cafe_cafe_id ON staff_cafe_assignments(cafe_id);
 ```
 
+#### `staff_invite_tokens`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) ON DELETE CASCADE | |
+| `email` | `varchar(255)` | NOT NULL | Email được mời |
+| `token` | `varchar(255)` | NOT NULL, UNIQUE | Token xác thực lời mời |
+| `status` | `StaffInviteStatus` | NOT NULL, DEFAULT `'PENDING'` | |
+| `expires_at` | `timestamptz` | NOT NULL | Thời hạn token |
+| `created_by` | `uuid` | NOT NULL, FK -> users(id) | Người tạo lời mời (PROVIDER/ADMIN) |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+#### `shift_positions`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) ON DELETE CASCADE | |
+| `name` | `varchar(100)` | NOT NULL | Vị trí làm việc (Lễ tân, Kỹ thuật...) |
+| `description` | `text` | NULL | |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+#### `shift_time_presets`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) ON DELETE CASCADE | |
+| `name` | `varchar(100)` | NOT NULL | Tên ca định sẵn (Ca sáng, Ca chiều...) |
+| `start_time`, `end_time` | `time` | NOT NULL | Khung giờ làm việc |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+#### `staff_shifts`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) ON DELETE CASCADE | |
+| `staff_id` | `uuid` | NOT NULL, FK -> users(id) ON DELETE CASCADE | |
+| `position_id` | `uuid` | NOT NULL, FK -> shift_positions(id) | Vị trí làm việc của ca này |
+| `shift_date` | `date` | NOT NULL | Ngày làm việc |
+| `time_preset_id` | `uuid` | NULL, FK -> shift_time_presets(id) | Tham chiếu ca định sẵn (nếu có) |
+| `start_time`, `end_time` | `time` | NOT NULL | Khung giờ làm việc thực tế |
+| `notes` | `text` | NULL | |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
 ---
 
 #### `disputes`
@@ -1140,7 +1398,7 @@ CREATE INDEX idx_staff_cafe_cafe_id ON staff_cafe_assignments(cafe_id);
 | `evidence_photos` | `text[]` | NOT NULL, DEFAULT '{}' | Cloudinary URLs |
 | `status` | `DisputeStatus` | NOT NULL, DEFAULT `OPEN` | |
 | `resolution` | `text` | NULL | Admin ghi quyết định |
-| `resolution_favor` | `varchar(20)` | NULL | `CUSTOMER` hoặc `PROVIDER` |
+| `resolution_favor` | `DisputeFavor` | NULL | `CUSTOMER` hoặc `PROVIDER` |
 | `resolved_by` | `uuid` | NULL, FK -> users(id) | Admin |
 | `resolved_at` | `timestamptz` | NULL | |
 | `created_at`, `updated_at` | `timestamptz` | NOT NULL | |
@@ -1208,7 +1466,7 @@ CREATE INDEX idx_cafe_announcements_cafe_id ON cafe_announcements(cafe_id, is_ac
 
 ---
 
-*Last updated: 2026-06-23 · 50 tables (contest compact tournament flow included)*
+*Last updated: 2026-06-29 · 65 tables (contest compact tournament flow, staff scheduling, widget and track/pricing configs included)*
 
 ### Contest Vehicle Flow Schema Notes
 
