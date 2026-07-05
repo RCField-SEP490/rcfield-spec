@@ -128,6 +128,16 @@ const sidebars: SidebarsConfig = {
         'customer-package-booking/contracts/api',
       ],
     },
+    {
+      type: 'category',
+      label: '010 · AI Revenue Analytics',
+      collapsed: true,
+      items: [
+        'ai-revenue-analytics/spec',
+        'ai-revenue-analytics/plan',
+        'ai-revenue-analytics/tasks',
+      ],
+    },
   ],
 };
 

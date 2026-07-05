@@ -65,6 +65,14 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Activity Diagrams',
+      collapsed: false,
+      items: [
+        'diagrams/activity/activity-flow-booking-full',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Developer Guides',
       collapsed: false,
       items: ['developer/provider-subscription-enforcement'],
