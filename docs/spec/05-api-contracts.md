@@ -1,6 +1,6 @@
 # 05 — API Contracts
 
-**Last updated**: 2026-06-23
+**Last updated**: 2026-07-07
 > Convention: tất cả response đều wrap trong `{ data, meta?, error? }`
 > Auth header: `Authorization: Bearer <jwt_token>`
 
@@ -308,14 +308,99 @@ Rules:
 - Không tạo booking giả cho contest entry fee; `CONTEST_ENTRY` payment subject là phase payment sau.
 - Schedule generation chỉ sau `CLOSED` hoặc `RUNNING`, và chỉ dùng registration `CONFIRMED`/`CHECKED_IN`.
 - Một match không cố định A/B; dùng `contest_match_participants` để hỗ trợ 1, 2, 4 hoặc nhiều driver.
-- Leaderboard phase này lưu trong `contests.config.leaderboard`; reward/prize là config hiển thị, không phát voucher tự động.
+- Leaderboard phase này lưu trong `contests.config.leaderboard` như local contest snapshot; global leaderboard phase sau đọc từ verified `race_records`. Reward/prize là config hiển thị, không phát voucher tự động.
 - Mọi mutation phải ghi `contest_audit_logs`.
+
+### Universal Racing Network APIs — Future Phase
+
+Các API dưới đây không thay đổi contest hiện tại. Chúng được implement sau khi Provider-level contest ổn định.
+
+#### Driver Passport
+
+| Method | Endpoint | Actor | Mô tả |
+|--------|----------|-------|-------|
+| GET | `/me/driver-passport` | CUSTOMER | Xem passport, stats, race records gần đây, achievements |
+| PATCH | `/me/driver-passport` | CUSTOMER | Cập nhật handle/display name/privacy |
+| GET | `/drivers/:handle` | Public/Auth | Xem public driver profile theo privacy |
+| POST | `/cafes/:id/passport-check-in` | STAFF/PROVIDER | Quét passport QR, ghi community check-in tại cafe |
+
+**PATCH /me/driver-passport body:**
+```json
+{
+  "driver_handle": "speednomad",
+  "display_name": "Speed Nomad",
+  "home_cafe_id": "uuid | null",
+  "public_profile_enabled": true,
+  "leaderboard_opt_in": true
+}
+```
+
+#### Race Records & Leaderboards
+
+| Method | Endpoint | Actor | Mô tả |
+|--------|----------|-------|-------|
+| POST | `/contests/:id/sync-race-records` | PROVIDER owner / ADMIN | Sync contest leaderboard đã publish sang verified race records |
+| GET | `/leaderboards/global` | Public/Auth | Leaderboard toàn hệ thống, filter theo city/cafe/track/time |
+| GET | `/leaderboards/cafes/:cafeId` | Public/Auth | Leaderboard public của một cafe opt-in |
+| GET | `/me/race-records` | CUSTOMER | Thành tích của driver hiện tại |
+| PATCH | `/race-records/:id/verification` | ADMIN | Verify/reject/supersede record khi cần moderation |
+
+**GET /leaderboards/global query:**
+```text
+city=Ho%20Chi%20Minh
+cafe_id=uuid
+track_config_id=uuid
+vehicle_source=RENTAL|BYOC
+source_type=CONTEST|SESSION_TIME_ATTACK
+period=daily|weekly|monthly|all_time
+limit=50
+```
+
+Leaderboard response không trả email, phone, payment, booking note hoặc session private note.
+
+#### Achievements
+
+| Method | Endpoint | Actor | Mô tả |
+|--------|----------|-------|-------|
+| GET | `/achievements` | Public/Auth | Danh sách badge definitions đang active |
+| GET | `/me/achievements` | CUSTOMER | Badge đã unlock của driver hiện tại |
+| POST | `/admin/achievements` | ADMIN | Tạo achievement definition |
+| PATCH | `/admin/achievements/:id` | ADMIN | Sửa/ẩn achievement definition |
+
+#### Grand Prix Series
+
+| Method | Endpoint | Actor | Mô tả |
+|--------|----------|-------|-------|
+| GET | `/series` | Public/Auth | List Grand Prix Series public |
+| GET | `/series/:id` | Public/Auth | Detail series + rounds |
+| GET | `/series/:id/standings` | Public/Auth | Standings tính từ contest rounds đã publish |
+| POST | `/admin/series` | ADMIN | Tạo series cross-provider |
+| POST | `/admin/series/:id/rounds` | ADMIN | Link contest đã publish làm round |
+| POST | `/admin/series/:id/recalculate` | ADMIN | Recalculate standings sau correction |
+
+#### Team War / Clan War
+
+| Method | Endpoint | Actor | Mô tả |
+|--------|----------|-------|-------|
+| GET | `/teams` | Public/Auth | List teams public |
+| POST | `/teams` | CUSTOMER | Tạo racing team, creator là captain |
+| POST | `/teams/:id/join-requests` | CUSTOMER | Xin tham gia team |
+| POST | `/teams/:id/members/:memberId/approve` | Team captain | Approve member |
+| POST | `/team-wars` | Team captain | Tạo challenge giữa hai team |
+| POST | `/team-wars/:id/lock-roster` | Team captain / ADMIN | Lock roster trước race day |
+| GET | `/team-wars/:id/results` | Public/Auth | Kết quả team war từ verified records |
+
+Rules:
+
+- Team War chỉ mở sau Driver Passport + verified race records.
+- Roster bị lock trước race day; override phải có Admin audit.
+- Team standings không dùng self-reported lap time.
 
 ---
 
 ## Phase 2 APIs
 
-Các nhóm API sau không thuộc Phase 1: multi-party dispute workflow nâng cao, SaaS tenant admin, AI jobs, analytics nâng cao, loyalty/dynamic pricing.
+Các nhóm API sau không thuộc Phase 1: Universal Racing Network, multi-party dispute workflow nâng cao, SaaS tenant admin, AI jobs, analytics nâng cao, loyalty/dynamic pricing.
 
 ## Response Format
 

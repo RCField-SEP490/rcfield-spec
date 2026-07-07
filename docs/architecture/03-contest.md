@@ -1,13 +1,13 @@
 # Architecture: Contest & Race Event
 
-**Last Updated:** 2026-06-23  
-**Spec refs:** `docs/spec/business-rules/BR-contest.md`, `docs/spec/01-domain-model.md`, `docs/spec/05-api-contracts.md`, `docs/spec/06-database.md`
+**Last Updated:** 2026-07-07
+**Spec refs:** `docs/spec/business-rules/BR-contest.md`, `docs/spec/business-rules/BR-racing-network.md`, `docs/spec/09-universal-racing-network.md`, `docs/spec/01-domain-model.md`, `docs/spec/05-api-contracts.md`, `docs/spec/06-database.md`
 
 ---
 
 ## 1. Intent
 
-Contest là module event operations riêng của RCField. Nó không phải booking thường và không tạo booking giả để thu phí hay giữ slot. Phase hiện tại tập trung vào luồng khả thi cho đồ án:
+Contest là module event operations riêng của RCField. Phase hiện tại là Provider-level contest: Provider tạo giải cho các cafe thuộc mình, Staff thao tác trong cafe được assign, và leaderboard publish ra snapshot local của contest. Nó không phải booking thường và không tạo booking giả để thu phí hay giữ slot. Phase hiện tại tập trung vào luồng khả thi cho đồ án:
 
 1. Provider tạo/sửa/open/close/cancel contest.
 2. Customer xem thông tin, luật, giải thưởng, địa điểm và đăng ký.
@@ -30,7 +30,7 @@ SESSION = actual play session
 |---|---|
 | Current phase | Compact tournament flow với 5 bảng chính + audit log |
 | Next phase | Schedule block, CONTEST_ENTRY payment, BYOC tech-check, rental assignment đầy đủ |
-| Backlog | Multi-class, live timing, transponder, protest, auto bracket nâng cao, series/championship, reward claim lifecycle |
+| Backlog | Multi-class, live timing, transponder, protest, auto bracket nâng cao, reward claim lifecycle |
 
 Schema hiện tại:
 
@@ -41,6 +41,23 @@ contest_registrations
 contest_matches
 contest_match_participants
 contest_audit_logs
+```
+
+Universal Racing Network phase sau contest:
+
+```text
+driver_profiles
+driver_cafe_checkins
+race_records
+achievement_definitions
+driver_achievements
+league_series
+league_rounds
+league_standings
+racing_teams
+racing_team_members
+team_wars
+team_war_results
 ```
 
 Không dùng trong phase hiện tại:
@@ -313,6 +330,10 @@ Rules:
 | Rental assignment | Optional registration field | Assignment pool at check-in |
 | Reward | Config-only prizes | Reward claim lifecycle |
 | Live timing | Manual result | Transponder/import/live board |
+| Global leaderboard | `contests.config.leaderboard` chỉ là local snapshot | `race_records` verified cho leaderboard liên tỉnh/toàn quốc |
+| Driver Passport | Chưa thuộc contest core | `driver_profiles` + `driver_cafe_checkins` |
+| Grand Prix Series | Không nằm trong contest core | `league_series` gom nhiều contest đã publish |
+| Team War | Chưa mở | Cần Driver Passport, verified records, roster lock |
 
 ---
 

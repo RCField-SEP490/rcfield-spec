@@ -14,6 +14,8 @@ const sidebars: SidebarsConfig = {
         'spec/inspection-flow',
         'spec/api-contracts',
         'spec/database',
+        'spec/contest',
+        'spec/universal-racing-network',
         {
           type: 'category',
           label: 'Business Rules',
@@ -27,6 +29,8 @@ const sidebars: SidebarsConfig = {
             'spec/business-rules/BR-fnb',
             'spec/business-rules/BR-dispute',
             'spec/business-rules/BR-promotions',
+            'spec/business-rules/BR-contest',
+            'spec/business-rules/BR-racing-network',
           ],
         },
       ],
@@ -39,6 +43,7 @@ const sidebars: SidebarsConfig = {
         'architecture/system-overview',
         'architecture/booking-session',
         'architecture/ai-chat-rag',
+        'architecture/contest',
         'architecture/RCField_ArchitectureOverview',
         'architecture/AI-Chat-RAG-ArchitectureOverview',
         {
@@ -48,6 +53,7 @@ const sidebars: SidebarsConfig = {
           items: [
             'architecture/diagrams/booking-data-flow',
             'architecture/diagrams/booking-lifecycle-flow',
+            'architecture/diagrams/contest-lifecycle-flow',
           ],
         },
       ],
@@ -61,6 +67,8 @@ const sidebars: SidebarsConfig = {
         'diagrams/sequence/sequence-flow-provider-onboarding-subscription',
         'diagrams/sequence/sequence-flow-rag-chat',
         'diagrams/sequence/sequence-flow-redis-usage',
+        'diagrams/sequence/sequence-flow-contest-lifecycle',
+        'diagrams/sequence/sequence-flow-contest-vehicle-operations',
       ],
     },
     {

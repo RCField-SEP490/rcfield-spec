@@ -1,10 +1,10 @@
 # BR-Contest — Quy tắc nghiệp vụ Contest & Race Event
 
-**Last updated**: 2026-06-23  
+**Last updated**: 2026-07-07
 **Status**: Active for current implementation  
 **Owner**: Product / Backend / Frontend / Operations
 
-> Contest trong RCField là event domain riêng: Provider tạo giải, Customer đăng ký, Provider/Staff monitoring và check-in, sau khi đóng đăng ký thì tạo lịch thi đấu dạng match/heat linh hoạt, nhập kết quả thủ công, publish leaderboard và ghi audit log. Phase này cố ý giữ schema gọn để khả thi cho đồ án.
+> Contest trong RCField là event domain riêng ở phạm vi Provider: Provider tạo giải cho các cafe thuộc mình, Customer đăng ký, Provider/Staff monitoring và check-in, sau khi đóng đăng ký thì tạo lịch thi đấu dạng match/heat linh hoạt, nhập kết quả thủ công, publish leaderboard local và ghi audit log. Phase này cố ý giữ schema gọn để khả thi cho đồ án; Universal Racing Network là phase mở rộng sau contest.
 
 ---
 
@@ -35,6 +35,10 @@
 - Rental vehicle assignment đầy đủ tại check-in.
 - Reward claim lifecycle nếu muốn phát voucher/package tự động.
 - Official roles: race director, timekeeper, tech inspector.
+- Universal Racing Network Phase B: Driver Passport, verified global race records, leaderboard lien tinh/toan quoc.
+- Universal Racing Network Phase C: Achievements tu check-in va race records.
+- Universal Racing Network Phase D: Grand Prix Series gom nhieu contest da publish.
+- Universal Racing Network Phase E: Team War/Clan War voi roster lock va captain approval.
 
 ### Backlog — Không mở scope đồ án hiện tại
 
@@ -42,7 +46,7 @@
 - Live timing/transponder/lap-by-lap.
 - Protest workflow.
 - Auto bracket phức tạp.
-- Series/championship nhiều contest.
+- Series/championship nhiều contest trong contest core; phase sau dùng module `league_series` riêng.
 - Cash prize/payout.
 
 ---
@@ -116,6 +120,11 @@ Config khuyến nghị:
 **BR-CT-010 — Provider owner là người sở hữu contest**  
 IF: User thao tác contest core  
 THEN: `contest.provider_id` phải bằng user id, trừ endpoint staff event-day được phép.
+
+**BR-CT-013 — Contest không tự động cross-provider**
+IF: Provider tạo contest
+THEN: `participating_cafe_ids` chỉ được chứa cafe ACTIVE thuộc Provider đó. Contest toàn platform phải đi qua Universal Racing Network/Admin orchestration ở phase sau, không dùng Provider contest thường.
+
 
 **BR-CT-011 — Staff không xem full provider registration list**  
 IF: Staff vận hành event-day  
@@ -248,6 +257,15 @@ THEN: Lưu trong `contests.config.prizes`; không phát voucher/package tự đ�
 IF: Provider trao tiền mặt  
 THEN: Hệ thống chỉ ghi mô tả manual, không xử lý payout/thuế/fraud.
 
+**BR-CT-054 — Local leaderboard không phải global leaderboard**
+IF: Provider publish leaderboard của contest
+THEN: Chỉ ghi snapshot local vào `contests.config.leaderboard`; bảng xếp hạng liên tỉnh/toàn quốc phải đọc từ `race_records` đã verified trong Universal Racing Network.
+
+**BR-CT-055 — Global sync chỉ sau publish/correction hợp lệ**
+IF: Contest muốn sync kết quả sang Universal Racing Network
+THEN: Contest phải có leaderboard đã publish, không còn match non-terminal, và mọi correction liên quan phải được audit trước khi tạo/cập nhật `race_records`.
+
+
 ---
 
 ## 8. Monitoring & Audit
@@ -268,6 +286,7 @@ match.participants_updated
 match.result_submitted
 match.advanced
 leaderboard.published
+race_records.synced
 ```
 
 **BR-CT-060 — Audit log nằm trong cùng transaction**  
@@ -332,7 +351,7 @@ Demo hợp lý nhất cho capstone:
 10. Publish leaderboard/podium.
 11. Xem audit log để chứng minh monitoring.
 
-## 7. Contest Vehicle Review & Rental Link Finalization
+## 12. Contest Vehicle Review & Rental Link Finalization
 
 **BR-CT-090 — Rental contest uses Booking/Session, not fake contest rental**  
 IF: Contest requires organizer rental car (`vehicle_rule.vehicle_policy = RENTAL_ONLY`) or a `MIXED` contest registration chooses `vehicle_source = RENTAL`  
@@ -353,3 +372,7 @@ THEN: Staff must be assigned to the exact cafe used by that registration/match. 
 **BR-CT-094 — Result correction and leaderboard guard**  
 IF: A result is corrected after downstream matches are completed  
 THEN: only Provider can force cascade, and the correction must be audit logged. Leaderboard cannot be published while any contest match is still non-terminal (`DRAFT`, `READY`, `RUNNING`).
+
+**BR-CT-095 — Corrected published result must re-sync race records**
+IF: Result correction changes `best_lap_ms`, `total_time_ms`, `finish_position`, `score`, `is_winner`, or disqualification after race records were synced
+THEN: Backend must mark previous synced record as `SUPERSEDED` or update through an audited re-sync flow before global leaderboard can use the corrected value.

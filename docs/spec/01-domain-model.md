@@ -1,6 +1,6 @@
 # 01 — Domain Model
 
-**Last updated**: 2026-06-23  
+**Last updated**: 2026-07-07
 **Status**: Active
 
 > Đây là file nguồn định nghĩa entity và enum. Xem `06-database.md` để biết schema chi tiết và indexes.
@@ -380,7 +380,7 @@ ExtensionProposal
 
 Contest là event domain riêng, không phải booking/session thường. Phase hiện tại giữ luồng gọn nhưng đủ vận hành giải RC nhỏ: Provider tạo sự kiện, Customer đăng ký, Provider/Staff monitoring/check-in, sau khi đóng đăng ký thì tạo lịch thi đấu linh hoạt bằng match/participant, nhập kết quả thủ công và publish leaderboard.
 
-- `Contest`: giải đua/sự kiện do Provider tạo ở cấp provider, có thể chọn nhiều chi nhánh tham gia.
+- `Contest`: giải đua/sự kiện do Provider tạo ở cấp provider, có thể chọn nhiều chi nhánh thuộc Provider đó tham gia.
 - `ContestCafe`: bảng nối giữa contest và các chi nhánh tham gia; chi nhánh phải thuộc cùng Provider và đang ACTIVE.
 - `ContestRegistration`: user đăng ký contest chung bằng rental vehicle hoặc BYOC vehicle; phase này một user đăng ký một lần cho một contest.
 - `ContestMatch`: một trận, heat, lượt chạy time attack hoặc final. Một match có thể có 1, 2, 4 hoặc nhiều người tùy `config.drivers_per_match`.
@@ -491,9 +491,90 @@ Rules:
 - `checked_in_cafe_id` phải là một cafe trong `contest_cafes`; Staff chỉ check-in tại cafe được assign.
 - Provider sở hữu contest được thao tác toàn bộ; Staff chỉ thao tác match/result/check-in nếu thuộc một cafe tham gia contest.
 - Schedule generation chỉ dùng registration `CONFIRMED` hoặc `CHECKED_IN`; không dùng registration `CANCELLED`.
-- Leaderboard phase này lưu snapshot cuối trong `contests.config.leaderboard`; không có bảng leaderboard riêng.
+- Leaderboard phase này lưu snapshot cuối trong `contests.config.leaderboard`; snapshot này là local contest leaderboard, không phải global leaderboard.
 - Prize phase này là config hiển thị trong `contests.config.prizes`; không phát voucher/reward claim tự động.
 - Mọi mutation nghiệp vụ phải ghi `contest_audit_logs` và logger vận hành.
+
+### Universal Racing Network
+
+Universal Racing Network là phase mở rộng sau Provider-level contest. Các entity này không thay đổi contest hiện tại; chúng nhận dữ liệu đã verified từ contest/session để tạo Driver Passport, leaderboard toàn hệ thống, achievements, series và team war.
+
+Phase B entities:
+
+- `DriverProfile`: hồ sơ tay đua dùng chung toàn platform, 1:1 với Customer user.
+- `DriverCafeCheckin`: log passport/check-in community tại cafe, dùng cho history và achievements.
+- `RaceRecord`: thành tích verified từ contest/session/admin import, là source of truth cho global leaderboard.
+
+```
+DriverProfile
+├── id: UUID
+├── user_id: UUID -> User (UNIQUE)
+├── driver_handle: string (UNIQUE, public)
+├── display_name: string
+├── home_cafe_id?: UUID -> Cafe
+├── avatar_url?
+├── level / xp
+├── public_profile_enabled
+├── leaderboard_opt_in
+├── metadata: JSON
+├── created_at / updated_at / deleted_at
+
+DriverCafeCheckin
+├── id: UUID
+├── driver_profile_id: UUID -> DriverProfile
+├── user_id: UUID -> User
+├── cafe_id: UUID -> Cafe
+├── checked_in_by?: UUID -> User
+├── source: QR_SCAN | STAFF_MANUAL | CONTEST_CHECKIN
+├── checked_in_at
+├── metadata: JSON
+├── created_at
+
+RaceRecord
+├── id: UUID
+├── user_id: UUID -> User
+├── driver_profile_id: UUID -> DriverProfile
+├── provider_id: UUID -> User
+├── cafe_id: UUID -> Cafe
+├── track_config_id?: UUID -> CafeTrackConfig
+├── contest_id?: UUID -> Contest
+├── match_id?: UUID -> ContestMatch
+├── contest_match_participant_id?: UUID -> ContestMatchParticipant
+├── session_id?: UUID -> Session
+├── vehicle_source: VehicleSource
+├── source_type: CONTEST | SESSION_TIME_ATTACK | ADMIN_IMPORT
+├── verification_status: PENDING | VERIFIED | REJECTED | SUPERSEDED
+├── best_lap_ms? / total_time_ms? / score? / finish_position?
+├── recorded_at / verified_at?
+├── verified_by?: UUID -> User
+├── metadata: JSON
+├── created_at / updated_at
+```
+
+Phase C entities:
+
+- `AchievementDefinition`: badge/rule catalog do Admin seed hoặc quản lý.
+- `DriverAchievement`: badge đã unlock của driver.
+
+Phase D entities:
+
+- `LeagueSeries`: Grand Prix Series gom nhiều contest đã publish.
+- `LeagueRound`: round trong series, link tới một `contest_id`.
+- `LeagueStanding`: standings/points snapshot theo driver trong series.
+
+Phase E entities:
+
+- `RacingTeam`: team/clan của drivers.
+- `RacingTeamMember`: membership có approval/role/status.
+- `TeamWar`: challenge giữa hai team.
+- `TeamWarResult`: kết quả team war từ verified race records.
+
+Rules:
+
+- Global leaderboard chỉ đọc `RaceRecord.verification_status = VERIFIED`.
+- Contest result chỉ sync sang `RaceRecord` sau khi contest leaderboard local đã publish và corrections đã audit.
+- `DriverProfile` public view không lộ email, phone, booking payment, session private notes hoặc inspection evidence.
+- Team War không implement trước Driver Passport + verified race records.
 
 ### Incident Policy Resolution & Disputes
 
@@ -649,6 +730,11 @@ enum CustomerPackageStatus { ACTIVE, EXPIRED, DEPLETED, CANCELLED }
 enum SubscriptionStatus { ACTIVE, PAUSED, CANCELLED, EXPIRED }
 enum ContestStatus { DRAFT, OPEN, CLOSED, RUNNING, COMPLETED, CANCELLED }
 enum ContestRegistrationStatus { PENDING, CONFIRMED, CANCELLED, CHECKED_IN }
+enum RaceRecordSourceType { CONTEST, SESSION_TIME_ATTACK, ADMIN_IMPORT }
+enum RaceRecordVerificationStatus { PENDING, VERIFIED, REJECTED, SUPERSEDED }
+enum DriverCheckinSource { QR_SCAN, STAFF_MANUAL, CONTEST_CHECKIN }
+enum TeamMemberStatus { PENDING, ACTIVE, LEFT, REMOVED }
+enum TeamWarStatus { DRAFT, OPEN, LOCKED, RUNNING, COMPLETED, CANCELLED }
 
 enum NotificationChannel { PUSH, SMS, EMAIL }
 enum NotificationStatus { PENDING, SENT, FAILED }
@@ -675,6 +761,7 @@ Các entity sau không thuộc Phase 1:
 
 - Multi-party dispute workflow nâng cao: `dispute_evidences`, `dispute_parties`, `incident_participants`
 - AI: `ai_analysis_jobs`, `ai_damage_detections`, `ai_recommendations`
+- Universal Racing Network: `driver_profiles`, `driver_cafe_checkins`, `race_records`, `achievement_definitions`, `driver_achievements`, `league_series`, `league_rounds`, `league_standings`, `racing_teams`, `racing_team_members`, `team_wars`, `team_war_results`
 
 ---
 

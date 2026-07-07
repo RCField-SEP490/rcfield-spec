@@ -1,6 +1,6 @@
 # 00 — Project Overview
 
-**Last updated**: 2026-06-23                                                
+**Last updated**: 2026-07-07
 **Status**: Active
 
 ---
@@ -19,7 +19,7 @@ Sân xe RC (Radio-Controlled Car) là mô hình giải trí trải nghiệm đan
 
 **RCField** là **nền tảng SaaS multi-tenant** cho **nhiều Provider** vận hành sân xe RC tại Việt Nam. Mỗi Provider đăng ký gói SaaS, sở hữu và quản lý một hoặc nhiều chi nhánh (cafes) độc lập. Mỗi chi nhánh có cấu hình riêng về giá, đội xe, giờ hoạt động và sức chứa, nhưng dùng chung một hệ thống.
 
-RCField Phase 1 tập trung vào vận hành thực tế của cafe xe RC, bao gồm booking/session, đội xe, BYOC, F&B, package, subscription, contest, promotion, inspection, dispute resolution, staff assignment, cafe operations, audit thanh toán/trust score và SaaS subscription/billing. Phase 2 dành cho AI nâng cao và multi-party dispute workflow nâng cao.
+RCField Phase 1 tập trung vào vận hành thực tế của cafe xe RC, bao gồm booking/session, đội xe, BYOC, F&B, package, subscription, contest, promotion, inspection, dispute resolution, staff assignment, cafe operations, audit thanh toán/trust score và SaaS subscription/billing. Phase 2+ dành cho AI nâng cao, multi-party dispute workflow nâng cao và Universal Racing Network sau khi Provider-level contest ổn định.
 
 Hai nhóm khách chính:
 
@@ -96,7 +96,7 @@ Phase 1 giữ các nghiệp vụ chính của hệ thống. Đây không chỉ l
 - F&B: menu, pre-order khi đặt lịch, on-site order trong session.
 - Packages/gói chơi và lịch sử sử dụng gói.
 - Subscriptions/lịch chơi định kỳ sinh booking.
-- Contests/tournament: Provider tạo event, Customer đăng ký, Staff/Provider check-in, match/result/leaderboard thủ công và audit monitoring.
+- Contests/tournament: Provider tạo event trong phạm vi cafe của Provider, Customer đăng ký, Staff/Provider check-in, match/result/leaderboard local thủ công và audit monitoring.
 - Promotions cơ bản và usage audit.
 - Incident logging + policy-based resolution để xử lý hư hỏng/va chạm ở mức Phase 1.
 - Vehicle maintenance logs để theo dõi bảo trì/sửa chữa xe.
@@ -111,6 +111,7 @@ Phase 1 giữ các nghiệp vụ chính của hệ thống. Đây không chỉ l
 
 Các module sau không thuộc Phase 1:
 
+- Universal Racing Network: Driver Passport, verified global race records, leaderboard liên tỉnh/toàn quốc, achievements, Grand Prix Series, Team War/Clan War.
 - Multi-party dispute workflow nâng cao: `dispute_evidences`, `dispute_parties`, `incident_participants`.
 - AI jobs, AI damage detection, AI recommendations nâng cao.
 - Analytics dashboard nâng cao.
@@ -132,6 +133,7 @@ Các module sau không thuộc Phase 1:
 10. Package/subscription/contest/F&B/maintenance là Phase 1 core.
 11. Tranh chấp Phase 1 dùng bảng `disputes` + evidence từ inspection. Multi-party dispute workflow nâng cao là Phase 2.
 12. Phase 2 AI/SaaS phải mở rộng được mà không redesign Phase 1 core.
+13. Universal Racing Network phải đọc từ verified `race_records`, không dùng `contests.config.leaderboard` làm global leaderboard.
 
 ---
 

@@ -1,6 +1,6 @@
 # 06 — Database Specification
 
-**Last updated**: 2026-06-23
+**Last updated**: 2026-07-07
 
 > Đọc `01-domain-model.md` để hiểu entity relationships trước khi đọc file này.  
 > File này là nguồn sự thật cho schema Phase 1 Operational Core.
@@ -264,6 +264,11 @@ enum ContestRegistrationStatus { PENDING, CONFIRMED, CANCELLED, CHECKED_IN }
 enum ContestMatchType { HEAD_TO_HEAD, MULTI_DRIVER, TIME_ATTACK, FINAL }
 enum ContestMatchStatus { DRAFT, READY, RUNNING, COMPLETED, CANCELLED }
 enum ContestMatchParticipantStatus { READY, STARTED, FINISHED, DNS, DNF, DQ }
+enum RaceRecordSourceType { CONTEST, SESSION_TIME_ATTACK, ADMIN_IMPORT }
+enum RaceRecordVerificationStatus { PENDING, VERIFIED, REJECTED, SUPERSEDED }
+enum DriverCheckinSource { QR_SCAN, STAFF_MANUAL, CONTEST_CHECKIN }
+enum TeamMemberStatus { PENDING, ACTIVE, LEFT, REMOVED }
+enum TeamWarStatus { DRAFT, OPEN, LOCKED, RUNNING, COMPLETED, CANCELLED }
 enum DiscountType { PERCENT, FIXED }
 enum PromoApplicableTo { ALL, RENTAL, BYOC, MIXED }
 enum NotificationChannel { PUSH, SMS, EMAIL }
@@ -1302,10 +1307,123 @@ Backlog chỉ quay lại khi thật sự cần:
 | Live timing/lap-by-lap | `contest_laps`, transponder import |
 | Protest/result correction formal | `contest_protests`, result audit chuyên biệt |
 | Reward claim lifecycle | `contest_rewards`, `contest_reward_claims` hoặc voucher integration |
-| Series/championship | `contest_series`, season points |
+| Series/championship | `league_series`, `league_rounds`, `league_standings` trong Universal Racing Network |
 | Official roles nâng cao | `contest_officials` |
 
-## 8. General Phase 2 Backlog — Not Part Of Phase 1 Schema
+## 8. Universal Racing Network Expansion Schema — Future Phase
+
+Các bảng dưới đây là thiết kế cho phase sau contest. Không cộng vào Phase 1 65 tables và không tạo migration cùng contest hiện tại.
+
+### Phase B — Driver Passport + Race Records
+
+#### `driver_profiles`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `user_id` | `uuid` | NOT NULL, UNIQUE, FK -> users(id) ON DELETE CASCADE | Customer owner |
+| `driver_handle` | `varchar(80)` | NOT NULL, UNIQUE | Public handle, case-insensitive unique |
+| `display_name` | `varchar(120)` | NOT NULL | Tên hiển thị public |
+| `home_cafe_id` | `uuid` | NULL, FK -> cafes(id) | Cafe ruột optional |
+| `avatar_url` | `text` | NULL | |
+| `level` | `integer` | NOT NULL, DEFAULT 1 | |
+| `xp` | `integer` | NOT NULL, DEFAULT 0 | |
+| `public_profile_enabled` | `boolean` | NOT NULL, DEFAULT true | |
+| `leaderboard_opt_in` | `boolean` | NOT NULL, DEFAULT true | |
+| `metadata` | `jsonb` | NOT NULL, DEFAULT `{}` | |
+| `created_at`, `updated_at`, `deleted_at` | `timestamptz` | | |
+
+```sql
+CREATE UNIQUE INDEX idx_driver_profiles_handle_lower ON driver_profiles(lower(driver_handle)) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX idx_driver_profiles_user ON driver_profiles(user_id) WHERE deleted_at IS NULL;
+```
+
+#### `driver_cafe_checkins`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `driver_profile_id` | `uuid` | NOT NULL, FK -> driver_profiles(id) | |
+| `user_id` | `uuid` | NOT NULL, FK -> users(id) | Denormalized query field |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) | |
+| `checked_in_by` | `uuid` | NULL, FK -> users(id) | Staff/Provider/Admin |
+| `source` | `DriverCheckinSource` | NOT NULL | QR_SCAN, STAFF_MANUAL, CONTEST_CHECKIN |
+| `checked_in_at` | `timestamptz` | NOT NULL | |
+| `metadata` | `jsonb` | NOT NULL, DEFAULT `{}` | |
+| `created_at` | `timestamptz` | NOT NULL | |
+
+```sql
+CREATE INDEX idx_driver_checkins_driver_time ON driver_cafe_checkins(driver_profile_id, checked_in_at DESC);
+CREATE INDEX idx_driver_checkins_cafe_time ON driver_cafe_checkins(cafe_id, checked_in_at DESC);
+CREATE INDEX idx_driver_checkins_distinct_cafe ON driver_cafe_checkins(driver_profile_id, cafe_id);
+```
+
+#### `race_records`
+
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `user_id` | `uuid` | NOT NULL, FK -> users(id) | Driver user |
+| `driver_profile_id` | `uuid` | NOT NULL, FK -> driver_profiles(id) | |
+| `provider_id` | `uuid` | NOT NULL, FK -> users(id) | Provider owner của cafe/source |
+| `cafe_id` | `uuid` | NOT NULL, FK -> cafes(id) | |
+| `track_config_id` | `uuid` | NULL, FK -> cafe_track_configs(id) | |
+| `contest_id` | `uuid` | NULL, FK -> contests(id) | Source contest |
+| `match_id` | `uuid` | NULL, FK -> contest_matches(id) | Source match |
+| `contest_match_participant_id` | `uuid` | NULL, FK -> contest_match_participants(id) | Source participant result |
+| `session_id` | `uuid` | NULL, FK -> sessions(id) | Source session/time attack |
+| `vehicle_source` | `VehicleSource` | NOT NULL | RENTAL/BYOC |
+| `source_type` | `RaceRecordSourceType` | NOT NULL | CONTEST, SESSION_TIME_ATTACK, ADMIN_IMPORT |
+| `verification_status` | `RaceRecordVerificationStatus` | NOT NULL, DEFAULT `PENDING` | |
+| `best_lap_ms` | `integer` | NULL | |
+| `total_time_ms` | `integer` | NULL | |
+| `score` | `numeric(10,2)` | NULL | |
+| `finish_position` | `integer` | NULL | |
+| `recorded_at` | `timestamptz` | NOT NULL | Thời điểm kết quả phát sinh |
+| `verified_at` | `timestamptz` | NULL | |
+| `verified_by` | `uuid` | NULL, FK -> users(id) | |
+| `metadata` | `jsonb` | NOT NULL, DEFAULT `{}` | |
+| `created_at`, `updated_at` | `timestamptz` | | |
+
+```sql
+CREATE INDEX idx_race_records_leaderboard ON race_records(verification_status, cafe_id, track_config_id, vehicle_source, best_lap_ms);
+CREATE INDEX idx_race_records_driver_time ON race_records(driver_profile_id, recorded_at DESC);
+CREATE INDEX idx_race_records_contest_source ON race_records(contest_id, match_id);
+CREATE UNIQUE INDEX idx_race_records_contest_participant ON race_records(contest_match_participant_id) WHERE contest_match_participant_id IS NOT NULL AND verification_status <> 'SUPERSEDED';
+```
+
+### Phase C — Achievements
+
+| Bảng | Cột chính | Ghi chú |
+|------|----------|---------|
+| `achievement_definitions` | `code`, `name`, `description`, `badge_icon_url`, `rule_code`, `rule_config`, `is_active`, `sort_order` | Badge catalog |
+| `driver_achievements` | `driver_profile_id`, `achievement_definition_id`, `unlocked_at`, `source_type`, `source_id`, `metadata` | Badge đã unlock |
+
+Indexes tối thiểu:
+
+```sql
+CREATE UNIQUE INDEX idx_achievement_definitions_code ON achievement_definitions(code);
+CREATE UNIQUE INDEX idx_driver_achievements_unique ON driver_achievements(driver_profile_id, achievement_definition_id);
+```
+
+### Phase D — Grand Prix Series
+
+| Bảng | Cột chính | Ghi chú |
+|------|----------|---------|
+| `league_series` | `name`, `description`, `status`, `starts_at`, `ends_at`, `point_rule`, `created_by` | Chuỗi giải |
+| `league_rounds` | `series_id`, `contest_id`, `round_no`, `point_multiplier`, `status` | Mỗi round link tới contest đã publish |
+| `league_standings` | `series_id`, `driver_profile_id`, `points`, `rank`, `round_results`, `calculated_at` | Standing snapshot |
+
+### Phase E — Team War / Clan War
+
+| Bảng | Cột chính | Ghi chú |
+|------|----------|---------|
+| `racing_teams` | `name`, `slug`, `home_cafe_id`, `captain_id`, `status`, `metadata` | Team/clan |
+| `racing_team_members` | `team_id`, `driver_profile_id`, `role`, `status`, `joined_at`, `approved_by` | Membership |
+| `team_wars` | `home_team_id`, `away_team_id`, `status`, `scheduled_at`, `roster_locked_at`, `rules_config` | Challenge |
+| `team_war_results` | `team_war_id`, `team_id`, `driver_profile_id`, `race_record_id`, `points`, `metadata` | Result từ verified records |
+
+## 9. General Phase 2 Backlog — Not Part Of Phase 1 Schema
 
 Các bảng dưới đây chỉ là backlog thiết kế cho Phase 2. Không tạo migration, entity hoặc API bắt buộc cho các bảng này trong Phase 1.
 
@@ -1315,6 +1433,7 @@ Các bảng dưới đây chỉ là backlog thiết kế cho Phase 2. Không t�
 | AI | `ai_analysis_jobs`, `ai_damage_detections`, `ai_recommendations` |
 | Advanced analytics | analytics aggregate/cache tables nếu cần |
 | Loyalty/dynamic pricing | loyalty points, price rules, campaign optimization |
+| Universal Racing Network | `driver_profiles`, `driver_cafe_checkins`, `race_records`, `achievement_definitions`, `driver_achievements`, `league_series`, `league_rounds`, `league_standings`, `racing_teams`, `racing_team_members`, `team_wars`, `team_war_results` |
 
 ---
 
@@ -1466,7 +1585,7 @@ CREATE INDEX idx_cafe_announcements_cafe_id ON cafe_announcements(cafe_id, is_ac
 
 ---
 
-*Last updated: 2026-06-29 · 65 tables (contest compact tournament flow, staff scheduling, widget and track/pricing configs included)*
+*Last updated: 2026-07-07 · 65 Phase 1 tables; Universal Racing Network tables documented as future expansion schema*
 
 ### Contest Vehicle Flow Schema Notes
 
