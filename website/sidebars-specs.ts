@@ -138,6 +138,34 @@ const sidebars: SidebarsConfig = {
         'ai-revenue-analytics/tasks',
       ],
     },
+    {
+      type: 'category',
+      label: '011 · Booking Review & Rating',
+      collapsed: true,
+      items: [
+        'booking-review/spec',
+        'booking-review/plan',
+        'booking-review/research',
+        'booking-review/data-model',
+        'booking-review/quickstart',
+        'booking-review/contracts/api',
+        'booking-review/tasks',
+      ],
+    },
+    {
+      type: 'category',
+      label: '012 · Provider KYC Verification',
+      collapsed: true,
+      items: [
+        'provider-kyc/spec',
+        'provider-kyc/plan',
+        'provider-kyc/data-model',
+        'provider-kyc/research',
+        'provider-kyc/quickstart',
+        'provider-kyc/tasks',
+        'provider-kyc/contracts/api',
+      ],
+    },
   ],
 };
 
