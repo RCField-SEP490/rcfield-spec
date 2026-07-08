@@ -263,11 +263,11 @@ graphify run                        # build graph từ docs/spec/
 ```
 
 <!-- SPECKIT START -->
-Current active feature plan: `specs/009-customer-package-booking/plan.md`
+Current active feature plan: `specs/015-booking-qr-checkin/plan.md`
 For implementation context, read in order:
-1. `specs/009-customer-package-booking/plan.md` — technical context, file structure, constitution check
-2. `specs/009-customer-package-booking/research.md` — 7 decisions: payment_tx schema, IPN routing, zero-total bypass, slot deduction timing, slot refund condition, public listing route, CustomerPackageStatus lifecycle
-3. `specs/009-customer-package-booking/data-model.md` — new CustomerPackage entity, modified booking/payment_transaction entities, migration plan
-4. `specs/009-customer-package-booking/contracts/api.md` — 6 endpoints: public package listing, purchase, list my packages, usage history, modified booking creation, IPN routing change; Zod schemas
-5. `specs/009-customer-package-booking/quickstart.md` — 8-phase implementation order + 5 E2E scenarios + unit test checklist
+1. `specs/015-booking-qr-checkin/plan.md` — technical context, files to modify, backend QR endpoint + email method, frontend QR display + staff upload decoder
+2. `specs/015-booking-qr-checkin/research.md` — 7 decisions: QR in email via URL endpoint (not base64 data URI), `qrcode` npm (backend), `jsqr` (staff FE decode), `qrcode.react` (customer FE display), UUID-only QR content, public endpoint, 2-mode check-in screen
+3. `specs/015-booking-qr-checkin/data-model.md` — no new tables; existing: bookings, cafes, users, sessions
+4. `specs/015-booking-qr-checkin/contracts/api.md` — 1 new endpoint: GET /bookings/:id/qr (public PNG); existing used: GET /bookings/:id, POST /staff/bookings/:id/check-in
+5. `specs/015-booking-qr-checkin/quickstart.md` — 8 E2E scenarios + unit test checklist
 <!-- SPECKIT END -->

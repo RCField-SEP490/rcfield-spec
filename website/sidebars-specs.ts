@@ -166,6 +166,20 @@ const sidebars: SidebarsConfig = {
         'provider-kyc/contracts/api',
       ],
     },
+    {
+      type: 'category',
+      label: '014 · Staff KPI Dashboard',
+      collapsed: true,
+      items: [
+        'staff-kpi-dashboard/spec',
+        'staff-kpi-dashboard/plan',
+        'staff-kpi-dashboard/data-model',
+        'staff-kpi-dashboard/research',
+        'staff-kpi-dashboard/quickstart',
+        'staff-kpi-dashboard/tasks',
+        'staff-kpi-dashboard/contracts/api',
+      ],
+    },
   ],
 };
 
