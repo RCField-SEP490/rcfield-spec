@@ -75,7 +75,21 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Developer Guides',
       collapsed: false,
-      items: ['developer/provider-subscription-enforcement'],
+      items: [
+        'developer/provider-subscription-enforcement',
+        {
+          type: 'category',
+          label: 'Contest Delivery',
+          collapsed: true,
+          items: [
+            'developer/contest-delivery/README',
+            'developer/contest-delivery/01-roadmap-and-scope',
+            'developer/contest-delivery/02-database-and-backend-rollout',
+            'developer/contest-delivery/03-frontend-rollout',
+            'developer/contest-delivery/04-testing-commit-and-release-checklist',
+          ],
+        },
+      ],
     },
     {
       type: 'category',
