@@ -1,6 +1,6 @@
 # Contest Module Specification
 
-**Last Updated:** 2026-07-07
+**Last Updated:** 2026-07-14
 **Related docs:** `docs/spec/business-rules/BR-contest.md`, `docs/spec/business-rules/BR-racing-network.md`, `docs/spec/05-api-contracts.md`, `docs/spec/06-database.md`, `docs/spec/09-universal-racing-network.md`, `docs/architecture/03-contest.md`, `docs/diagrams/sequence/sequence-flow-contest-vehicle-operations.md`
 
 ---
@@ -15,7 +15,7 @@ Contest la module van hanh giai dau rieng cua RCField. Phase hien tai la **Provi
 4. Staff/Provider check-in van dong vien tai chi nhanh duoc phan cong.
 5. Provider/Staff tao lich thi dau, nhap ket qua, sua ket qua va cong bo leaderboard.
 6. He thong luu audit log va metrics van hanh de theo doi su kien contest.
-7. Phase sau co the sync ket qua contest da publish sang Universal Racing Network de tao Driver Passport, global leaderboard, achievements va league lien quan.
+7. Phase hien tai da co the sync ket qua contest da publish sang Universal Racing Network toi gian de tao `race_records`, Driver Passport stats/title va global leaderboard.
 
 ---
 
@@ -36,6 +36,7 @@ Contest la module van hanh giai dau rieng cua RCField. Phase hien tai la **Provi
 - Result correction co audit
 - Audit logs va metrics API
 - Optional sync sang Universal Racing Network sau khi leaderboard contest da publish/correct xong
+- Driver title co the hien thi tren local leaderboard/match card neu user da unlock qua Driver Passport
 
 ### Ngoai scope hien tai
 
@@ -269,14 +270,15 @@ Sau check-in:
 
 ## 9. Universal Racing Network Integration
 
-Universal Racing Network la phase mo rong sau contest, khong thay the contest hien tai.
+Universal Racing Network hien tai duoc implement o muc toi gian, khong thay the contest hien tai.
 
 Nguyen tac:
 
 - Contest hien tai van la Provider-level contest.
 - `contests.config.leaderboard` chi la snapshot local, khong phai bang xep hang lien tinh/toan quoc.
 - Global leaderboard chi doc tu `race_records` co `verification_status = VERIFIED`.
-- Race record co the duoc tao tu contest result da publish, session time attack duoc Staff ghi nhan, hoac Admin import/verify trong phase sau.
+- Phase hien tai chi tao race record tu contest result da publish.
+- Session time attack, passport QR community check-in rieng, Grand Prix Series va Team War la phase sau.
 - Cross-provider data public chi gom display name, cafe, track, vehicle source, lap/time/rank va metadata can hien thi; khong lo email, phone, booking payment, session private note.
 
 Luang sync khuyen nghi:
@@ -288,6 +290,15 @@ Luang sync khuyen nghi:
 5. Achievement service tinh lai Driver Passport va badges neu co thay doi thanh tich.
 
 Xem chi tiet o `docs/spec/09-universal-racing-network.md`.
+
+### Planned expansion / Next phase
+
+- Tach `driver_profiles` ra khoi `users.racing_profile` neu public identity can scale rieng.
+- Them `driver_cafe_checkins` cho passport QR community check-in doc lap voi completed play.
+- Them `driver_achievements` neu can query badge/analytics sau nay.
+- Them session time attack sync vao `race_records`.
+- Them Grand Prix Series.
+- Them Team War / Clan War.
 
 ---
 

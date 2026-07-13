@@ -1,10 +1,12 @@
 # BR-Contest — Quy tắc nghiệp vụ Contest & Race Event
 
-**Last updated**: 2026-07-07
+**Last updated**: 2026-07-14
 **Status**: Active for current implementation  
 **Owner**: Product / Backend / Frontend / Operations
 
 > Contest trong RCField là event domain riêng ở phạm vi Provider: Provider tạo giải cho các cafe thuộc mình, Customer đăng ký, Provider/Staff monitoring và check-in, sau khi đóng đăng ký thì tạo lịch thi đấu dạng match/heat linh hoạt, nhập kết quả thủ công, publish leaderboard local và ghi audit log. Phase này cố ý giữ schema gọn để khả thi cho đồ án; Universal Racing Network là phase mở rộng sau contest.
+
+Lưu ý cập nhật hiện tại: Universal Racing Network đã có implementation tối giản phía trên contest core. Contest vẫn là local/provider runtime; global leaderboard là lớp đọc riêng từ `race_records`, không phải từ JSON snapshot local.
 
 ---
 
@@ -264,6 +266,10 @@ THEN: Chỉ ghi snapshot local vào `contests.config.leaderboard`; bảng xếp 
 **BR-CT-055 — Global sync chỉ sau publish/correction hợp lệ**
 IF: Contest muốn sync kết quả sang Universal Racing Network
 THEN: Contest phải có leaderboard đã publish, không còn match non-terminal, và mọi correction liên quan phải được audit trước khi tạo/cập nhật `race_records`.
+
+**BR-CT-056 — Global sync phase này chỉ lấy từ contest published**
+IF: Hệ thống tạo global leaderboard trong implementation hiện tại
+THEN: Chỉ sync từ contest đã publish; session time attack và source khác để phase sau.
 
 
 ---

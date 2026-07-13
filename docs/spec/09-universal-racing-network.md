@@ -1,7 +1,7 @@
 # 09 — Universal Racing Network
 
-**Last updated**: 2026-07-07  
-**Status**: Future phase after Provider-level contest
+**Last updated**: 2026-07-14  
+**Status**: Minimal current implementation + planned expansion
 
 ---
 
@@ -17,6 +17,14 @@ Universal Racing Network la lop community/racing layer sau contest hien tai. Muc
 
 Contest hien tai van la Provider-level contest. Universal Racing Network doc ket qua da xac thuc tu contest/session, khong thay the contest CRUD, booking/session, payment hoac inspection.
 
+Phase hien tai da implement ban toi gian de phuc vu capstone:
+
+- `users.racing_profile` luu passport state, current title, badge unlock va stats cache
+- `achievement_definitions` la DB source of truth cho badge/rule
+- `race_records` la source of truth cho global leaderboard
+- Global leaderboard chi sync tu contest da publish
+- Achievements visit/count chi tinh tu completed play that
+
 ---
 
 ## 2. Phase Boundary
@@ -24,8 +32,8 @@ Contest hien tai van la Provider-level contest. Universal Racing Network doc ket
 | Phase | Capability | Scope |
 |---|---|---|
 | A | Provider contest hien tai | Provider tao contest trong cafe cua minh, publish leaderboard local |
-| B | Driver Passport + Race Records | Tao ho so tay dua, check-in cafe, sync ket qua verified vao `race_records` |
-| C | Achievements | Badge tu cafe visits, verified records, monthly leaderboard |
+| B | Driver Passport + Race Records | Phase hien tai lam ban toi gian bang `users.racing_profile` + sync contest published vao `race_records` |
+| C | Achievements | Phase hien tai da co ban toi gian tu DB; phase sau moi tach bang/query sau hon |
 | D | Grand Prix Series | RCField/Admin hoac opt-in Provider gom nhieu contest thanh series |
 | E | Team War / Clan War | Team, roster lock, captain approval, team challenge |
 
@@ -39,10 +47,9 @@ Phase B la buoc nen lam dau tien vi no tao source of truth cho leaderboard va ac
 
 Driver Passport la ho so racing public cua Customer:
 
-- Gan 1:1 voi `users` role CUSTOMER.
-- Co `driver_handle`, `display_name`, home cafe optional, level/xp, privacy config.
-- Co QR/passport code de Staff quet khi check-in tai cafe.
-- Tong hop cafe da ghe, race records, best laps, badges.
+- Phase hien tai gan toi gian vao `users.racing_profile`.
+- Co `driver_handle`, `display_name`, `passport_code`, privacy config, current title, unlocked badges va stats cache.
+- QR/passport check-in community rieng la phase sau.
 
 ### Race Record
 
@@ -51,8 +58,8 @@ Driver Passport la ho so racing public cua Customer:
 Nguon tao hop le:
 
 - `CONTEST`: tu `contest_match_participants` sau khi contest leaderboard da publish.
-- `SESSION_TIME_ATTACK`: tu session/time attack do Staff ghi nhan trong phase sau.
-- `ADMIN_IMPORT`: import co verify boi Admin.
+- `SESSION_TIME_ATTACK`: phase sau.
+- `ADMIN_IMPORT`: phase sau.
 
 Global leaderboard chi doc record `verification_status = VERIFIED` va cafe/provider da opt-in public racing network.
 
@@ -72,12 +79,12 @@ Public leaderboard khong hien email, phone, payment, booking note, session priva
 
 Achievements la badge unlock tu event/rule:
 
-- Check-in du so cafe khac nhau.
+- Hoan tat du so cafe khac nhau tu completed play that.
 - Co du so race records verified.
 - Dat top 3 theo leaderboard thang.
 - Hoan thanh Grand Prix Series.
 
-Definitions duoc seed/admin manage; unlock result luu o `driver_achievements`.
+Definitions duoc seed/admin manage. Phase hien tai unlock result luu toi gian trong `users.racing_profile.unlocked_achievements`; phase sau co the tach `driver_achievements`.
 
 ### Grand Prix Series
 
@@ -160,11 +167,16 @@ Admin/Provider co the xem them trace noi bo neu co quyen, nhung public API khong
 
 ### Phase B — Driver Passport + Race Records
 
-Tables:
+Current minimal implementation:
+
+- `users.racing_profile`
+- `race_records`
+- `achievement_definitions`
+
+Planned expansion:
 
 - `driver_profiles`
 - `driver_cafe_checkins`
-- `race_records`
 
 Services:
 
@@ -174,9 +186,13 @@ Services:
 
 ### Phase C — Achievements
 
-Tables:
+Current minimal implementation:
 
 - `achievement_definitions`
+- unlock state trong `users.racing_profile`
+
+Planned expansion:
+
 - `driver_achievements`
 
 Services:
@@ -247,7 +263,18 @@ Admin:
 
 ---
 
-## 9. References
+## 9. Planned expansion / Next phase
+
+Phase sau se mo rong khi can scale, khong phai requirement bat buoc cua dot capstone nay:
+
+- Tach `driver_profiles` khoi `users.racing_profile` neu public identity can query/doc lap hon.
+- Them `driver_cafe_checkins` cho passport QR community check-in rieng.
+- Them `driver_achievements` neu can analytics/query badge chi tiet.
+- Them session time attack sync vao `race_records`.
+- Them Grand Prix Series.
+- Them Team War / Clan War.
+
+## 10. References
 
 - `docs/spec/03-contest.md`
 - `docs/spec/business-rules/BR-contest.md`

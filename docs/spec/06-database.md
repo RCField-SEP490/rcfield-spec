@@ -1,6 +1,6 @@
 # 06 — Database Specification
 
-**Last updated**: 2026-07-07
+**Last updated**: 2026-07-14
 
 > Đọc `01-domain-model.md` để hiểu entity relationships trước khi đọc file này.  
 > File này là nguồn sự thật cho schema Phase 1 Operational Core.
@@ -1310,9 +1310,41 @@ Backlog chỉ quay lại khi thật sự cần:
 | Series/championship | `league_series`, `league_rounds`, `league_standings` trong Universal Racing Network |
 | Official roles nâng cao | `contest_officials` |
 
-## 8. Universal Racing Network Expansion Schema — Future Phase
+## 8. Universal Racing Network — Minimal Current Implementation
 
-Các bảng dưới đây là thiết kế cho phase sau contest. Không cộng vào Phase 1 65 tables và không tạo migration cùng contest hiện tại.
+Đợt hiện tại đã implement bản tối giản để bám codebase và đủ demo capstone. Không tách subsystem lớn; chỉ thêm đúng các phần cần để có Driver Passport, achievements từ DB và global leaderboard sync từ contest đã publish.
+
+### Current minimal tables / columns
+
+| Bảng | Trạng thái | Ghi chú |
+|------|------------|---------|
+| `users.racing_profile jsonb` | Đã implement | Lưu passport state, current title, unlocked achievements, stats cache |
+| `race_records` | Đã implement | Source of truth cho global leaderboard phase hiện tại |
+| `achievement_definitions` | Đã implement | Badge catalog/rule source of truth trong DB |
+
+`users.racing_profile` hiện lưu tối thiểu:
+
+- `driver_handle`
+- `display_name`
+- `passport_code`
+- `home_cafe_id`
+- `public_profile_enabled`
+- `leaderboard_opt_in`
+- `current_title_code`
+- `current_title_label`
+- `unlocked_achievements`
+- `stats_cache`
+
+Rules hiện tại:
+
+- Global leaderboard chỉ đọc `race_records.verification_status = VERIFIED`.
+- Record hiện chỉ sync từ contest published; chưa sync trực tiếp từ session time attack.
+- Badge state lưu tối giản trong `users.racing_profile`, chưa tách `driver_achievements`.
+- Achievement visit/count tính từ completed play thật, không từ community check-in.
+
+## 9. Universal Racing Network Expansion Schema — Planned Expansion / Next Phase
+
+Các bảng dưới đây là hướng scale sau contest và sau implementation tối giản hiện tại. Không phải yêu cầu bắt buộc của đợt capstone này.
 
 ### Phase B — Driver Passport + Race Records
 
@@ -1423,7 +1455,7 @@ CREATE UNIQUE INDEX idx_driver_achievements_unique ON driver_achievements(driver
 | `team_wars` | `home_team_id`, `away_team_id`, `status`, `scheduled_at`, `roster_locked_at`, `rules_config` | Challenge |
 | `team_war_results` | `team_war_id`, `team_id`, `driver_profile_id`, `race_record_id`, `points`, `metadata` | Result từ verified records |
 
-## 9. General Phase 2 Backlog — Not Part Of Phase 1 Schema
+## 10. General Phase 2 Backlog — Not Part Of Phase 1 Schema
 
 Các bảng dưới đây chỉ là backlog thiết kế cho Phase 2. Không tạo migration, entity hoặc API bắt buộc cho các bảng này trong Phase 1.
 
@@ -1585,7 +1617,7 @@ CREATE INDEX idx_cafe_announcements_cafe_id ON cafe_announcements(cafe_id, is_ac
 
 ---
 
-*Last updated: 2026-07-07 · 65 Phase 1 tables; Universal Racing Network tables documented as future expansion schema*
+*Last updated: 2026-07-14 · 65 Phase 1 tables plus minimal Universal Racing Network implementation (`users.racing_profile`, `race_records`, `achievement_definitions`)*
 
 ### Contest Vehicle Flow Schema Notes
 

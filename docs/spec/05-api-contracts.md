@@ -1,6 +1,6 @@
 # 05 — API Contracts
 
-**Last updated**: 2026-07-07
+**Last updated**: 2026-07-14
 > Convention: tất cả response đều wrap trong `{ data, meta?, error? }`
 > Auth header: `Authorization: Bearer <jwt_token>`
 
@@ -311,18 +311,17 @@ Rules:
 - Leaderboard phase này lưu trong `contests.config.leaderboard` như local contest snapshot; global leaderboard phase sau đọc từ verified `race_records`. Reward/prize là config hiển thị, không phát voucher tự động.
 - Mọi mutation phải ghi `contest_audit_logs`.
 
-### Universal Racing Network APIs — Future Phase
+### Universal Racing Network APIs — Minimal Current Implementation
 
-Các API dưới đây không thay đổi contest hiện tại. Chúng được implement sau khi Provider-level contest ổn định.
+Các API dưới đây là lớp community mỏng nằm trên contest hiện tại. Contest vẫn là runtime local/provider-level; global leaderboard chỉ đọc từ `race_records` đã verified.
 
 #### Driver Passport
 
 | Method | Endpoint | Actor | Mô tả |
 |--------|----------|-------|-------|
-| GET | `/me/driver-passport` | CUSTOMER | Xem passport, stats, race records gần đây, achievements |
+| GET | `/me/driver-passport` | CUSTOMER | Xem passport, current title, stats tổng hợp và achievements đã unlock |
 | PATCH | `/me/driver-passport` | CUSTOMER | Cập nhật handle/display name/privacy |
 | GET | `/drivers/:handle` | Public/Auth | Xem public driver profile theo privacy |
-| POST | `/cafes/:id/passport-check-in` | STAFF/PROVIDER | Quét passport QR, ghi community check-in tại cafe |
 
 **PATCH /me/driver-passport body:**
 ```json
@@ -341,17 +340,12 @@ Các API dưới đây không thay đổi contest hiện tại. Chúng được 
 |--------|----------|-------|-------|
 | POST | `/contests/:id/sync-race-records` | PROVIDER owner / ADMIN | Sync contest leaderboard đã publish sang verified race records |
 | GET | `/leaderboards/global` | Public/Auth | Leaderboard toàn hệ thống, filter theo city/cafe/track/time |
-| GET | `/leaderboards/cafes/:cafeId` | Public/Auth | Leaderboard public của một cafe opt-in |
-| GET | `/me/race-records` | CUSTOMER | Thành tích của driver hiện tại |
-| PATCH | `/race-records/:id/verification` | ADMIN | Verify/reject/supersede record khi cần moderation |
 
 **GET /leaderboards/global query:**
 ```text
 city=Ho%20Chi%20Minh
 cafe_id=uuid
-track_config_id=uuid
 vehicle_source=RENTAL|BYOC
-source_type=CONTEST|SESSION_TIME_ATTACK
 period=daily|weekly|monthly|all_time
 limit=50
 ```
@@ -363,7 +357,24 @@ Leaderboard response không trả email, phone, payment, booking note hoặc ses
 | Method | Endpoint | Actor | Mô tả |
 |--------|----------|-------|-------|
 | GET | `/achievements` | Public/Auth | Danh sách badge definitions đang active |
-| GET | `/me/achievements` | CUSTOMER | Badge đã unlock của driver hiện tại |
+
+Rules hiện tại:
+
+- `achievement_definitions` là DB source of truth, không hardcode ở FE/BE.
+- Badge visit/count phase này chỉ tính từ `sessions.status = COMPLETED`; fallback `bookings.status = COMPLETED` chỉ để hỗ trợ dữ liệu cũ.
+- `DISTINCT_CAFES_FROM_COMPLETED_PLAY` đếm số quán khác nhau từ completed play thật, không tính check-in ảo.
+
+### Universal Racing Network APIs — Planned Expansion / Next Phase
+
+Các API dưới đây chưa implement trong đợt tối giản hiện tại. Đây là hướng scale sau khi capstone ổn định.
+
+| Method | Endpoint | Actor | Mô tả |
+|--------|----------|-------|-------|
+| POST | `/cafes/:id/passport-check-in` | STAFF/PROVIDER | Quét passport QR, ghi community check-in tại cafe |
+| GET | `/leaderboards/cafes/:cafeId` | Public/Auth | Leaderboard public của một cafe opt-in |
+| GET | `/me/race-records` | CUSTOMER | Thành tích chi tiết của driver hiện tại |
+| PATCH | `/race-records/:id/verification` | ADMIN | Verify/reject/supersede record khi cần moderation |
+| GET | `/me/achievements` | CUSTOMER | Badge đã unlock dạng feed/query riêng |
 | POST | `/admin/achievements` | ADMIN | Tạo achievement definition |
 | PATCH | `/admin/achievements/:id` | ADMIN | Sửa/ẩn achievement definition |
 

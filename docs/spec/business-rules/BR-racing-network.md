@@ -1,23 +1,24 @@
 # BR-Racing-Network — Universal Racing Network Rules
 
-**Last updated**: 2026-07-07  
-**Status**: Future phase after Provider-level contest  
+**Last updated**: 2026-07-14  
+**Status**: Minimal current implementation + planned expansion  
 **Owner**: Product / Backend / Frontend / Operations
 
-> Universal Racing Network la lop community/racing layer doc tu contest/session results da verified. Module nay khong thay Provider contest hien tai; no chi public hoa thanh tich duoc xac thuc theo privacy boundary ro rang.
+> Universal Racing Network la lop community/racing layer doc tu contest/session results da verified. Module nay khong thay Provider contest hien tai; no chi public hoa thanh tich duoc xac thuc theo privacy boundary ro rang. Phase hien tai moi implement lop toi gian: `users.racing_profile`, `race_records`, `achievement_definitions` va sync tu contest da publish.
 
 ---
 
 ## 1. Scope
 
-| Capability | Phase |
+| Capability | Trạng thái |
 |---|---|
-| Driver Passport | Phase B |
-| Global race records | Phase B |
-| Global/cafe leaderboard | Phase B |
-| Achievements | Phase C |
-| Grand Prix Series | Phase D |
-| Team War / Clan War | Phase E |
+| Driver Passport tối giản | Đã implement |
+| Global race records từ contest published | Đã implement |
+| Global leaderboard public | Đã implement |
+| Achievements từ DB + completed play thật | Đã implement |
+| Passport QR community check-in riêng | Phase sau |
+| Grand Prix Series | Phase sau |
+| Team War / Clan War | Phase sau |
 
 ---
 
@@ -40,7 +41,7 @@ IF: Kết quả contest đã sync bị sửa
 THEN: Race record cũ phải được đánh dấu `SUPERSEDED` hoặc được update qua audited re-sync; global leaderboard không được hiển thị đồng thời cả record cũ và mới.
 
 **BR-RN-005 — Opt-in trước khi public cross-provider**  
-IF: Cafe/provider chưa bật public racing network  
+IF: Driver chưa bật `leaderboard_opt_in`  
 THEN: Race record vẫn có thể lưu nội bộ nhưng không xuất hiện trên public global leaderboard.
 
 ---
@@ -48,8 +49,8 @@ THEN: Race record vẫn có thể lưu nội bộ nhưng không xuất hiện tr
 ## 3. Driver Passport Rules
 
 **BR-RN-020 — Một user một driver profile active**  
-IF: Customer dùng Driver Passport  
-THEN: Mỗi `user_id` chỉ có một `driver_profiles` active; `driver_handle` phải unique case-insensitive.
+IF: Customer dùng Driver Passport trong phase hiện tại  
+THEN: Mỗi `user_id` có một `users.racing_profile` active về mặt nghiệp vụ; `driver_handle` phải unique case-insensitive.
 
 **BR-RN-021 — Passport QR không phải quyền vào sân**  
 IF: Staff scan Driver Passport QR  
@@ -72,8 +73,8 @@ IF: Hệ thống unlock badge
 THEN: Badge phải tồn tại trong `achievement_definitions`, đang active, và rule_code/version phải khớp evaluator.
 
 **BR-RN-041 — Distinct cafe achievement đếm cafe duy nhất**  
-IF: Achievement yêu cầu đi qua N cafe  
-THEN: Đếm distinct `cafe_id` từ `driver_cafe_checkins` hợp lệ, không đếm nhiều lần cùng cafe.
+IF: Achievement yêu cầu đi qua N cafe trong phase hiện tại  
+THEN: Đếm distinct `cafe_id` từ completed play thật (`sessions.status = COMPLETED`, fallback `bookings.status = COMPLETED`), không đếm nhiều lần cùng cafe.
 
 **BR-RN-042 — Race achievement chỉ dùng verified records**  
 IF: Achievement dựa trên lap time, rank, podium hoặc số lần đua  
@@ -81,7 +82,15 @@ THEN: Chỉ dùng `race_records.verification_status = VERIFIED`.
 
 **BR-RN-043 — Unlock idempotent**  
 IF: Achievement evaluator chạy lại  
-THEN: Không tạo duplicate `driver_achievements`; nếu rule version thay đổi thì ghi metadata version.
+THEN: Không tạo duplicate unlock trong `users.racing_profile.unlocked_achievements`; nếu phase sau tách `driver_achievements` thì vẫn phải giữ idempotent.
+
+## 4A. Planned Expansion / Next Phase
+
+- Tách `driver_profiles` khỏi `users.racing_profile` nếu public identity cần scale riêng.
+- Thêm `driver_cafe_checkins` cho passport QR community check-in độc lập.
+- Thêm `driver_achievements` cho analytics/query chuyên sâu.
+- Thêm session time attack sync vào `race_records`.
+- Thêm Grand Prix Series và Team War sau khi lớp verified record ổn định.
 
 ---
 
