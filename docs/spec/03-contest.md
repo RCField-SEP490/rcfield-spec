@@ -1,13 +1,13 @@
 # Contest Module Specification
 
-**Last Updated:** 2026-06-27  
-**Related docs:** `docs/spec/business-rules/BR-contest.md`, `docs/spec/05-api-contracts.md`, `docs/spec/06-database.md`, `docs/architecture/03-contest.md`, `docs/diagrams/sequence/sequence-flow-contest-vehicle-operations.md`
+**Last Updated:** 2026-07-14
+**Related docs:** `docs/spec/business-rules/BR-contest.md`, `docs/spec/business-rules/BR-racing-network.md`, `docs/spec/05-api-contracts.md`, `docs/spec/06-database.md`, `docs/spec/09-universal-racing-network.md`, `docs/architecture/03-contest.md`, `docs/diagrams/sequence/sequence-flow-contest-vehicle-operations.md`
 
 ---
 
 ## 1. Intent
 
-Contest la module van hanh giai dau rieng cua RCField. Module nay khong thay the booking/session ma dung song song voi booking/session cho cac nhu cau lien quan den event day operations:
+Contest la module van hanh giai dau rieng cua RCField. Phase hien tai la **Provider-level contest**: Provider tao giai trong pham vi cac cafe thuoc Provider do, Staff van hanh tai cafe duoc assign, va leaderboard cua contest la snapshot local cua giai. Module nay khong thay the booking/session ma dung song song voi booking/session cho cac nhu cau lien quan den event day operations:
 
 1. Provider tao va cau hinh contest.
 2. Customer xem thong tin giai dau va dang ky tham gia.
@@ -15,6 +15,7 @@ Contest la module van hanh giai dau rieng cua RCField. Module nay khong thay the
 4. Staff/Provider check-in van dong vien tai chi nhanh duoc phan cong.
 5. Provider/Staff tao lich thi dau, nhap ket qua, sua ket qua va cong bo leaderboard.
 6. He thong luu audit log va metrics van hanh de theo doi su kien contest.
+7. Phase hien tai da co the sync ket qua contest da publish sang Universal Racing Network toi gian de tao `race_records`, Driver Passport stats/title va global leaderboard.
 
 ---
 
@@ -34,15 +35,20 @@ Contest la module van hanh giai dau rieng cua RCField. Module nay khong thay the
 - Knockout bye round auto-advance
 - Result correction co audit
 - Audit logs va metrics API
+- Optional sync sang Universal Racing Network sau khi leaderboard contest da publish/correct xong
+- Driver title co the hien thi tren local leaderboard/match card neu user da unlock qua Driver Passport
 
 ### Ngoai scope hien tai
 
+- Contest cross-provider do Provider tu tao.
+- Bang xep hang toan quoc truc tiep trong `contests.config`.
 - Global BYOC certification workflow
 - Contest-specific rental payment engine rieng
 - Live timing / transponder
 - Multi-class / heat / round runtime tables cu
 - Protest / appeal workflow day du
 - Reward claim lifecycle day du
+- Grand Prix Series va Team War runtime.
 
 ---
 
@@ -70,7 +76,8 @@ Nguyen tac:
 - Chua event-level config
 - So huu boi Provider
 - Co nhieu cafe tham gia thong qua `contest_cafes`
-- `config` luu format, seeding, leaderboard snapshot, runtime metadata
+- `config` luu format, seeding, leaderboard snapshot local cua contest, runtime metadata
+- Khong phai owner cua global leaderboard; global leaderboard doc tu `race_records` cua Universal Racing Network.
 
 ### CustomerVehicle
 
@@ -255,10 +262,47 @@ Sau check-in:
 
 - Chi publish khi khong con match non-terminal
 - Neu van con `DRAFT`, `READY`, `RUNNING` thi reject
+- Publish leaderboard ghi snapshot vao `contests.config.leaderboard`; snapshot nay la ket qua local cua contest.
+- Neu cafe/provider opt-in Universal Racing Network, Provider co the sync ket qua da publish sang `race_records`.
+- Neu correct result sau khi da sync, service phai audit correction va danh dau race record cu la `SUPERSEDED` hoac re-sync thanh record moi.
 
 ---
 
-## 9. Monitoring
+## 9. Universal Racing Network Integration
+
+Universal Racing Network hien tai duoc implement o muc toi gian, khong thay the contest hien tai.
+
+Nguyen tac:
+
+- Contest hien tai van la Provider-level contest.
+- `contests.config.leaderboard` chi la snapshot local, khong phai bang xep hang lien tinh/toan quoc.
+- Global leaderboard chi doc tu `race_records` co `verification_status = VERIFIED`.
+- Phase hien tai chi tao race record tu contest result da publish.
+- Session time attack, passport QR community check-in rieng, Grand Prix Series va Team War la phase sau.
+- Cross-provider data public chi gom display name, cafe, track, vehicle source, lap/time/rank va metadata can hien thi; khong lo email, phone, booking payment, session private note.
+
+Luang sync khuyen nghi:
+
+1. Staff/Provider submit result vao `contest_match_participants`.
+2. Provider publish leaderboard local cua contest.
+3. Provider goi sync race records hoac backend job sync tu contest da publish.
+4. He thong tao/cap nhat `race_records` voi source `CONTEST`, link ve `contest_id`, `match_id`, `contest_match_participant_id`.
+5. Achievement service tinh lai Driver Passport va badges neu co thay doi thanh tich.
+
+Xem chi tiet o `docs/spec/09-universal-racing-network.md`.
+
+### Planned expansion / Next phase
+
+- Tach `driver_profiles` ra khoi `users.racing_profile` neu public identity can scale rieng.
+- Them `driver_cafe_checkins` cho passport QR community check-in doc lap voi completed play.
+- Them `driver_achievements` neu can query badge/analytics sau nay.
+- Them session time attack sync vao `race_records`.
+- Them Grand Prix Series.
+- Them Team War / Clan War.
+
+---
+
+## 10. Monitoring
 
 ### Audit logs
 
@@ -283,7 +327,7 @@ Can co it nhat:
 
 ---
 
-## 10. Happy Cases can test
+## 11. Happy Cases can test
 
 ### Happy case 1: BYOC approved
 
@@ -307,7 +351,7 @@ Can co it nhat:
 
 ---
 
-## 11. Negative cases can test
+## 12. Negative cases can test
 
 - Dang ky sai `vehicle_policy`
 - BYOC khong co `customer_vehicle_id`
@@ -320,14 +364,17 @@ Can co it nhat:
 - Staff submit/correct result sai cafe
 - Publish leaderboard khi con match unfinished
 - Staff correction khi downstream da completed
+- Global sync khi contest chua publish
+- Global leaderboard hien thi race record chua verified
 
 ---
 
-## 12. Implementation Notes
+## 13. Implementation Notes
 
 - Uu tien happy case va guard nghiep vu vua du
 - Khong mo rong thanh global vehicle certification system
 - Khong nhan doi payment/inspection logic cua booking trong contest
+- Khong nhan doi global leaderboard trong `contests.config`; dung `race_records` khi lam Universal Racing Network.
 - Docs, Postman, BE va FE phai cung mot contract:
   - `vehicle_policy`
   - `customer_vehicle_id`
@@ -335,4 +382,4 @@ Can co it nhat:
   - `results/correct`
   - `audit-logs`
   - `metrics`
-
+  - `sync-race-records`

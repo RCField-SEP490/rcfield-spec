@@ -27,6 +27,9 @@ B2B SaaS cho **1 doanh nghiệp** vận hành chuỗi sân xe RC tại Việt Na
 | [`04-dispute-resolution.md`](04-dispute-resolution.md) | Incident policy vs Dispute, evidence, Phase 1 scope | Trước khi làm incident/dispute |
 | [`02-ai-chat-rag.md`](02-ai-chat-rag.md) | NLU routing, RAG pipeline, KB ingestion, SSE streaming | Trước khi đụng chat/KB feature |
 
+**Delivery / rollout docs**  
+→ [`docs/developer/contest-delivery/README.md`](../developer/contest-delivery/README.md)
+
 **Sequence diagrams** (luồng end-to-end):  
 → [`docs/diagrams/sequence/README.md`](../diagrams/sequence/README.md)
 

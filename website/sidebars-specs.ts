@@ -128,6 +128,58 @@ const sidebars: SidebarsConfig = {
         'customer-package-booking/contracts/api',
       ],
     },
+    {
+      type: 'category',
+      label: '010 · AI Revenue Analytics',
+      collapsed: true,
+      items: [
+        'ai-revenue-analytics/spec',
+        'ai-revenue-analytics/plan',
+        'ai-revenue-analytics/tasks',
+      ],
+    },
+    {
+      type: 'category',
+      label: '011 · Booking Review & Rating',
+      collapsed: true,
+      items: [
+        'booking-review/spec',
+        'booking-review/plan',
+        'booking-review/research',
+        'booking-review/data-model',
+        'booking-review/quickstart',
+        'booking-review/contracts/api',
+        'booking-review/tasks',
+      ],
+    },
+    {
+      type: 'category',
+      label: '012 · Provider KYC Verification',
+      collapsed: true,
+      items: [
+        'provider-kyc/spec',
+        'provider-kyc/plan',
+        'provider-kyc/data-model',
+        'provider-kyc/research',
+        'provider-kyc/quickstart',
+        'provider-kyc/tasks',
+        'provider-kyc/contracts/api',
+      ],
+    },
+    {
+      type: 'category',
+      label: '014 · Staff KPI Dashboard',
+      collapsed: true,
+      items: [
+        'staff-kpi-dashboard/spec',
+        'staff-kpi-dashboard/plan',
+        'staff-kpi-dashboard/data-model',
+        'staff-kpi-dashboard/research',
+        'staff-kpi-dashboard/quickstart',
+        'staff-kpi-dashboard/tasks',
+        'staff-kpi-dashboard/contracts/api',
+      ],
+    },
   ],
 };
 
