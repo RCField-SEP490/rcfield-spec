@@ -1,385 +1,533 @@
 # Contest Module Specification
 
-**Last Updated:** 2026-07-14
-**Related docs:** `docs/spec/business-rules/BR-contest.md`, `docs/spec/business-rules/BR-racing-network.md`, `docs/spec/05-api-contracts.md`, `docs/spec/06-database.md`, `docs/spec/09-universal-racing-network.md`, `docs/architecture/03-contest.md`, `docs/diagrams/sequence/sequence-flow-contest-vehicle-operations.md`
+**Last Updated:** 2026-07-14  
+**Status:** Backend-current truth + requested operating flow  
+**Related docs:** `docs/spec/business-rules/BR-contest.md`, `docs/architecture/03-contest.md`, `docs/developer/contest-delivery/05-contest-current-backend-vs-requested-flow.md`, `docs/spec/05-api-contracts.md`, `docs/spec/06-database.md`, `docs/spec/09-universal-racing-network.md`
 
 ---
 
 ## 1. Intent
 
-Contest la module van hanh giai dau rieng cua RCField. Phase hien tai la **Provider-level contest**: Provider tao giai trong pham vi cac cafe thuoc Provider do, Staff van hanh tai cafe duoc assign, va leaderboard cua contest la snapshot local cua giai. Module nay khong thay the booking/session ma dung song song voi booking/session cho cac nhu cau lien quan den event day operations:
+Contest là module tổ chức giải đua ở phạm vi Provider. Provider tạo giải cho một hoặc nhiều cafe của mình, Customer đăng ký, Staff/Provider check-in và vận hành ngày thi đấu, sau đó Provider publish leaderboard local của giải.
 
-1. Provider tao va cau hinh contest.
-2. Customer xem thong tin giai dau va dang ky tham gia.
-3. Provider/Staff review nguon xe cua van dong vien.
-4. Staff/Provider check-in van dong vien tai chi nhanh duoc phan cong.
-5. Provider/Staff tao lich thi dau, nhap ket qua, sua ket qua va cong bo leaderboard.
-6. He thong luu audit log va metrics van hanh de theo doi su kien contest.
-7. Phase hien tai da co the sync ket qua contest da publish sang Universal Racing Network toi gian de tao `race_records`, Driver Passport stats/title va global leaderboard.
+Tài liệu này làm rõ **backend hiện có gì** và **những điểm sản phẩm muốn nhưng backend chưa đủ**. FE không được hiểu các gap như tính năng đã hoàn thành.
 
----
-
-## 2. Scope va Boundary
-
-### Trong phase hien tai
-
-- Contest CRUD: create, edit, open, close, cancel, detail, public listing, banner upload
-- Multi-branch contest qua `contest_cafes`
-- Dang ky theo contest-level, moi user mot lan/contest
-- `vehicle_rule.vehicle_policy = RENTAL_ONLY | BYOC_ONLY | MIXED`
-- Review registration:
-  - `PENDING -> CONFIRMED`
-  - `PENDING/CONFIRMED -> CANCELLED`
-- Check-in theo `check_in_code`
-- Match generation bang `contest_matches` + `contest_match_participants`
-- Knockout bye round auto-advance
-- Result correction co audit
-- Audit logs va metrics API
-- Optional sync sang Universal Racing Network sau khi leaderboard contest da publish/correct xong
-- Driver title co the hien thi tren local leaderboard/match card neu user da unlock qua Driver Passport
-
-### Ngoai scope hien tai
-
-- Contest cross-provider do Provider tu tao.
-- Bang xep hang toan quoc truc tiep trong `contests.config`.
-- Global BYOC certification workflow
-- Contest-specific rental payment engine rieng
-- Live timing / transponder
-- Multi-class / heat / round runtime tables cu
-- Protest / appeal workflow day du
-- Reward claim lifecycle day du
-- Grand Prix Series va Team War runtime.
+```text
+CONTEST = event/tournament operations
+BOOKING = lịch chơi/thuê xe thông thường
+SESSION = ca chơi thực tế, inspection, checkout
+```
 
 ---
 
-## 3. Roles va Permissions
+## 2. Backend Current vs Requested
 
-| Role | Quyen chinh |
+| Chủ đề | Backend hiện có | Còn thiếu / cần làm rõ |
+|---|---|---|
+| Thời gian contest | Có `registration_opens_at`, `registration_closes_at`, `starts_at`, `ends_at`; create validate đăng ký đóng trước hoặc bằng giờ bắt đầu | Chưa có job tự chuyển `OPEN -> CLOSED` khi hết giờ đăng ký |
+| Cafe tham gia | Có `contest_cafes`, `participating_cafe_ids`, chỉ cho cafe ACTIVE thuộc Provider | FE cần hiển thị rõ host/participating branches |
+| Track type | Có `track_type_id`; registration rental phải có booking cùng track type | FE cần giúp Provider thấy cafe nào có track config nào trước khi khóa |
+| Khóa sân/cafe | Có `config.resource_locks`, `FULL_BRANCH`, `SELECTED_TRACKS`; backend chặn booking trùng contest | FE cần phản ánh đây là current feature, không phải backlog |
+| Entry fee | Có `entry_fee`, `entry_fee_amount`, `payment_status`; Provider mark paid/waive thủ công | Chưa nối VNPay cho contest; chưa có `CONTEST_ENTRY` payment subject |
+| Revenue dashboard | Có metrics cơ bản: registration/match/leaderboard/global sync | Chưa có gross/paid/pending/waived/conversion revenue metrics |
+| Prize | Có thể lưu trong `contests.config.prizes` để hiển thị | Chưa có reward claim, payout, tự phát voucher/package |
+| Runtime format | Có `KNOCKOUT` và `TIME_TRIAL` qua `runtime_format`; dùng `contest_matches` | Multi-driver heat nâng cao chưa phải UI/runtime chính |
+| Leaderboard | Có publish local leaderboard vào `contests.config.published_leaderboard`; contest -> `COMPLETED` | Public cần đọc snapshot này rõ ràng; global leaderboard đọc `race_records` sau sync |
+| Audit | Có `contest_audit_logs`, Provider đọc `/audit-logs` | FE cần tab Audit; chưa có incident/ban riêng cho contest |
+| Ban/phá giải | Có reject/cancel registration + audit reason; có `is_active` user global | Chưa có `contest_bans`, contest incident, ban theo provider/contest, evidence |
+
+---
+
+## 3. Create Contest Flow
+
+Provider tạo contest bằng `POST /api/v1/contests`. Payload chính:
+
+- `name`, `description`, `banner_image_url`
+- `contest_type_id`, `contest_format_id`, `contest_template_id`
+- `track_type_id`
+- `participating_cafe_ids`
+- `registration_opens_at`, `registration_closes_at`
+- `starts_at`, `ends_at`
+- `capacity`
+- `entry_fee`
+- `vehicle_rule`
+- `config`
+
+Validation hiện có:
+
+- `ends_at > starts_at`
+- `registration_opens_at < registration_closes_at`
+- `registration_closes_at <= starts_at`
+- cafe tham gia phải ACTIVE và thuộc Provider
+- `track_type_id` phải active
+- contest type/format/template phải active và khớp nhau
+- không được tạo contest nếu resource lock trùng booking đang `PENDING` hoặc `CONFIRMED`
+
+State chính:
+
+```text
+DRAFT -> OPEN -> CLOSED -> RUNNING -> COMPLETED
+   \       \        \          \
+    \       \        \          -> CANCELLED
+     \       \        -> CANCELLED
+      \       -> CANCELLED
+       -> CANCELLED
+```
+
+Backend hiện chỉ cho Provider chuyển:
+
+- `DRAFT -> OPEN`
+- `OPEN -> CLOSED`
+- `DRAFT/OPEN/CLOSED/RUNNING -> CANCELLED`
+- `RUNNING/COMPLETED` xảy ra qua runtime/result/publish flow
+
+---
+
+## 4. Resource Lock: Khóa Sân Hoặc Khóa Cafe
+
+Contest không dùng luồng đóng/mở cửa cafe. Contest dùng `config.resource_locks` để giữ tài nguyên thi đấu trong thời gian `starts_at -> ends_at`.
+
+Shape khuyến nghị:
+
+```json
+{
+  "resource_locks": [
+    {
+      "cafe_id": "uuid",
+      "scope": "FULL_BRANCH",
+      "track_config_ids": []
+    },
+    {
+      "cafe_id": "uuid",
+      "scope": "SELECTED_TRACKS",
+      "track_config_ids": ["uuid-track-config-1"]
+    }
+  ]
+}
+```
+
+Ý nghĩa:
+
+- `FULL_BRANCH`: khóa cả cafe trong thời gian contest, booking thường không được tạo ở cafe đó.
+- `SELECTED_TRACKS`: chỉ khóa các track config được chọn. Nếu booking không có `track_config_id`, backend fallback so với `track_type_id`.
+
+Backend hiện có:
+
+- `resolveContestResourceLocks`: tự resolve lock theo cafe và track config active.
+- `assertNoContestBookingConflicts`: chặn tạo/update contest nếu đã có booking trùng.
+- `assertBookingNotBlockedByContest`: chặn customer booking nếu slot bị contest giữ.
+- Cafe availability trả unavailable khi khung giờ bị contest lock.
+
+FE Provider cần:
+
+1. Khi chọn cafe, load danh sách track configs active của cafe đó.
+2. Cho Provider chọn khóa cả cafe hoặc chọn từng sân.
+3. Hiển thị cảnh báo nếu khóa cả cafe sẽ làm mất booking thường trong thời gian contest.
+4. Gửi `resource_locks` trong `config`.
+
+---
+
+## 5. Public Registration Flow
+
+Customer chỉ đăng ký được khi:
+
+- contest `OPEN`
+- thời điểm hiện tại nằm trong registration window
+- capacity chưa đầy
+- user chưa có registration active trong contest
+- hiện backend registration flow chỉ hỗ trợ `vehicle_source = RENTAL`
+- booking rental phải:
+  - thuộc customer đó
+  - `CONFIRMED`
+  - cùng `track_type_id`
+  - thuộc cafe tham gia contest
+  - giao với thời gian contest
+  - có `vehicle_id` thuộc booking đó
+
+Endpoint:
+
+```text
+POST /api/v1/contests/:contestId/register
+```
+
+Payload hiện tại:
+
+```json
+{
+  "booking_id": "uuid",
+  "vehicle_id": "uuid",
+  "vehicle_source": "RENTAL"
+}
+```
+
+Quan trọng: mặc dù schema có enum `BYOC`, service hiện reject mọi source khác `RENTAL` bằng `CONTEST_RENTAL_ONLY`. BYOC là intended flow/gap, chưa phải backend hoàn chỉnh.
+
+Public FE cần hiển thị:
+
+- tên giải, banner, mô tả, luật
+- registration open/close
+- race start/end
+- cafe tham gia
+- track type
+- capacity và số đăng ký hiện tại
+- entry fee
+- prize/rules từ config
+- trạng thái đăng ký của chính customer nếu đã đăng nhập
+- leaderboard nếu đã publish
+
+---
+
+## 6. Entry Fee, VNPay Và Revenue
+
+Backend hiện có dữ liệu phí:
+
+- `contests.entry_fee`
+- `contest_registrations.entry_fee_amount`
+- `contest_registrations.payment_status`
+
+Payment statuses:
+
+```text
+NOT_REQUIRED
+PENDING_PAYMENT
+PENDING_REVIEW
+WAIVED
+MARKED_PAID
+```
+
+Endpoint thủ công hiện có:
+
+```text
+POST /api/v1/contest-registrations/:registrationId/mark-entry-fee-paid
+POST /api/v1/contest-registrations/:registrationId/waive-entry-fee
+```
+
+Hiện backend **chưa có VNPay contest payment**. Không được tạo booking giả để thu entry fee. Khi làm VNPay cho contest cần:
+
+- payment subject riêng: `CONTEST_ENTRY`
+- transaction/payment component link `contest_registration_id`
+- VNPay return/IPN update `payment_status`
+- audit `registration.entry_fee_paid`
+- refund policy khi contest bị cancel
+
+Revenue metrics hiện còn thiếu. `GET /api/v1/contests/:contestId/metrics` hiện có:
+
+- registration counts
+- match counts
+- leaderboard status
+- global sync status
+
+Nếu FE cần dashboard doanh thu contest, backend cần bổ sung:
+
+- expected gross = active registrations * entry fee
+- paid gross = registrations `MARKED_PAID`
+- waived amount/count
+- pending amount/count
+- cancelled/refunded amount/count nếu có payment thật
+- payment conversion rate
+
+---
+
+## 7. Prize / Reward
+
+Backend có thể lưu prize trong `contests.config`, ví dụ:
+
+```json
+{
+  "prizes": [
+    {
+      "rank": 1,
+      "title": "Champion",
+      "description": "Cash 1,000,000 VND"
+    }
+  ]
+}
+```
+
+Current behavior:
+
+- prize chỉ là thông tin hiển thị
+- cash prize nằm ngoài platform
+- không có payout/thuế/fraud workflow
+- không tự phát voucher/package
+- không có reward claim lifecycle
+
+FE cần hiển thị prize như cam kết thủ công của Provider, không hiển thị như phần thưởng đã được platform bảo đảm thanh toán.
+
+---
+
+## 8. Check-in Và Trạng Thái Người Dùng
+
+Registration state thật:
+
+```text
+PENDING -> CONFIRMED -> CHECKED_IN
+    \          \
+     -> CANCELLED
+```
+
+Check-in:
+
+```text
+POST /api/v1/contest-registrations/:registrationId/check-in
+```
+
+Điều kiện:
+
+- registration phải `CONFIRMED`
+- `checked_in_cafe_id` thuộc contest
+- Staff phải assigned đúng cafe
+- Provider owner có thể thao tác toàn bộ cafe trong contest
+
+FE Customer không nên hiển thị quá nhiều trạng thái kỹ thuật. Dùng journey status rút gọn:
+
+| Journey status | Ý nghĩa |
 |---|---|
-| CUSTOMER | Xem contest, tao/sua/xoa customer vehicle cua minh, dang ky contest, xem registration cua minh |
-| PROVIDER owner | Tao/sua/open/close/cancel contest, review registration, check-in, generate match, submit/correct result, publish leaderboard, xem audit logs va metrics |
-| STAFF assigned | Lookup registration, check-in tai dung cafe, reorder participants, submit/correct result tai dung cafe cua match |
-| ADMIN | Khong phai primary operator trong flow nay; chi can truy vet/ho tro khi can |
-
-Nguyen tac:
-
-- Staff khong duoc thao tac neu khong thuoc cafe do.
-- Provider duoc thao tac tren contest cua minh tren tat ca cafe tham gia.
-- Customer khong duoc tu approve registration cua minh.
+| `PENDING_APPROVAL` | Đã đăng ký, chờ Provider duyệt/phí |
+| `APPROVED_WAITING_CHECKIN` | Đã được duyệt, chờ tới ngày thi |
+| `CHECKED_IN_WAITING_BRACKET` | Đã check-in, chờ xếp lịch |
+| `IN_BRACKET` | Đang trong bracket/lượt thi |
+| `ADVANCED` | Đã qua vòng |
+| `ELIMINATED` | Đã bị loại |
+| `FINISHED` | Giải đã kết thúc |
+| `CANCELLED` | Đăng ký bị hủy/từ chối |
 
 ---
 
-## 4. Core Entities
+## 9. Runtime: Knockout Và Time Trial
 
-### Contest
+Tất cả runtime dùng:
 
-- Chua event-level config
-- So huu boi Provider
-- Co nhieu cafe tham gia thong qua `contest_cafes`
-- `config` luu format, seeding, leaderboard snapshot local cua contest, runtime metadata
-- Khong phai owner cua global leaderboard; global leaderboard doc tu `race_records` cua Universal Racing Network.
+```text
+contest_matches
+contest_match_participants
+```
 
-### CustomerVehicle
+Generate:
 
-- La BYOC registry cua customer
-- Thuoc `customer_id`
-- Dung cho contest BYOC va co the tai su dung cho booking/session BYOC trong tuong lai
-- Khong chua trang thai approve toan cuc cho contest
+```text
+POST /api/v1/contests/:contestId/matches/generate
+```
 
-### ContestRegistration
+Payload:
 
-- Mot user dang ky mot lan trong mot contest
-- Chua `vehicle_source`, `vehicle_id`, `customer_vehicle_id`, `booking_id`
-- Chua `check_in_code`
-- Chua trang thai review/check-in
+```json
+{
+  "cafe_id": "uuid",
+  "track_config_id": "uuid-or-null",
+  "registration_ids": ["uuid"],
+  "drivers_per_match": 2,
+  "seeding_mode": "CHECK_IN_ORDER"
+}
+```
 
-### ContestMatch
+Backend chỉ cho đưa registration đã `CHECKED_IN` vào runtime.
 
-- Don vi runtime cua giai: match / heat / final / knockout node
-- Co `cafe_id`, `track_config_id` de localize operation
-- Co `next_match_id` de advance bracket
+### Knockout
 
-### ContestMatchParticipant
+Khi `runtime_format = KNOCKOUT`:
 
-- Gan registration vao tung match
-- Chua slot, lane, seeding, finish position, score, result note
+- backend tạo round/match dạng bracket
+- first round nhận participant theo seed/check-in order
+- mỗi match có `next_match_id`
+- submit result xong có thể advance winner sang match kế tiếp
+- leaderboard mode mặc định `KNOCKOUT_WINS`
 
-### ContestAuditLog
+UI Provider/Staff cần:
 
-- Ghi lai cac mutation quan trong:
-  - contest created/opened/closed/cancelled
-  - registration created/approved/rejected/checked_in/cancelled
-  - schedule generated
-  - participants updated
-  - result submitted/corrected
-  - leaderboard published
+- bracket view theo round
+- match detail panel
+- participant slots/lane/grid
+- form nhập `finish_position`, `is_winner`, `score`, `result_note`
+- action `Advance winner`
+- correction flow có reason và `force_cascade` chỉ cho Provider
 
----
+### Time Trial
 
-## 5. Contest Status Model
+Khi `runtime_format = TIME_TRIAL`:
 
-### Contest
+- mỗi registration tạo một match/lượt thi riêng
+- match type `TIME_ATTACK`
+- nhập `best_lap_ms` hoặc `total_time_ms`
+- leaderboard sort theo `BEST_LAP` hoặc `TOTAL_TIME`
 
-`DRAFT -> OPEN -> CLOSED -> RUNNING -> COMPLETED`
+UI Provider/Staff cần:
 
-Terminal cancel path:
-
-`DRAFT/OPEN/CLOSED/RUNNING -> CANCELLED`
-
-### Registration
-
-`PENDING -> CONFIRMED -> CHECKED_IN`
-
-Cancel path:
-
-`PENDING/CONFIRMED -> CANCELLED`
-
-### Match
-
-`DRAFT -> READY -> RUNNING -> COMPLETED`
-
-Cancel path:
-
-`DRAFT/READY/RUNNING -> CANCELLED`
+- danh sách lượt thi theo thứ tự
+- form nhập thời gian từng người
+- bảng ranking realtime sau khi match completed
+- nút publish leaderboard khi mọi lượt đã completed
 
 ---
 
-## 6. Vehicle Flows
+## 10. Result Correction Và Publish Leaderboard
 
-### 6.1 Rental contest flow
+Submit result:
 
-Ap dung khi:
+```text
+POST /api/v1/contest-matches/:matchId/results
+```
 
-- contest `vehicle_policy = RENTAL_ONLY`, hoac
-- contest `vehicle_policy = MIXED` va customer chon `vehicle_source = RENTAL`
+Correct result:
 
-Nguyen tac:
+```text
+POST /api/v1/contest-matches/:matchId/results/correct
+```
 
-- Contest registration khong tao booking gia.
-- Rental payment, vehicle hold, session check-in/check-out, inspection van di qua booking/session flow hien co.
-- Registration chi link qua `booking_id` va `vehicle_id`.
+Advance:
 
-Happy path:
+```text
+POST /api/v1/contest-matches/:matchId/advance
+```
 
-1. Customer dat booking rental binh thuong.
-2. Booking phai `CONFIRMED`.
-3. Booking phai dung customer, dung branch contest, dung track type, va bao phu thoi gian contest.
-4. Customer dang ky contest bang `vehicle_source = RENTAL`, `booking_id`, `vehicle_id`.
-5. Registration tao `PENDING`.
-6. Provider/Staff review va approve.
-7. Den ngay thi dau, check-in contest va session/check-in booking van van hanh binh thuong.
+Publish:
 
-Rui ro can chan:
+```text
+POST /api/v1/contests/:contestId/leaderboard/publish
+```
 
-- Booking chua thanh toan/xac nhan
-- Booking sai branch
-- Booking sai track type
-- Booking khong cover du thoi gian contest
-- Vehicle dang bi registration active khac giu trong cung contest
+Guard hiện có:
 
-### 6.2 BYOC contest flow
+- result phải thuộc participant của match
+- submit result cần `reason`
+- match completed mới được correct
+- Staff không được `force_cascade`
+- nếu downstream đã linked, correction không force sẽ bị chặn
+- nếu downstream match đã completed, force correction cũng bị chặn
+- publish bị chặn nếu còn match `DRAFT`, `READY`, `RUNNING`
+- publish local leaderboard vào `contests.config.published_leaderboard`
+- contest chuyển `COMPLETED`
 
-Ap dung khi:
+Public sau giải:
 
-- contest `vehicle_policy = BYOC_ONLY`, hoac
-- contest `vehicle_policy = MIXED` va customer chon `vehicle_source = BYOC`
-
-Nguyen tac:
-
-- Customer phai tao hoac chon `customer_vehicle_id`
-- Approval la theo registration cua contest, khong phai approval toan cuc cua xe
-
-Happy path:
-
-1. Customer tao customer vehicle.
-2. Customer dang ky contest voi `customer_vehicle_id`.
-3. Registration tao `PENDING`.
-4. Provider/Staff review xe theo the le va track.
-5. Neu phu hop -> approve `CONFIRMED`.
-6. Neu khong phu hop -> reject `CANCELLED` + `rejection_reason` + `reason_code`.
-7. Neu contest la `MIXED`, UI nen goi y chuyen sang rental flow.
-
-Rui ro can chan:
-
-- Customer dung xe khong thuoc minh
-- Xe BYOC da duoc active trong cung contest
-- Review reject nhung khong co reason ro rang
+- `GET /api/v1/contests/:contestId` cần hiển thị `published_leaderboard` nếu có
+- `GET /api/v1/contests/:contestId/matches` vẫn cho xem lại bracket/matches của contest public
+- local leaderboard khác global leaderboard
+- global leaderboard chỉ đọc `race_records` verified sau `sync-race-records`
 
 ---
 
-## 7. Registration Review va Check-in
+## 11. Audit Và Metrics
 
-### Review
+Audit:
 
-- Provider owner co the approve/reject moi registration trong contest cua minh
-- Staff duoc phep review neu thuoc it nhat mot cafe tham gia contest
-- Approve/reject phai ghi audit
+```text
+GET /api/v1/contests/:contestId/audit-logs
+```
 
-### Check-in
+Metrics:
 
-- Registration phai o `CONFIRMED`
-- `checked_in_cafe_id` phai thuoc `contest_cafes`
-- Neu actor la STAFF:
-  - phai duoc assign dung cafe check-in
+```text
+GET /api/v1/contests/:contestId/metrics
+```
 
-Sau check-in:
+Audit events hiện có trong backend gồm:
 
-- `status = CHECKED_IN`
-- luu `checked_in_by`, `checked_in_at`, `checked_in_cafe_id`
+- `contest.created`
+- `contest.updated`
+- `contest.opened`
+- `contest.closed`
+- `contest.cancelled`
+- `registration.created`
+- `registration.entry_fee_marked_paid`
+- `registration.entry_fee_waived`
+- `registration.approved`
+- `registration.rejected`
+- `registration.cancelled`
+- `registration.checked_in`
+- `contest.matches_generated`
+- `match.participants_updated`
+- `match.results_submitted`
+- `match.results_corrected`
+- `match.advanced`
+- `contest.leaderboard_published`
+- `race_records.synced`
 
----
+FE Provider cần có tab Audit để xem:
 
-## 8. Match Operations
-
-### Generate Matches
-
-- Contest phai dong dang ky hoac dang trong runtime state hop le
-- Chi su dung registration `CONFIRMED` hoac `CHECKED_IN`
-- `cafe_id` va `track_config_id` duoc truyen khi generate
-- Knockout co the auto-advance bye rounds neu match chi co 1 participant
-
-### Reorder Participants
-
-- Provider duoc thao tac tren moi match cua contest
-- Staff chi duoc thao tac neu `staff_cafe_assignments.cafe_id = contest_matches.cafe_id`
-- Khong cho reorder match da `COMPLETED`
-
-### Submit Results
-
-- Result phai thuoc participant cua match
-- Update participant status/score/position
-- Match -> `COMPLETED`
-- Neu co `next_match_id`, co the advance
-
-### Correct Results
-
-- Endpoint chinh: `POST /contest-matches/:id/results/correct`
-- Staff chi sua duoc khi downstream chua hoan tat
-- Provider co the `force_cascade=true` de sua khi downstream da hoan tat
-- Moi correction phai co audit log
-
-### Publish Leaderboard
-
-- Chi publish khi khong con match non-terminal
-- Neu van con `DRAFT`, `READY`, `RUNNING` thi reject
-- Publish leaderboard ghi snapshot vao `contests.config.leaderboard`; snapshot nay la ket qua local cua contest.
-- Neu cafe/provider opt-in Universal Racing Network, Provider co the sync ket qua da publish sang `race_records`.
-- Neu correct result sau khi da sync, service phai audit correction va danh dau race record cu la `SUPERSEDED` hoac re-sync thanh record moi.
+- actor id/role
+- event type
+- registration/match liên quan
+- before/after json
+- reason
+- created time
 
 ---
 
-## 9. Universal Racing Network Integration
+## 12. Unhappy Cases, Disqualification Và Ban
 
-Universal Racing Network hien tai duoc implement o muc toi gian, khong thay the contest hien tai.
+Backend hiện xử lý được:
 
-Nguyen tac:
+- reject/cancel registration có reason
+- disqualify mềm bằng result status `DQ` trên participant
+- sửa result có audit
+- chặn Staff thao tác sai cafe
+- chặn publish khi match chưa xong
+- chặn booking trùng contest lock
 
-- Contest hien tai van la Provider-level contest.
-- `contests.config.leaderboard` chi la snapshot local, khong phai bang xep hang lien tinh/toan quoc.
-- Global leaderboard chi doc tu `race_records` co `verification_status = VERIFIED`.
-- Phase hien tai chi tao race record tu contest result da publish.
-- Session time attack, passport QR community check-in rieng, Grand Prix Series va Team War la phase sau.
-- Cross-provider data public chi gom display name, cafe, track, vehicle source, lap/time/rank va metadata can hien thi; khong lo email, phone, booking payment, session private note.
+Backend chưa có:
 
-Luang sync khuyen nghi:
+- contest-specific incident table
+- contest-specific ban list
+- ban theo Provider/cafe/contest
+- evidence cho người phá giải
+- unban workflow
+- rule tự động chặn người đã phá giải đăng ký lại
 
-1. Staff/Provider submit result vao `contest_match_participants`.
-2. Provider publish leaderboard local cua contest.
-3. Provider goi sync race records hoac backend job sync tu contest da publish.
-4. He thong tao/cap nhat `race_records` voi source `CONTEST`, link ve `contest_id`, `match_id`, `contest_match_participant_id`.
-5. Achievement service tinh lai Driver Passport va badges neu co thay doi thanh tich.
+Không dùng `users.is_active` để thay contest ban, vì đó là khóa tài khoản toàn hệ thống.
 
-Xem chi tiet o `docs/spec/09-universal-racing-network.md`.
+Nếu muốn làm bài bản, phase sau cần:
 
-### Planned expansion / Next phase
+```text
+contest_participant_incidents
+contest_bans
+contest_disciplinary_actions
+```
 
-- Tach `driver_profiles` ra khoi `users.racing_profile` neu public identity can scale rieng.
-- Them `driver_cafe_checkins` cho passport QR community check-in doc lap voi completed play.
-- Them `driver_achievements` neu can query badge/analytics sau nay.
-- Them session time attack sync vao `race_records`.
-- Them Grand Prix Series.
-- Them Team War / Clan War.
+Minimum behavior đề xuất:
 
----
-
-## 10. Monitoring
-
-### Audit logs
-
-Can truy vet duoc:
-
-- ai thao tac
-- thao tac nao
-- contest/registration/match nao
-- truoc va sau thay doi
-- reason neu co
-
-### Metrics
-
-Can co it nhat:
-
-- registration totals theo `BYOC` / `RENTAL`
-- pending / confirmed / cancelled / checked-in counts
-- check-in rate
-- match totals theo status
-- completed match duration summary neu tinh duoc
-- correction / operation error counters neu backend da expose
+- Staff/Provider report incident với reason/evidence.
+- Provider có thể disqualify registration khỏi match/contest.
+- Provider có thể ban user khỏi contest hiện tại hoặc khỏi contest của provider trong thời hạn nhất định.
+- Ban/unban/disqualify đều ghi audit.
+- Customer bị ban không đăng ký được contest nằm trong scope ban.
 
 ---
 
-## 11. Happy Cases can test
+## 13. FE Screen Contract
 
-### Happy case 1: BYOC approved
+Provider nên chia contest thành các màn hình/tabs:
 
-1. Provider tao contest `MIXED` hoac `BYOC_ONLY`
-2. Customer tao customer vehicle
-3. Customer dang ky contest -> `PENDING`
-4. Provider approve -> `CONFIRMED`
-5. Staff/Provider check-in -> `CHECKED_IN`
-6. Generate match
-7. Submit result
-8. Publish leaderboard
+1. **Setup**: info, time, cafe, track type, resource locks, prize, fee.
+2. **Registrations**: danh sách người đăng ký, payment status, approve/reject/cancel.
+3. **Check-in**: lookup/check-in code, cafe check-in.
+4. **Runtime**:
+   - Knockout bracket UI nếu `runtime_format=KNOCKOUT`
+   - Time trial run list/ranking UI nếu `runtime_format=TIME_TRIAL`
+5. **Leaderboard**: preview/publish, local snapshot.
+6. **Metrics**: counts hiện có, revenue khi backend bổ sung.
+7. **Audit**: lịch sử thao tác.
 
-### Happy case 2: Rental linked booking
+Staff nên có:
 
-1. Customer tao booking rental `CONFIRMED`
-2. Customer dang ky contest bang `booking_id` + `vehicle_id`
-3. Provider approve
-4. Contest check-in
-5. Session/inspection van dung booking flow cu
-6. Match ops dien ra binh thuong
+- contest list theo cafe assigned
+- check-in screen
+- runtime screen theo format
+- result submit/correct không force cascade
 
----
+Customer nên có:
 
-## 12. Negative cases can test
-
-- Dang ky sai `vehicle_policy`
-- BYOC khong co `customer_vehicle_id`
-- RENTAL khong co `booking_id`/`vehicle_id`
-- Booking rental chua `CONFIRMED`
-- Booking rental sai cafe / sai track / sai time window
-- Duplicate active rental vehicle trong cung contest
-- Duplicate active customer vehicle trong cung contest
-- Staff check-in sai cafe
-- Staff submit/correct result sai cafe
-- Publish leaderboard khi con match unfinished
-- Staff correction khi downstream da completed
-- Global sync khi contest chua publish
-- Global leaderboard hien thi race record chua verified
+- public listing/detail
+- registration status rõ ràng
+- my contest registrations
+- bracket/leaderboard read-only
 
 ---
 
-## 13. Implementation Notes
+## 14. Implementation Notes
 
-- Uu tien happy case va guard nghiep vu vua du
-- Khong mo rong thanh global vehicle certification system
-- Khong nhan doi payment/inspection logic cua booking trong contest
-- Khong nhan doi global leaderboard trong `contests.config`; dung `race_records` khi lam Universal Racing Network.
-- Docs, Postman, BE va FE phai cung mot contract:
-  - `vehicle_policy`
-  - `customer_vehicle_id`
-  - `booking_id`
-  - `results/correct`
-  - `audit-logs`
-  - `metrics`
-  - `sync-race-records`
+- Không viết docs như thể VNPay contest đã xong.
+- Không viết BYOC như đã xong; backend register hiện rental-only.
+- Không viết schedule block là future; backend đã có contest lock.
+- Không dùng `contests.config.published_leaderboard` làm global leaderboard.
+- Không dùng user global deactivate thay contest ban.

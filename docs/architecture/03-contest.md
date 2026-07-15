@@ -1,112 +1,57 @@
 # Architecture: Contest & Race Event
 
-**Last Updated:** 2026-07-07
-**Spec refs:** `docs/spec/business-rules/BR-contest.md`, `docs/spec/business-rules/BR-racing-network.md`, `docs/spec/09-universal-racing-network.md`, `docs/spec/01-domain-model.md`, `docs/spec/05-api-contracts.md`, `docs/spec/06-database.md`
+**Last Updated:** 2026-07-14  
+**Spec refs:** `docs/spec/03-contest.md`, `docs/spec/business-rules/BR-contest.md`, `docs/developer/contest-delivery/05-contest-current-backend-vs-requested-flow.md`, `docs/spec/09-universal-racing-network.md`
 
 ---
 
 ## 1. Intent
 
-Contest là module event operations riêng của RCField. Phase hiện tại là Provider-level contest: Provider tạo giải cho các cafe thuộc mình, Staff thao tác trong cafe được assign, và leaderboard publish ra snapshot local của contest. Nó không phải booking thường và không tạo booking giả để thu phí hay giữ slot. Phase hiện tại tập trung vào luồng khả thi cho đồ án:
+Contest là bounded context cho event/tournament operations của Provider. Nó không thay booking/session, nhưng có thể link tới booking rental khi người chơi đăng ký giải bằng xe thuê.
 
-1. Provider tạo/sửa/open/close/cancel contest.
-2. Customer xem thông tin, luật, giải thưởng, địa điểm và đăng ký.
-3. Provider/Staff monitoring người tham gia và check-in.
-4. Sau khi đóng đăng ký, Provider/Staff tạo lịch thi đấu bằng match linh hoạt.
-5. Staff nhập kết quả, advance người thắng/qualified và publish leaderboard.
-6. Mọi mutation quan trọng ghi audit log DB + logger.
+Architecture hiện tại có 4 lớp rõ:
 
 ```text
-CONTEST = event operations
-BOOKING = planned play slot
-SESSION = actual play session
+Setup        = tạo giải, chọn cafe/track/time/fee/prize/locks
+Registration = customer đăng ký, Provider duyệt, fee manual
+Runtime      = check-in, generate matches, nhập/correct/advance result
+Publishing   = local leaderboard, metrics, audit, optional race record sync
 ```
 
 ---
 
-## 2. Phase Boundary
-
-| Scope | Quyết định |
-|---|---|
-| Current phase | Compact tournament flow với 5 bảng chính + audit log |
-| Next phase | Schedule block, CONTEST_ENTRY payment, BYOC tech-check, rental assignment đầy đủ |
-| Backlog | Multi-class, live timing, transponder, protest, auto bracket nâng cao, reward claim lifecycle |
-
-Schema hiện tại:
-
-```text
-contests
-contest_cafes
-contest_registrations
-contest_matches
-contest_match_participants
-contest_audit_logs
-```
-
-Universal Racing Network phase sau contest:
-
-```text
-driver_profiles
-driver_cafe_checkins
-race_records
-achievement_definitions
-driver_achievements
-league_series
-league_rounds
-league_standings
-racing_teams
-racing_team_members
-team_wars
-team_war_results
-```
-
-Không dùng trong phase hiện tại:
-
-```text
-contest_classes
-contest_rounds
-contest_heats
-contest_heat_entries
-contest_results
-contest_result_audits
-contest_leaderboard_snapshots
-contest_rewards
-contest_reward_claims
-contest_bracket_matches
-```
-
----
-
-## 3. Module Boundary
+## 2. Current Module Boundary
 
 ```mermaid
 graph TD
-    subgraph PublicUI[Public / Customer]
+    subgraph PublicCustomer[Public / Customer]
         LIST[Contest listing]
         DETAIL[Contest detail]
-        REGISTER[Registration]
-        MYREG[My registrations]
+        REGISTER[Rental-linked registration]
+        MYREG[My contest registrations]
+        PUBLICLB[Published leaderboard]
     end
 
     subgraph ProviderUI[Provider Dashboard]
-        CRUD[Create/Edit/Open/Close/Cancel]
-        REGDASH[Participant dashboard]
-        MATCHUI[Match schedule + drag/drop]
-        RESULTUI[Result entry + leaderboard]
-        AUDITUI[Audit log]
+        SETUP[Setup: time/cafe/track/locks/fee/prize]
+        REGDASH[Registrations + manual fee]
+        CHECKINP[Check-in management]
+        RUNTIMEP[Runtime by format]
+        METRICS[Metrics]
+        AUDITUI[Audit logs]
     end
 
     subgraph StaffUI[Staff Event Day]
         LOOKUP[Lookup by check-in code]
-        CHECKIN[Check-in]
-        RESULT[Result update if assigned]
+        CHECKIN[Check-in at assigned cafe]
+        RUNTIMES[Submit/correct result]
     end
 
-    subgraph Backend[Contest Backend]
+    subgraph Backend[Backend Services]
         CONTEST[contest.service]
-        REG[contest-registration.service]
-        TOUR[contest-tournament.service]
-        AUDIT[contest-audit helper]
+        LOCK[contest-lock.service]
+        RUNTIME[contest-runtime.service]
+        RN[racing-network.service]
     end
 
     subgraph Data[Database]
@@ -116,32 +61,40 @@ graph TD
         CM[contest_matches]
         CMP[contest_match_participants]
         CAL[contest_audit_logs]
+        RR[race_records]
     end
 
     LIST --> CONTEST
     DETAIL --> CONTEST
-    REGISTER --> REG
-    MYREG --> REG
-    CRUD --> CONTEST
-    REGDASH --> REG
-    MATCHUI --> TOUR
-    RESULTUI --> TOUR
-    AUDITUI --> AUDIT
-    LOOKUP --> REG
-    CHECKIN --> REG
-    RESULT --> TOUR
+    REGISTER --> CONTEST
+    MYREG --> CONTEST
+    PUBLICLB --> CONTEST
+
+    SETUP --> CONTEST
+    SETUP --> LOCK
+    REGDASH --> CONTEST
+    CHECKINP --> CONTEST
+    RUNTIMEP --> RUNTIME
+    METRICS --> RUNTIME
+    AUDITUI --> RUNTIME
+
+    LOOKUP --> CONTEST
+    CHECKIN --> CONTEST
+    RUNTIMES --> RUNTIME
 
     CONTEST --> C
     CONTEST --> CC
-    REG --> CR
-    TOUR --> CM
-    TOUR --> CMP
-    AUDIT --> CAL
+    CONTEST --> CR
+    LOCK --> C
+    RUNTIME --> CM
+    RUNTIME --> CMP
+    RUNTIME --> CAL
+    RN --> RR
 ```
 
 ---
 
-## 4. Entity Map
+## 3. Entity Map
 
 ```mermaid
 erDiagram
@@ -150,197 +103,219 @@ erDiagram
     cafes ||--o{ contest_cafes : "hosts"
     contests ||--o{ contest_registrations : "registrations"
     users ||--o{ contest_registrations : "registers"
-    vehicles ||--o{ contest_registrations : "rental optional"
-    customer_vehicles ||--o{ contest_registrations : "BYOC optional"
-    contests ||--o{ contest_matches : "schedule"
+    bookings ||--o{ contest_registrations : "rental link"
+    vehicles ||--o{ contest_registrations : "rental vehicle"
+    contests ||--o{ contest_matches : "runtime schedule"
     contest_matches ||--o{ contest_match_participants : "drivers"
     contest_registrations ||--o{ contest_match_participants : "placed in match"
     contests ||--o{ contest_audit_logs : "audit"
-    contest_registrations ||--o{ contest_audit_logs : "registration event"
-    contest_matches ||--o{ contest_audit_logs : "match event"
+    contests ||--o{ race_records : "optional sync"
 ```
 
-### contests.config
+`contests.config` current keys used by contest:
 
 ```json
 {
-  "format": "KNOCKOUT | MULTI_DRIVER_HEAT | TIME_ATTACK",
+  "format": "KNOCKOUT",
+  "runtime_format": "KNOCKOUT",
   "drivers_per_match": 2,
-  "seeding_mode": "MANUAL | CHECK_IN_ORDER",
-  "rules_text": "The le giai...",
-  "prizes": [
-    { "rank": 1, "title": "Champion", "description": "Voucher 500k" }
+  "seeding_mode": "CHECK_IN_ORDER",
+  "leaderboard_mode": "KNOCKOUT_WINS",
+  "resource_locks": [
+    {
+      "cafe_id": "uuid",
+      "scope": "FULL_BRANCH",
+      "track_config_ids": []
+    }
   ],
-  "leaderboard": []
+  "prizes": [],
+  "published_leaderboard": null,
+  "global_sync": null
 }
 ```
 
 ---
 
-## 5. State Machines
+## 4. Critical Flows
 
-### ContestStatus
-
-```text
-DRAFT -> OPEN -> CLOSED -> RUNNING -> COMPLETED
-   \       \        \          \
-    \       \        \          -> CANCELLED
-     \       \        -> CANCELLED
-      \       -> CANCELLED
-       -> CANCELLED
-```
-
-### ContestRegistrationStatus
-
-```text
-PENDING -> CONFIRMED -> CHECKED_IN
-    \          \
-     -> CANCELLED
-```
-
-### ContestMatchStatus
-
-```text
-DRAFT -> READY -> RUNNING -> COMPLETED
-   \       \        \
-    \       \        -> CANCELLED
-     \       -> CANCELLED
-      -> CANCELLED
-```
-
----
-
-## 6. Critical Flows
-
-### 6.1 Create/Open/Close
+### 4.1 Setup + Resource Lock
 
 ```mermaid
 flowchart TD
-    A[Provider creates contest DRAFT] --> B[Validate provider + owned ACTIVE cafes]
-    B --> C[Save contests + contest_cafes]
-    C --> D[Provider opens registration]
-    D --> E[Validate config/time/capacity/registration window]
-    E --> F[contest DRAFT -> OPEN + audit]
-    F --> G[Customers register]
-    G --> H[Provider closes registration]
-    H --> I[contest OPEN -> CLOSED + audit]
+    A[Provider opens create contest] --> B[Select type/format/template]
+    B --> C[Select participating cafes]
+    C --> D[Select track type]
+    D --> E[Choose race and registration windows]
+    E --> F[Choose resource locks: FULL_BRANCH or SELECTED_TRACKS]
+    F --> G[Backend resolves active track configs]
+    G --> H{Existing booking conflict?}
+    H -->|Yes| X[Reject CONTEST_BOOKING_CONFLICT]
+    H -->|No| I[Save contest + contest_cafes + config.resource_locks]
 ```
 
-### 6.2 Register/Check-in
+Key point: schedule block is current backend behavior, not future scope.
+
+### 4.2 Registration + Fee
 
 ```mermaid
 flowchart TD
-    A[Customer registers] --> B[Validate contest OPEN + window + capacity]
-    B --> C[Create registration]
-    C --> D{entry_fee = 0?}
-    D -->|Yes| E[CONFIRMED]
-    D -->|No| F[PENDING/manual payment until payment phase]
-    E --> G[Staff lookup by code]
-    G --> H[Validate assigned cafe in contest_cafes]
-    H --> I[CHECKED_IN + audit]
+    A[Customer views public contest] --> B{OPEN and inside registration window?}
+    B -->|No| X[Reject registration]
+    B -->|Yes| C[Customer selects confirmed rental booking + vehicle]
+    C --> D[Backend validates booking owner/status/cafe/track/time/vehicle]
+    D --> E[Create registration PENDING]
+    E --> F{entry_fee > 0?}
+    F -->|No| G[payment_status=PENDING_REVIEW]
+    F -->|Yes| H[payment_status=PENDING_PAYMENT]
+    H --> I[Provider mark paid or waive manually]
+    G --> J[Provider approve]
+    I --> J
+    J --> K[Registration CONFIRMED]
 ```
 
-### 6.3 Tournament schedule/result
+VNPay contest entry is not implemented yet.
+
+### 4.3 Runtime
 
 ```mermaid
 flowchart TD
-    A[Contest CLOSED/RUNNING] --> B[Generate matches]
-    B --> C[Create contest_matches]
-    C --> D[Create contest_match_participants]
-    D --> E[Staff/Provider reorders slot/lane/grid]
-    E --> F[Run match]
-    F --> G[Submit manual results]
-    G --> H[Mark winner/finish position]
-    H --> I{next_match_id?}
-    I -->|Yes| J[Advance winner/qualified]
-    I -->|No| K[Publish leaderboard]
-    J --> F
-    K --> L[contests.config.leaderboard + audit]
+    A[Staff/Provider check-in CONFIRMED registration] --> B[Registration CHECKED_IN]
+    B --> C[Provider generate matches from CHECKED_IN registrations]
+    C --> D{runtime_format}
+    D -->|KNOCKOUT| E[Bracket by round/match]
+    D -->|TIME_TRIAL| F[One run/match per participant]
+    E --> G[Submit result + advance winner]
+    F --> H[Submit best lap/total time]
+    G --> I[All matches completed]
+    H --> I
+    I --> J[Provider publish local leaderboard]
+    J --> K[Contest COMPLETED]
+```
+
+### 4.4 Audit And Review
+
+```mermaid
+flowchart TD
+    A[Mutation occurs] --> B[Write business row]
+    B --> C[Write contest_audit_logs]
+    C --> D[Provider Audit tab]
+    D --> E[Review actor/event/reason/before/after]
 ```
 
 ---
 
-## 7. API Surface
+## 5. API Surface
+
+Catalog:
 
 ```text
-GET  /contests
-GET  /cafes/:cafeId/contests
-GET  /contests/:id
-POST /contests
-PATCH /contests/:id
-POST /contests/:id/open
-POST /contests/:id/close
-POST /contests/:id/cancel
-
-POST /contests/:id/register
-GET  /contests/:id/registrations
-GET  /contests/:id/registrations/lookup?check_in_code=...
-GET  /me/contest-registrations
-POST /contest-registrations/:id/check-in
-POST /contest-registrations/:id/cancel
-
-GET  /contests/:id/matches
-POST /contests/:id/matches/generate
-PATCH /contest-matches/:id/participants
-POST /contest-matches/:id/results
-POST /contest-matches/:id/advance
-POST /contests/:id/leaderboard/publish
-GET  /contests/:id/audit-logs
+GET /api/v1/contest-catalog/types
+GET /api/v1/contest-catalog/formats
+GET /api/v1/contest-catalog/templates
 ```
 
----
-
-## 8. Monitoring
-
-Business mutations write `contest_audit_logs` and logger events.
-
-Required event types:
+Contest:
 
 ```text
-contest.created
-contest.updated
-contest.opened
-contest.closed
-contest.cancelled
-registration.created
-registration.cancelled
-registration.checked_in
-match.schedule_generated
-match.participants_updated
-match.result_submitted
-match.advanced
-leaderboard.published
+GET   /api/v1/contests
+GET   /api/v1/cafes/:cafeId/contests
+GET   /api/v1/contests/:contestId
+POST  /api/v1/contests
+PATCH /api/v1/contests/:contestId
+POST  /api/v1/contests/:contestId/open
+POST  /api/v1/contests/:contestId/close
+POST  /api/v1/contests/:contestId/cancel
 ```
 
-Rules:
+Registration:
 
-- Audit writes run in the same transaction as the business mutation.
-- Store small before/after snapshots, not huge request payloads.
-- Provider can read audit logs for their contest.
+```text
+POST /api/v1/contests/:contestId/register
+GET  /api/v1/me/contest-registrations
+GET  /api/v1/contests/:contestId/registrations
+GET  /api/v1/contests/:contestId/registrations/lookup?check_in_code=...
+POST /api/v1/contest-registrations/:registrationId/mark-entry-fee-paid
+POST /api/v1/contest-registrations/:registrationId/waive-entry-fee
+POST /api/v1/contest-registrations/:registrationId/approve
+POST /api/v1/contest-registrations/:registrationId/reject
+POST /api/v1/contest-registrations/:registrationId/cancel
+POST /api/v1/contest-registrations/:registrationId/check-in
+```
+
+Runtime:
+
+```text
+GET   /api/v1/contests/:contestId/matches
+POST  /api/v1/contests/:contestId/matches/generate
+PATCH /api/v1/contest-matches/:matchId/participants
+POST  /api/v1/contest-matches/:matchId/results
+POST  /api/v1/contest-matches/:matchId/results/correct
+POST  /api/v1/contest-matches/:matchId/advance
+POST  /api/v1/contests/:contestId/leaderboard/publish
+```
+
+Monitoring and racing network:
+
+```text
+GET  /api/v1/contests/:contestId/audit-logs
+GET  /api/v1/contests/:contestId/metrics
+POST /api/v1/contests/:contestId/sync-race-records
+```
 
 ---
 
-## 9. Deferred Integrations
+## 6. FE Expectations
 
-| Concern | Current decision | Future |
+Provider dashboard should be split into tabs:
+
+| Tab | Purpose | Backend source |
 |---|---|---|
-| Payment | No fake booking; free/manual contest allowed | `CONTEST_ENTRY` payment subject |
-| Schedule block | Documented gap | Block normal booking during contest |
-| BYOC tech check | Manual note in metadata | Structured checklist/evidence |
-| Rental assignment | Optional registration field | Assignment pool at check-in |
-| Reward | Config-only prizes | Reward claim lifecycle |
-| Live timing | Manual result | Transponder/import/live board |
-| Global leaderboard | `contests.config.leaderboard` chỉ là local snapshot | `race_records` verified cho leaderboard liên tỉnh/toàn quốc |
-| Driver Passport | Chưa thuộc contest core | `driver_profiles` + `driver_cafe_checkins` |
-| Grand Prix Series | Không nằm trong contest core | `league_series` gom nhiều contest đã publish |
-| Team War | Chưa mở | Cần Driver Passport, verified records, roster lock |
+| Setup | Contest info, windows, cafe, track, resource locks, fee, prize | contest create/update/detail |
+| Registrations | Participant list, fee status, approve/reject/cancel | registration endpoints |
+| Check-in | Lookup code and check in at cafe | lookup/check-in |
+| Runtime | Format-specific management | matches/results/advance |
+| Leaderboard | Preview and publish local standings | publish/detail |
+| Metrics | Operational counts now; revenue after backend adds it | metrics |
+| Audit | Anti-fraud history | audit-logs |
+
+Runtime UI must branch by `runtime_format`:
+
+- `KNOCKOUT`: bracket, match panel, winner advance.
+- `TIME_TRIAL`: run list, time entry, ranking table.
+
+Customer UI must hide technical states and show journey states:
+
+```text
+PENDING_APPROVAL
+APPROVED_WAITING_CHECKIN
+CHECKED_IN_WAITING_BRACKET
+IN_BRACKET
+ADVANCED
+ELIMINATED
+FINISHED
+CANCELLED
+```
+
+---
+
+## 7. Deferred / Gap Architecture
+
+| Concern | Current | Needed if product wants full flow |
+|---|---|---|
+| VNPay contest entry | Manual mark/waive only | `CONTEST_ENTRY` payment subject + IPN |
+| Revenue report | Operational metrics only | gross/paid/pending/waived/refund/conversion |
+| BYOC contest | Product intent, service rental-only | `customer_vehicle_id` registration + review |
+| Prize payout | Display config only | reward claim/payout/voucher engine |
+| Ban participant | Cancel/reject/DQ only | `contest_bans` or contest incident subject |
+| Auto close registration | Time guard in register | scheduler status sync |
+| Protest/appeal | Not present | disciplinary/appeal workflow |
 
 ---
 
 ## Reference
 
+- [Contest spec](../spec/03-contest.md)
 - [BR-contest](../spec/business-rules/BR-contest.md)
-- [Database spec](../spec/06-database.md)
+- [Current backend vs requested flow](../developer/contest-delivery/05-contest-current-backend-vs-requested-flow.md)
 - [API contracts](../spec/05-api-contracts.md)
-- [Contest sequence](../diagrams/sequence/sequence-flow-contest-lifecycle.md)
-- [Contest lifecycle flow](./diagrams/contest-lifecycle-flow.md)
+- [Database spec](../spec/06-database.md)

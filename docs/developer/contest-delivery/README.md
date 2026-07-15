@@ -1,6 +1,6 @@
 # Contest Delivery Docs
 
-**Last updated:** 2026-07-11  
+**Last updated:** 2026-07-14  
 **Owner:** Product / Backend / Frontend / QA
 
 > Bộ tài liệu này là playbook triển khai thực tế cho Contest Core và các phase mở rộng liên quan.  
@@ -16,6 +16,7 @@
 | [02-database-and-backend-rollout.md](./02-database-and-backend-rollout.md) | Kế hoạch DB/BE chi tiết theo phase, migration, entity, API, permission | Trước khi code backend |
 | [03-frontend-rollout.md](./03-frontend-rollout.md) | Kế hoạch FE, route, state, UI rules, thay mock bằng live data | Trước khi code frontend |
 | [04-testing-commit-and-release-checklist.md](./04-testing-commit-and-release-checklist.md) | Checklist test, commit strategy, release notes, branch handling | Trước khi commit / release |
+| [05-contest-current-backend-vs-requested-flow.md](./05-contest-current-backend-vs-requested-flow.md) | Đối chiếu yêu cầu contest với backend hiện có, gap và FE flow cần hiển thị | Khi cần hiểu nhanh hiện trạng thật |
 
 ---
 
@@ -51,6 +52,10 @@
   - customer rental contest registration
   - provider fee review / waive / approve / reject
   - provider/staff lookup + contest check-in
+  - match generation cho `TIME_TRIAL` / `KNOCKOUT`
+  - result submission / correction / advance
+  - publish leaderboard local
+  - metrics và audit log endpoints
 - Frontend:
   - provider contest list
   - provider contest create/edit
@@ -59,9 +64,9 @@
 
 Chưa hoàn tất:
 
-- Match generation runtime thật cho `TIME_TRIAL` / `KNOCKOUT`
-- Result submission / correction / advance
-- Publish leaderboard local
-- Metrics / audit screen hoàn chỉnh
-- Gateway payment cho `CONTEST_ENTRY`
+- Revenue metrics đầy đủ cho entry fee contest
+- VNPay gateway payment cho `CONTEST_ENTRY`
+- BYOC registration production-ready
+- Contest-specific incident/ban workflow
+- FE runtime/audit/metrics screen cần chia rõ theo flow mới
 
