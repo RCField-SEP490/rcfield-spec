@@ -1,6 +1,6 @@
 # Contest Delivery Docs
 
-**Last updated:** 2026-07-14  
+**Last updated:** 2026-07-16  
 **Owner:** Product / Backend / Frontend / QA
 
 > Bộ tài liệu này là playbook triển khai thực tế cho Contest Core và các phase mở rộng liên quan.  
@@ -50,23 +50,31 @@
   - provider contest CRUD
   - public contest list/detail
   - customer rental contest registration
-  - provider fee review / waive / approve / reject
+  - customer BYOC declaration registration
+  - customer create contest entry payment URL (`CONTEST_ENTRY`)
+  - provider/staff fee review / waive / approve / reject / disqualify
   - provider/staff lookup + contest check-in
+  - contest staff assignment
   - match generation cho `TIME_TRIAL` / `KNOCKOUT`
   - result submission / correction / advance
   - publish leaderboard local
-  - metrics và audit log endpoints
+  - metrics có revenue summary cơ bản
+  - audit log endpoints
+  - contest ban / lift ban endpoints
 - Frontend:
   - provider contest list
   - provider contest create/edit
+  - provider contest runtime dashboard
+  - provider leaderboard / audit / metrics panels
   - public contest list/detail
   - customer contest registrations
+  - staff contest check-in / runtime
 
 Chưa hoàn tất:
 
-- Revenue metrics đầy đủ cho entry fee contest
-- VNPay gateway payment cho `CONTEST_ENTRY`
-- BYOC registration production-ready
-- Contest-specific incident/ban workflow
-- FE runtime/audit/metrics screen cần chia rõ theo flow mới
+- Refund/cancel lifecycle đầy đủ cho `CONTEST_ENTRY`
+- Auto-close scheduler đồng bộ status theo registration window
+- BYOC vehicle registry hoàn chỉnh dùng `customer_vehicle_id`
+- Incident / protest / appeal workflow riêng cho contest governance
+- Một số refinement FE cho governance screens và operator UX
 
