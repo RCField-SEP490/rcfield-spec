@@ -24,17 +24,17 @@ SESSION = ca chơi thực tế, inspection, checkout
 
 | Chủ đề | Backend hiện có | Còn thiếu / cần làm rõ |
 |---|---|---|
-| Thời gian contest | Có `registration_opens_at`, `registration_closes_at`, `starts_at`, `ends_at`; create validate đăng ký đóng trước hoặc bằng giờ bắt đầu | Chưa có job tự chuyển `OPEN -> CLOSED` khi hết giờ đăng ký |
-| Cafe tham gia | Có `contest_cafes`, `participating_cafe_ids`, chỉ cho cafe ACTIVE thuộc Provider | FE cần hiển thị rõ host/participating branches |
-| Track type | Có `track_type_id`; registration rental phải có booking cùng track type | FE cần giúp Provider thấy cafe nào có track config nào trước khi khóa |
+| Thời gian contest | Có `registration_opens_at`, `registration_closes_at`, `starts_at`, `ends_at`; create validate đăng ký đóng trước hoặc bằng giờ bắt đầu | Cron tự chuyển `OPEN -> CLOSED` khi hết giờ đăng ký đã có; vẫn cần monitor job |
+| Cafe tham gia | Có `contest_cafes`, `participating_cafe_ids`, chỉ cho cafe ACTIVE thuộc Provider | Update participating_cafe_ids khi đã có registration cần merge metadata thay vì xóa |
+| Track type | Có `track_type_id`; registration rental phải có booking cùng track type | FE cần hiển thị rõ host/participating branches |
 | Khóa sân/cafe | Có `config.resource_locks`, `FULL_BRANCH`, `SELECTED_TRACKS`; backend chặn booking trùng contest | FE cần phản ánh đây là current feature, không phải backlog |
-| Entry fee | Có `entry_fee`, `entry_fee_amount`, `payment_status`; Provider mark paid/waive thủ công | Chưa nối VNPay cho contest; chưa có `CONTEST_ENTRY` payment subject |
-| Revenue dashboard | Có metrics cơ bản: registration/match/leaderboard/global sync | Chưa có gross/paid/pending/waived/conversion revenue metrics |
+| Entry fee | Có `entry_fee`, `entry_fee_amount`, `payment_status`; Provider mark paid/waive thủ công; `CONTEST_ENTRY` payment subject; chặn duplicate payment URL | Chưa nối VNPay IPN tự động xác nhận; refund tiền thật do payment flow xử lý |
+| Revenue dashboard | Metrics có registration/match/leaderboard/global sync + revenue summary | Gross/paid/pending/waived/conversion đã có ở metrics |
 | Prize | Có thể lưu trong `contests.config.prizes` để hiển thị | Chưa có reward claim, payout, tự phát voucher/package |
 | Runtime format | Có `KNOCKOUT` và `TIME_TRIAL` qua `runtime_format`; dùng `contest_matches` | Multi-driver heat nâng cao chưa phải UI/runtime chính |
 | Leaderboard | Có publish local leaderboard vào `contests.config.published_leaderboard`; contest -> `COMPLETED` | Public cần đọc snapshot này rõ ràng; global leaderboard đọc `race_records` sau sync |
-| Audit | Có `contest_audit_logs`, Provider đọc `/audit-logs` | FE cần tab Audit; chưa có incident/ban riêng cho contest |
-| Ban/phá giải | Có reject/cancel registration + audit reason; có `is_active` user global | Chưa có `contest_bans`, contest incident, ban theo provider/contest, evidence |
+| Audit | Có `contest_audit_logs`, Provider đọc `/audit-logs` với pagination | FE cần tab Audit; chưa có incident/ban riêng cho contest |
+| Ban/phá giải | Có `contest_bans` với scope `CONTEST`/`PROVIDER`, evidence, expires, lift | Chưa có contest-specific incident table; chưa có rule tự động chặn đăng ký lại |
 
 ---
 
@@ -74,11 +74,11 @@ DRAFT -> OPEN -> CLOSED -> RUNNING -> COMPLETED
        -> CANCELLED
 ```
 
-Backend hiện chỉ cho Provider chuyển:
+Backend hiện cho Provider chuyển:
 
 - `DRAFT -> OPEN`
-- `OPEN -> CLOSED`
-- `DRAFT/OPEN/CLOSED/RUNNING -> CANCELLED`
+- `OPEN -> CLOSED` (thủ công hoặc tự động qua cron khi hết registration window)
+- `DRAFT/OPEN/CLOSED/RUNNING -> CANCELLED` (kích hoạt cleanup registrations + matches + refund flags)
 - `RUNNING/COMPLETED` xảy ra qua runtime/result/publish flow
 
 ---
@@ -275,9 +275,11 @@ POST /api/v1/contest-registrations/:registrationId/check-in
 Điều kiện:
 
 - registration phải `CONFIRMED`
+- contest phải `CLOSED` hoặc `RUNNING` và nằm trong race window (`starts_at <= now <= ends_at`)
 - `checked_in_cafe_id` thuộc contest
-- Staff phải assigned đúng cafe
+- Staff phải assigned đúng cafe đó
 - Provider owner có thể thao tác toàn bộ cafe trong contest
+- Check-in code được tạo ngẫu nhiên bảo mật và có unique constraint DB
 
 FE Customer không nên hiển thị quá nhiều trạng thái kỹ thuật. Dùng journey status rút gọn:
 
@@ -321,7 +323,11 @@ Payload:
 }
 ```
 
-Backend chỉ cho đưa registration đã `CHECKED_IN` vào runtime.
+Backend chỉ cho đưa registration đã `CHECKED_IN` vào runtime.  
+Generate matches bị chặn nếu contest đã có match `COMPLETED` hoặc `RUNNING` để tránh xóa kết quả đã có.
+
+`updateMatchParticipants` dùng UPSERT thay vì xóa toàn bộ, giữ lại result data đã nhập.  
+Không được chỉnh participant khi match đang `RUNNING`.
 
 ### Knockout
 
@@ -391,10 +397,11 @@ Guard hiện có:
 - result phải thuộc participant của match
 - submit result cần `reason`
 - match completed mới được correct
-- Staff không được `force_cascade`
+- Staff không được `force_cascade`; Provider mới có force_cascade
 - nếu downstream đã linked, correction không force sẽ bị chặn
-- nếu downstream match đã completed, force correction cũng bị chặn
-- publish bị chặn nếu còn match `DRAFT`, `READY`, `RUNNING`
+- nếu **bất kỳ downstream match** nào đã completed, force correction cũng bị chặn
+- correction xóa toàn bộ downstream participants và reset chúng về `DRAFT`
+- publish bị chặn nếu còn match `DRAFT`, `READY`, `RUNNING` hoặc thiếu result
 - publish local leaderboard vào `contests.config.published_leaderboard`
 - contest chuyển `COMPLETED`
 
@@ -412,8 +419,10 @@ Public sau giải:
 Audit:
 
 ```text
-GET /api/v1/contests/:contestId/audit-logs
+GET /api/v1/contests/:contestId/audit-logs?page=1&limit=20
 ```
+
+Response dạng paginated: `data`, `meta.total`, `meta.page`, `meta.limit`.
 
 Metrics:
 
@@ -458,21 +467,21 @@ FE Provider cần có tab Audit để xem:
 
 Backend hiện xử lý được:
 
-- reject/cancel registration có reason
-- disqualify mềm bằng result status `DQ` trên participant
+- reject/cancel/disqualify registration có reason; disqualify đồng thời xóa participant khỏi matches chưa completed
+- cancel contest: hủy registrations, đánh dấu refund_needed cho paid, chuyển matches sang CANCELLED, ghi audit
+- contest-specific ban list với scope `CONTEST`/`PROVIDER`, evidence, expires, lift
 - sửa result có audit
 - chặn Staff thao tác sai cafe
-- chặn publish khi match chưa xong
+- chặn publish khi match chưa xong hoặc thiếu result
 - chặn booking trùng contest lock
+- chặn duplicate entry-fee payment URL
+- atomic capacity check + unique check-in code
 
 Backend chưa có:
 
 - contest-specific incident table
-- contest-specific ban list
-- ban theo Provider/cafe/contest
-- evidence cho người phá giải
-- unban workflow
 - rule tự động chặn người đã phá giải đăng ký lại
+- automated refund qua payment gateway (refund flag được set, tiền thật cần payment flow xử lý)
 
 Không dùng `users.is_active` để thay contest ban, vì đó là khóa tài khoản toàn hệ thống.
 

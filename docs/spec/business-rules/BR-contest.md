@@ -35,11 +35,12 @@ THEN: reject registration.
 
 **BR-CT-013 — Capacity tính registration chưa cancelled**  
 IF: số registration active đạt capacity  
-THEN: reject registration mới.
+THEN: reject registration mới.  
+NOTE: capacity check phải atomic (transaction + row-level lock) để tránh race condition overcapacity.
 
-**BR-CT-014 — Auto-close status chưa phải guaranteed behavior**  
-IF: registration window đã hết nhưng status vẫn `OPEN`  
-THEN: service register vẫn reject theo thời gian; cron auto-close vẫn là gap UX/ops.
+**BR-CT-014 — Auto-close OPEN -> CLOSED khi hết registration window**  
+IF: contest `OPEN` và `registration_closes_at` đã qua  
+THEN: cron job tự chuyển sang `CLOSED`. Register endpoint vẫn reject theo thời gian là fallback.
 
 ---
 
@@ -105,15 +106,16 @@ THEN: payment transaction phải dùng `subject_type = CONTEST_ENTRY` và link `
 
 **BR-CT-041 — Contest entry payment URL là current feature**  
 IF: customer có registration `PENDING_PAYMENT`  
-THEN: backend có thể tạo payment URL qua `create-entry-fee-payment`.
+THEN: backend tạo payment URL qua `create-entry-fee-payment`.  
+NOTE: chỉ cho phép một transaction `CONTEST_ENTRY` đang active (PENDING/PENDING_PAYMENT) tại một thời điểm; nếu đã có transaction chưa failed thì reject hoặc reuse thay vì tạo mới, tránh duplicate payment/orphan txn.
 
 **BR-CT-042 — Operator vẫn có manual override**  
 IF: Provider/Staff cần duyệt phí thủ công  
 THEN: dùng `mark-entry-fee-paid` hoặc `waive-entry-fee`.
 
-**BR-CT-043 — Chưa có refund lifecycle hoàn chỉnh**  
-IF: contest cancel hoặc operator muốn hoàn tiền entry fee  
-THEN: backend hiện chưa có refund contract hoàn chỉnh cho contest entry.
+**BR-CT-043 — Contest cancel kích hoạt lifecycle cleanup**  
+IF: contest chuyển sang `CANCELLED`  
+THEN: hủy tất cả registrations chưa cancelled, đánh dấu paid registrations cần refund, chuyển matches sang `CANCELLED`, và ghi audit. Refund tiền thật vẫn do VNPay/IPN flow xử lý.
 
 ---
 
@@ -131,9 +133,9 @@ THEN: reject approve hoặc check-in.
 IF: registration chưa `CONFIRMED`  
 THEN: reject check-in.
 
-**BR-CT-053 — Staff phải được assign vào contest**  
+**BR-CT-053 — Staff phải assigned đúng cafe**  
 IF: staff lookup/check-in/runtime action  
-THEN: staff phải là assigned staff của contest.
+THEN: staff phải là assigned staff của contest VÀ được assigned vào cafe nơi thao tác diễn ra (`checked_in_cafe_id` hoặc `match.cafe_id`). Provider owner được quyền trên toàn bộ cafe trong contest.
 
 ---
 
@@ -177,9 +179,9 @@ THEN: có thể tạo ban scope `CONTEST` hoặc `PROVIDER`, có `reason`, `evid
 IF: operator gỡ ban  
 THEN: lưu `lifted_at`, `lifted_by`, `lift_reason` và audit event.
 
-**BR-CT-073 — Disqualify hiện xử lý ở registration level**  
+**BR-CT-073 — Disqualify loại participant khỏi active matches**  
 IF: operator disqualify participant  
-THEN: backend chuyển registration sang `CANCELLED`, lưu reason và metadata disqualified.
+THEN: chuyển registration sang `CANCELLED`, lưu reason và metadata disqualified, đồng thời xóa participant khỏi các `contest_match_participants` của matches chưa `COMPLETED` để bracket không tiếp tục đẩy người bị loại đi tiếp.
 
 **BR-CT-074 — Incident/protest/appeal chưa có module riêng**  
 IF: cần quy trình kỷ luật nhiều bước  
