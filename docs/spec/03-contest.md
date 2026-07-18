@@ -135,14 +135,11 @@ Customer chỉ đăng ký được khi:
 - thời điểm hiện tại nằm trong registration window
 - capacity chưa đầy
 - user chưa có registration active trong contest
-- hiện backend registration flow chỉ hỗ trợ `vehicle_source = RENTAL`
-- booking rental phải:
-  - thuộc customer đó
-  - `CONFIRMED`
-  - cùng `track_type_id`
-  - thuộc cafe tham gia contest
-  - giao với thời gian contest
-  - có `vehicle_id` thuộc booking đó
+- phải khớp `vehicle_rule.vehicle_policy` (`RENTAL_ONLY`, `BYOC_ONLY`, `MIXED`)
+- với `RENTAL`, có 2 cách:
+  1. Dùng booking đã có: booking thuộc customer, `CONFIRMED` (hoặc đang tạo từ rental slot), cùng `track_type_id`, thuộc cafe tham gia contest, giao với thời gian contest, có `vehicle_id` thuộc booking.
+  2. Thuê xe ngay trong form đăng ký qua `rental_slot`: backend tạo booking PENDING, customer thanh toán booking trước khi provider duyệt đăng ký.
+- với `BYOC`, khai báo tên xe/hãng/class và chờ provider duyệt.
 
 Endpoint:
 
@@ -150,7 +147,7 @@ Endpoint:
 POST /api/v1/contests/:contestId/register
 ```
 
-Payload hiện tại:
+Payload RENTAL với booking đã có:
 
 ```json
 {
@@ -160,7 +157,34 @@ Payload hiện tại:
 }
 ```
 
-Quan trọng: mặc dù schema có enum `BYOC`, service hiện reject mọi source khác `RENTAL` bằng `CONTEST_RENTAL_ONLY`. BYOC là intended flow/gap, chưa phải backend hoàn chỉnh.
+Payload RENTAL thuê xe ngay:
+
+```json
+{
+  "vehicle_source": "RENTAL",
+  "rental_slot": {
+    "cafe_id": "uuid",
+    "slot_start": "2026-07-20T09:00:00.000Z",
+    "slot_end": "2026-07-20T10:00:00.000Z",
+    "track_config_id": "uuid | null",
+    "vehicle_catalog_id": "uuid | null"
+  }
+}
+```
+
+Payload BYOC:
+
+```json
+{
+  "vehicle_source": "BYOC",
+  "byoc_vehicle_name": "Yokomo MD 2.0",
+  "byoc_vehicle_brand": "Yokomo",
+  "byoc_vehicle_class": "Drift",
+  "byoc_vehicle_notes": "Front motor conversion"
+}
+```
+
+Đăng ký thành công tạo notification in-app và email xác nhận cho customer.
 
 Public FE cần hiển thị:
 
@@ -202,11 +226,9 @@ POST /api/v1/contest-registrations/:registrationId/mark-entry-fee-paid
 POST /api/v1/contest-registrations/:registrationId/waive-entry-fee
 ```
 
-Hiện backend **chưa có VNPay contest payment**. Không được tạo booking giả để thu entry fee. Khi làm VNPay cho contest cần:
+Hiện backend **đã có VNPay contest payment** qua `POST /api/v1/contest-registrations/:registrationId/create-entry-fee-payment`. Hệ thống tạo payment transaction với subject `CONTEST_ENTRY`, link `contest_registration_id`. VNPay return/IPN cập nhật `payment_status`.
 
-- payment subject riêng: `CONTEST_ENTRY`
-- transaction/payment component link `contest_registration_id`
-- VNPay return/IPN update `payment_status`
+Khi dùng `rental_slot` để thuê xe ngay trong đăng ký, booking thuê xe được tạo ở trạng thái PENDING. Customer thanh toán booking riêng; provider chỉ duyệt đăng ký contest khi booking thuê xe đã `CONFIRMED`. Không dùng booking giả để thu entry fee.
 - audit `registration.entry_fee_paid`
 - refund policy khi contest bị cancel
 
