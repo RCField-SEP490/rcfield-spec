@@ -1,6 +1,6 @@
 # BR-Contest
 
-**Last updated:** 2026-07-16  
+**Last updated:** 2026-07-23  
 **Status:** Aligned to current backend
 
 ---
@@ -186,3 +186,33 @@ THEN: chuyển registration sang `CANCELLED`, lưu reason và metadata disqualif
 **BR-CT-074 — Incident/protest/appeal chưa có module riêng**  
 IF: cần quy trình kỷ luật nhiều bước  
 THEN: đó vẫn là gap, chưa phải current contract.
+
+---
+
+## 9. Contest↔Booking Rental
+
+**BR-CT-080 — Contest rental booking là booking thật, không booking giả**  
+IF: customer thuê xe cho contest (WF-A `POST /bookings/contest-rental` hoặc WF-B register kèm `rental_slot`)  
+THEN: tạo booking với `source = CONTEST` và `bookings.contest_id` (FK → contests, `ON DELETE SET NULL`); booking đi qua core booking/payment/session engine (snapshot pricing, VNPay flow, expiry, checkout/refund) như booking thường. Không được tạo payment path hay state machine riêng cho contest.
+
+**BR-CT-081 — Slot thuê xe contest phải nằm trong slot_window**  
+IF: tạo contest rental booking  
+THEN: slot phải nằm trong `contest.starts_at - slot_window.before_min` → `contest.ends_at + slot_window.after_min` (đọc từ `contest.config.rental_policy`, default 60/60); vi phạm reject bằng `CONTEST_SLOT_OUTSIDE_WINDOW`. Áp dụng cho cả WF-A và WF-B.
+
+**BR-CT-082 — Chính sách giá contest áp lúc pricing, freeze vào snapshot**  
+IF: contest có `config.rental_policy`  
+THEN: `waive_slot_fee=true` → phí sân = 0; `deposit_mode=REDUCED` → cọc = `deposit_percent`% mức chuẩn (default 50); `deposit_mode=WAIVED` → cọc 0; `FULL` → cọc chuẩn. Giá thực thu freeze vào snapshot → refund cọc sau checkout tự đúng, không có code refund riêng. Thiếu `rental_policy` → tính giá như booking thường.
+
+**BR-CT-083 — Check-in xe tự đồng bộ check-in registration (một chiều, fail-open)**  
+IF: staff check-in xe cho booking có `contest_id` VÀ customer có registration `CONFIRMED` của contest đó  
+THEN: registration tự chuyển `CHECKED_IN`, ghi audit `registration.checked_in` với `metadata.trigger='vehicle_check_in'`; response check-in có `contest_checkin { registrationId, synced, previousStatus }`.  
+IF: không có registration hợp lệ (chưa duyệt/đã hủy/đã check-in/không tồn tại)  
+THEN: check-in xe vẫn thành công bình thường, `synced=false`, không side effect vào contest. Chiều ngược lại (check-in contest thủ công → xe) không tự động. Checkout trả xe ghi audit `booking.vehicle_checked_out`.
+
+**BR-CT-084 — Cleanup booking theo trạng thái tiền khi reject/cancel registration**  
+IF: registration có booking contest kèm theo (WF-B) bị reject hoặc cancel  
+THEN: booking còn `PENDING` → bị cancel + audit `booking.contest_rental_cancelled`; booking đã thanh toán → giữ nguyên + audit `booking.contest_rental_retained` (không hủy tiền đã thu).
+
+**BR-CT-085 — Seeding QUALIFYING_FINAL**  
+IF: `runtime_format = QUALIFYING_FINAL`  
+THEN: phase QUALIFYING là match `TIME_ATTACK` cho mỗi VĐV `CHECKED_IN`, xếp theo `best_lap_ms`; sau khi mọi match QUALIFYING `COMPLETED`, `generate-final-bracket` đưa top N (`config.finalists`, default 4) vào bracket FINAL knockout với seed đối xứng: rank 1 gặp rank N, rank 2 gặp rank N-1, ...; số VĐV đủ điều kiện ít hơn N thì bracket chỉ gồm VĐV thực tế; leaderboard mode `KNOCKOUT_WINS`.
