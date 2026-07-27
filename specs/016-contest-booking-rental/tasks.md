@@ -35,14 +35,14 @@
 
 ## Phase 3: User Story 1 — WF-A Thuê xe riêng cho contest (Priority: P1) 🎯 MVP
 
-**Goal**: Customer thuê xe cho contest từ CreateBookingPage mà không tạo registration.
+**Goal**: Customer thuê xe cho contest từ form đăng ký contest (chọn nguồn xe "Thuê xe tại quầy") mà không bắt buộc tạo registration; API `POST /bookings/contest-rental` vẫn phục vụ trường hợp thuê riêng.
 
 **Independent Test**: `POST /bookings/contest-rental` → booking `source=CONTEST` + `contest_id`; slot ngoài window → `CONTEST_SLOT_OUTSIDE_WINDOW`; không có registration nào được tạo.
 
 ### Implementation for User Story 1
 
 - [X] T007 [US1] Thêm endpoint `POST /api/v1/bookings/contest-rental` (controller + route, auth CUSTOMER) gọi `createContestRentalBooking`; KHÔNG tạo registration
-- [X] T008 [P] [US1] FE: thêm entry "Thuê xe thi đấu" trong rcfield-fe/src/pages/customer/CreateBookingPage.tsx, dùng `contest-booking.api.ts` + hooks `use-contest-booking`
+- [X] T008 [P] [US1] FE: entry thuê xe cho contest chuyển vào `ContestRegistrationPanel` (stepper chọn nguồn xe) trong luồng đăng ký giải; xóa banner "Thuê xe thi đấu" khỏi `CreateBookingPage`.
 
 **Checkpoint**: Tạo booking contest từ FE → thanh toán VNPay/mock → booking CONFIRMED như booking thường; kiểm tra `contest_registrations` không có record mới.
 

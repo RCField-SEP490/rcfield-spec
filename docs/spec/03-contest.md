@@ -212,7 +212,7 @@ Booking thuê xe cho contest là **booking thật**, không phải booking giả
 
 **Hai entry point:**
 
-- **WF-A — thuê xe riêng, chưa đăng ký:** `POST /api/v1/bookings/contest-rental`. Tạo booking `source=CONTEST` + `contest_id`, KHÔNG tạo registration. FE: entry "Thuê xe thi đấu" trong CreateBookingPage.
+- **WF-A — thuê xe riêng, chưa đăng ký:** `POST /api/v1/bookings/contest-rental`. Tạo booking `source=CONTEST` + `contest_id`, KHÔNG tạo registration. Entry chính ở FE là chọn "Thuê xe tại quầy" trong form đăng ký contest (`ContestRegistrationPanel`); không còn banner trên `CreateBookingPage`.
 - **WF-B — đăng ký kèm thuê xe:** register với `rental_slot` (payload ở trên) trả thêm `booking { id, status, payment_expires_at, total_amount }` trong response. FE: stepper 3 bước (nguồn xe → xe/slot → xác nhận thanh toán gộp). Provider chỉ approve khi booking đã CONFIRMED.
 
 **Cleanup booking khi reject/cancel registration:**
@@ -487,6 +487,8 @@ Guard hiện có:
 - publish bị chặn nếu còn match `DRAFT`, `READY`, `RUNNING` hoặc thiếu result
 - publish local leaderboard vào `contests.config.published_leaderboard`
 - contest chuyển `COMPLETED`
+- **publish leaderboard chỉ cho phép Provider owner; STAFF không được publish**
+- **không thể submit/correct result sau khi leaderboard đã publish** (409 `CONTEST_LEADERBOARD_PUBLISHED`)
 
 Public sau giải:
 
@@ -505,7 +507,11 @@ Audit:
 GET /api/v1/contests/:contestId/audit-logs?page=1&limit=20
 ```
 
-Response dạng paginated: `data`, `meta.total`, `meta.page`, `meta.limit`.
+Response dạng paginated: `data`, `meta.total`, `meta.page`, `meta.limit`. Mỗi row có thêm:
+
+- `actionSummary`: câu mô tả tiếng Việt ngắn gọn (vd: "Tạo đăng ký #a1b2c3d4 tham gia contest", "Sửa kết quả trận #e5f6...")
+- `actorName`: full name của actor khi có actor id; SYSTEM thì để null
+- raw `before_json`, `after_json`, `metadata`, `reason` vẫn giữ để audit chi tiết
 
 Metrics:
 
@@ -554,7 +560,7 @@ FE Provider cần có tab Audit để xem:
 Backend hiện xử lý được:
 
 - reject/cancel/disqualify registration có reason; disqualify đồng thời xóa participant khỏi matches chưa completed
-- cancel contest: hủy registrations, đánh dấu refund_needed cho paid, chuyển matches sang CANCELLED, ghi audit
+- cancel contest: hủy registrations, đánh dấu refund_needed cho paid, chuyển matches sang CANCELLED, ghi audit (chỉ Provider owner được cancel)
 - contest-specific ban list với scope `CONTEST`/`PROVIDER`, evidence, expires, lift
 - sửa result có audit
 - chặn Staff thao tác sai cafe
@@ -562,6 +568,11 @@ Backend hiện xử lý được:
 - chặn booking trùng contest lock
 - chặn duplicate entry-fee payment URL
 - atomic capacity check + unique check-in code
+- cleanup PENDING registration khi booking thuê xe hết hạn thanh toán (zombie cleanup)
+- QUALIFYING_FINAL format đúng (không bị ép về KNOCKOUT)
+- assign contest staff chỉ cho phép staff thuộc cafe của provider
+- ADMIN có thể đọc audit log contest để oversight
+- các thao tác tác động lớn chỉ Provider owner: cancel, update, publish leaderboard, generate final bracket, waive entry fee
 
 Backend chưa có:
 

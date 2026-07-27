@@ -137,6 +137,10 @@ THEN: reject check-in.
 IF: staff lookup/check-in/runtime action  
 THEN: staff phải là assigned staff của contest VÀ được assigned vào cafe nơi thao tác diễn ra (`checked_in_cafe_id` hoặc `match.cafe_id`). Provider owner được quyền trên toàn bộ cafe trong contest.
 
+**BR-CT-054 — Các thao tác tác động lớn chỉ thuộc Provider owner**  
+IF: cancel contest, update contest info, publish leaderboard, generate final bracket, hoặc waive entry fee  
+THEN: chỉ Provider owner của contest được phép; STAFF không được phép thực hiện để giảm rủi ro gian lận và đảm bảo có đầu mối chịu trách nhiệm pháp lý. Các thao tác vận hành ngày thi (check-in, generate matches, submit/correct results, approve/reject registrations, open/close registrations) vẫn cho phép STAFF đã được phân công.
+
 ---
 
 ## 7. Runtime, Leaderboard, Metrics

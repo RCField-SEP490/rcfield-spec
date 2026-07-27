@@ -81,7 +81,7 @@
 
 **Purpose**: QUALIFYING_FINAL — sau khi phase QUALIFYING hoàn tất, tạo bracket FINAL knockout cho top N finalists.
 
-**Auth**: JWT PROVIDER (owner) / STAFF theo RBAC runtime hiện hữu
+**Auth**: JWT PROVIDER (owner) — chỉ Provider owner của contest được gọi, không phải STAFF.
 
 **Request** (body optional — mặc định dùng `contest.config.finalists`, default 4):
 ```json
@@ -206,7 +206,7 @@ Số VĐV vào FINAL của QUALIFYING_FINAL; default 4. Leaderboard mode: `KNOCK
 
 ### features/contests/api/contest-booking.api.ts + hooks use-contest-booking
 
-- `createContestRentalBooking(payload)` → `POST /bookings/contest-rental` (WF-A, entry "Thuê xe thi đấu" trong CreateBookingPage)
+- `createContestRentalBooking(payload)` → `POST /bookings/contest-rental` (WF-A, thuê riêng không đăng ký; entry chính ở FE là chọn "Thuê xe tại quầy" trong `ContestRegistrationPanel`, không còn trên `CreateBookingPage`)
 - `registerWithRentalSlot(contestId, payload)` → `POST /contests/:id/register`, nhận `booking` để chuyển bước thanh toán trong stepper 3 bước (nguồn xe → xe/slot → xác nhận thanh toán gộp)
 - `getContestBookings(contestId)` → `GET /contests/:id/bookings` (provider/staff)
 - `generateFinalBracket(contestId)` → `POST /contests/:id/matches/generate-final-bracket`
