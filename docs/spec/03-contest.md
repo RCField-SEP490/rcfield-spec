@@ -1,6 +1,6 @@
 # Contest Module Specification
 
-**Last Updated:** 2026-07-23  
+**Last Updated:** 2026-07-27  
 **Status:** Backend-current truth + requested operating flow  
 **Related docs:** `docs/spec/business-rules/BR-contest.md`, `docs/architecture/03-contest.md`, `docs/developer/contest-delivery/05-contest-current-backend-vs-requested-flow.md`, `docs/spec/05-api-contracts.md`, `docs/spec/06-database.md`, `docs/spec/09-universal-racing-network.md`, `specs/016-contest-booking-rental/`
 
@@ -24,17 +24,17 @@ SESSION = ca chơi thực tế, inspection, checkout
 
 | Chủ đề | Backend hiện có | Còn thiếu / cần làm rõ |
 |---|---|---|
-| Thời gian contest | Có `registration_opens_at`, `registration_closes_at`, `starts_at`, `ends_at`; create validate đăng ký đóng trước hoặc bằng giờ bắt đầu | Cron tự chuyển `OPEN -> CLOSED` khi hết giờ đăng ký đã có; vẫn cần monitor job |
+| Thời gian contest | Có `registration_opens_at`, `registration_closes_at`, `starts_at`, `ends_at`; create validate đăng ký đóng trước hoặc bằng giờ bắt đầu | Cron tự chuyển `OPEN -> CLOSED` và `CLOSED -> RUNNING` (khi đã có match và đến giờ `starts_at`) đã có; vẫn cần monitor job |
 | Cafe tham gia | Có `contest_cafes`, `participating_cafe_ids`, chỉ cho cafe ACTIVE thuộc Provider | Update participating_cafe_ids khi đã có registration cần merge metadata thay vì xóa |
 | Track type | Có `track_type_id`; registration rental phải có booking cùng track type | FE cần hiển thị rõ host/participating branches |
 | Contest↔Booking rental | Có `BookingSource.CONTEST` + `bookings.contest_id` (FK SET NULL); ContestBookingBridge áp `config.rental_policy` (miễn phí sân, cọc FULL/REDUCED/WAIVED, slot_window); WF-A `POST /bookings/contest-rental`; WF-B register kèm `rental_slot`; check-in xe tự sync registration CHECKED_IN; `GET /contests/:id/bookings` | Không còn gap ở backend core; FE theo spec 016 |
 | Khóa sân/cafe | Có `config.resource_locks`, `FULL_BRANCH`, `SELECTED_TRACKS`; backend chặn booking trùng contest | FE cần phản ánh đây là current feature, không phải backlog |
-| Entry fee | Có `entry_fee`, `entry_fee_amount`, `payment_status`; Provider mark paid/waive thủ công; `CONTEST_ENTRY` payment subject; chặn duplicate payment URL | Chưa nối VNPay IPN tự động xác nhận; refund tiền thật do payment flow xử lý |
+| Entry fee | Có `entry_fee`, `entry_fee_amount`, `payment_status`; Provider mark paid/waive thủ công; `CONTEST_ENTRY` payment subject; chặn duplicate payment URL; ghi audit khi tạo link thanh toán và khi thanh toán thất bại; tạo REFUND PENDING khi contest bị hủy; Provider/Admin có endpoint xác nhận hoàn tiền | Chưa nối VNPay IPN tự động xác nhận; refund tiền thật do payment flow xử lý (hoặc xác nhận thủ công) |
 | Revenue dashboard | Metrics có registration/match/leaderboard/global sync + revenue summary | Gross/paid/pending/waived/conversion đã có ở metrics |
 | Prize | Có thể lưu trong `contests.config.prizes` để hiển thị | Chưa có reward claim, payout, tự phát voucher/package |
 | Runtime format | Có `KNOCKOUT`, `TIME_TRIAL` và `QUALIFYING_FINAL` qua `runtime_format`; dùng `contest_matches` | Multi-driver heat nâng cao chưa phải UI/runtime chính |
-| Leaderboard | Có publish local leaderboard vào `contests.config.published_leaderboard`; contest -> `COMPLETED` | Public cần đọc snapshot này rõ ràng; global leaderboard đọc `race_records` sau sync |
-| Audit | Có `contest_audit_logs`, Provider đọc `/audit-logs` với pagination | FE cần tab Audit; chưa có incident/ban riêng cho contest |
+| Leaderboard | Có publish local leaderboard vào `contests.config.published_leaderboard`; contest -> `COMPLETED`; áp privacy mask theo `racing_profile.public_profile_enabled` / `leaderboard_opt_in` cho public view | Global leaderboard đọc `race_records` sau sync; sync audit ghi cả id từng race record |
+| Audit | Có `contest_audit_logs`, Provider đọc `/audit-logs` với pagination; `buildContestAuditSummary` trả về câu tiếng Việt đọc được | FE đã có tab Audit; chưa có incident/ban riêng cho contest (ban đã có) |
 | Ban/phá giải | Có `contest_bans` với scope `CONTEST`/`PROVIDER`, evidence, expires, lift | Chưa có contest-specific incident table; chưa có rule tự động chặn đăng ký lại |
 
 ---

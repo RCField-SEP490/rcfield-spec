@@ -1,6 +1,6 @@
 # BR-Contest
 
-**Last updated:** 2026-07-23  
+**Last updated:** 2026-07-27  
 **Status:** Aligned to current backend
 
 ---
@@ -41,6 +41,10 @@ NOTE: capacity check phải atomic (transaction + row-level lock) để tránh r
 **BR-CT-014 — Auto-close OPEN -> CLOSED khi hết registration window**  
 IF: contest `OPEN` và `registration_closes_at` đã qua  
 THEN: cron job tự chuyển sang `CLOSED`. Register endpoint vẫn reject theo thời gian là fallback.
+
+**BR-CT-015 — Auto-running CLOSED -> RUNNING khi đến giờ thi**  
+IF: contest `CLOSED`, `starts_at` đã qua, `ends_at` chưa qua và đã có ít nhất một `contest_match`  
+THEN: cron job tự chuyển sang `RUNNING`. Nếu chưa có match nào thì giữ `CLOSED` cho operator generate matches trước.
 
 ---
 
@@ -113,9 +117,21 @@ NOTE: chỉ cho phép một transaction `CONTEST_ENTRY` đang active (PENDING/PE
 IF: Provider/Staff cần duyệt phí thủ công  
 THEN: dùng `mark-entry-fee-paid` hoặc `waive-entry-fee`.
 
+**BR-CT-042a — Ghi audit khi khách tạo link thanh toán lệ phí**  
+IF: customer gọi `create-entry-fee-payment`  
+THEN: ghi audit `registration.entry_fee_payment_initiated` với `txn_ref`, `amount`, `gateway` để truy vết cả các link chưa thanh toán.
+
+**BR-CT-042b — Ghi audit khi thanh toán lệ phí thất bại**  
+IF: VNPay/IPN trả về thất bại cho transaction `CONTEST_ENTRY`  
+THEN: ghi audit `registration.entry_fee_payment_failed` với `response_code` để provider biết lý do.
+
 **BR-CT-043 — Contest cancel kích hoạt lifecycle cleanup**  
 IF: contest chuyển sang `CANCELLED`  
-THEN: hủy tất cả registrations chưa cancelled, đánh dấu paid registrations cần refund, chuyển matches sang `CANCELLED`, và ghi audit. Refund tiền thật vẫn do VNPay/IPN flow xử lý.
+THEN: hủy tất cả registrations chưa cancelled, đánh dấu paid registrations cần refund (`refund_needed=true`, tạo `PaymentTransaction` REFUND PENDING), chuyển matches sang `CANCELLED`, và ghi audit `registration.refund_requested`. Refund tiền thật vẫn do VNPay/IPN flow xử lý.
+
+**BR-CT-043a — Provider/Admin xác nhận hoàn tiền thủ công**  
+IF: contest đã bị hủy và có `PaymentTransaction` REFUND PENDING cho registration  
+THEN: Provider hoặc Admin gọi `POST /contest-registrations/:registrationId/refunds/:refundTxnId/confirm` để đánh dấu đã hoàn tiền (dù gateway chưa tự động), ghi audit `registration.refund_confirmed`.
 
 ---
 
@@ -162,6 +178,10 @@ THEN: backend lưu `config.published_leaderboard` và đưa contest sang `COMPLE
 **BR-CT-063 — Local leaderboard không phải global leaderboard**  
 IF: muốn bảng xếp hạng toàn hệ thống  
 THEN: đọc từ `race_records`, không đọc trực tiếp từ config contest.
+
+**BR-CT-063a — Published leaderboard tôn trọng privacy của VĐV**
+IF: customer xem bảng xếp hạng công bố của contest (không phải operator/admin/bản thân VĐV)  
+THEN: backend mask tên/driver_handle/title của những VĐV có `racing_profile.public_profile_enabled = false` hoặc `racing_profile.leaderboard_opt_in = false` thành "VĐV ẩn danh"; operator/admin/self vẫn thấy rõ.
 
 **BR-CT-064 — Metrics hiện đã có revenue summary cơ bản**  
 IF: FE gọi metrics  
