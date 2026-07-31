@@ -7,7 +7,7 @@
 
 ## Summary
 
-Kết nối Contest với Booking qua một **bridge service** (`ContestBookingBridge` trong `contest-rental.service.ts`): booking contest là booking thật (`source = CONTEST`, `bookings.contest_id`), đi qua core booking/payment/session engine hiện hữu — không tạo flow thanh toán hay state machine riêng. Chính sách giá contest (`contest.config.rental_policy`) được áp lúc tính tiền và freeze vào snapshot, nên refund cọc tự động đúng. Hai entry point: WF-A (`POST /bookings/contest-rental`, thuê xe riêng chưa đăng ký) và WF-B (register contest kèm `rental_slot`). Vận hành ngày thi được đồng bộ: check-in xe tự chuyển registration CONFIRMED → CHECKED_IN. Kèm format mới QUALIFYING_FINAL (Grand Prix): qualifying TIME_ATTACK → top N finalists → knockout bracket seeded.
+Kết nối Contest với Booking qua một **bridge service** (`ContestBookingBridge` trong `contest-rental.service.ts`): booking contest là booking thật (`source = CONTEST`, `bookings.contest_id`), đi qua core booking/payment/session engine hiện hữu — không tạo flow thanh toán hay state machine riêng. Chính sách giá contest (`contest.config.rental_policy`) được áp lúc tính tiền và freeze vào snapshot, nên refund cọc tự động đúng. Entry point chính ở FE là trong form đăng ký contest (`ContestRegistrationPanel`), nơi khách chọn nguồn xe (BYOC / booking đã có / thuê mới) và đăng ký kèm `rental_slot`. API trực tiếp `POST /bookings/contest-rental` vẫn tồn tại cho trường hợp thuê riêng (không đăng ký), nhưng không còn banner trên `CreateBookingPage`. Vận hành ngày thi được đồng bộ: check-in xe tự chuyển registration CONFIRMED → CHECKED_IN. Kèm format mới QUALIFYING_FINAL (Grand Prix): qualifying TIME_ATTACK → top N finalists → knockout bracket seeded.
 
 ---
 
@@ -110,8 +110,9 @@ rcfield-fe/
 │   ├── features/contests/
 │   │   ├── api/contest-booking.api.ts            ← API client contest↔booking
 │   │   └── hooks/use-contest-booking.ts          ← React Query hooks
-│   ├── pages/customer/CreateBookingPage.tsx      ← entry "Thuê xe thi đấu" (WF-A)
-│   ├── features/contests/components/...          ← stepper đăng ký 3 bước (WF-B)
+│   ├── pages/public/contest-detail/components/ContestRegistrationPanel.tsx
+│   │                                                   ← entry thuê xe cho contest (WF-A/WF-B) tích hợp trong form đăng ký
+│   ├── features/contests/components/...                ← stepper đăng ký 3 bước (WF-B)
 │   ├── pages/staff/...                           ← badge Contest + toast đồng bộ check-in
 │   └── features/contests/components/bracket/...  ← views tách 2 phase Qualifying/Final + input finalists
 ```

@@ -11,7 +11,7 @@
 
 ### User Story 1 — WF-A: Thuê xe riêng cho contest, chưa đăng ký (Priority: P1)
 
-Khách muốn thuê xe để chuẩn bị/tập luyện hoặc thi đấu cho một contest cụ thể, nhưng chưa (hoặc không) đăng ký giải ngay lúc đó. Khách chọn entry "Thuê xe thi đấu" trong CreateBookingPage, chọn contest, xe và khung giờ; hệ thống tạo booking thật với `source = CONTEST`, link `contest_id`, áp chính sách giá của contest (`rental_policy`), validate khung giờ nằm trong cửa sổ cho phép quanh giờ thi.
+Khách muốn thuê xe để chuẩn bị/tập luyện hoặc thi đấu cho một contest cụ thể, nhưng chưa (hoặc không) đăng ký giải ngay lúc đó. Khách chọn nguồn xe "Thuê xe tại quầy" trong form đăng ký contest (hoặc dùng API trực tiếp), chọn xe và khung giờ; hệ thống tạo booking thật với `source = CONTEST`, link `contest_id`, áp chính sách giá của contest (`rental_policy`), validate khung giờ nằm trong cửa sổ cho phép quanh giờ thi. Entry point chính ở FE là trong `ContestRegistrationPanel`, không còn banner trên `CreateBookingPage` để tránh gây nhầm lẫn khi quán không có contest.
 
 **Why this priority**: Đây là nền của mọi liên kết Contest↔Booking — booking contest là booking thật, đi qua core booking/payment engine, không phải flow giả.
 
@@ -118,7 +118,7 @@ Provider tổ chức giải theo format hai phase kiểu Grand Prix/F1: vòng QU
 - **FR-008**: Checkout trả xe của booking contest PHẢI ghi audit `booking.vehicle_checked_out`.
 - **FR-009**: Hệ thống PHẢI có `GET /contests/:contestId/bookings` cho provider/staff xem các booking liên kết contest.
 - **FR-010**: Hệ thống PHẢI hỗ trợ `runtime_format = QUALIFYING_FINAL`: phase QUALIFYING (TIME_ATTACK mỗi VĐV, xếp theo best lap) → phase FINAL knockout cho top N (`config.finalists`, default 4) với seeding 1vN, 2vN-1, ...; leaderboard dùng `KNOCKOUT_WINS`; route `POST /contests/:contestId/matches/generate-final-bracket`; kèm contest type GRAND_PRIX + template `grand_prix_qualifying_final` (seed migration).
-- **FR-011**: FE PHẢI có entry "Thuê xe thi đấu" trong CreateBookingPage và stepper đăng ký 3 bước (nguồn xe → xe/slot → xác nhận thanh toán gộp) dùng `contest-booking.api.ts` + hooks use-contest-booking.
+- **FR-011**: FE PHẢI có stepper đăng ký 3 bước (nguồn xe → xe/slot → xác nhận thanh toán gộp) trong `ContestRegistrationPanel`, dùng `contest-booking.api.ts` + hooks use-contest-booking. Thuê xe cho contest KHÔNG còn xuất hiện như banner trên `CreateBookingPage` để tránh lộn xộn luồng đặt lịch thường.
 - **FR-012**: FE staff PHẢI hiển thị badge Contest cho booking có `contest_id` và toast trạng thái đồng bộ check-in; FE provider PHẢI có input `finalists` và bracket views tách 2 phase Qualifying/Final.
 
 ### Key Entities

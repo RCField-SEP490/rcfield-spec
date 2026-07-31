@@ -1,6 +1,6 @@
 # Contest Module Specification
 
-**Last Updated:** 2026-07-23  
+**Last Updated:** 2026-07-31  
 **Status:** Backend-current truth + requested operating flow  
 **Related docs:** `docs/spec/business-rules/BR-contest.md`, `docs/architecture/03-contest.md`, `docs/developer/contest-delivery/05-contest-current-backend-vs-requested-flow.md`, `docs/spec/05-api-contracts.md`, `docs/spec/06-database.md`, `docs/spec/09-universal-racing-network.md`, `specs/016-contest-booking-rental/`
 
@@ -24,17 +24,17 @@ SESSION = ca chơi thực tế, inspection, checkout
 
 | Chủ đề | Backend hiện có | Còn thiếu / cần làm rõ |
 |---|---|---|
-| Thời gian contest | Có `registration_opens_at`, `registration_closes_at`, `starts_at`, `ends_at`; create validate đăng ký đóng trước hoặc bằng giờ bắt đầu | Cron tự chuyển `OPEN -> CLOSED` khi hết giờ đăng ký đã có; vẫn cần monitor job |
+| Thời gian contest | Có `registration_opens_at`, `registration_closes_at`, `starts_at`, `ends_at`; create validate đăng ký đóng trước hoặc bằng giờ bắt đầu | Cron tự chuyển `OPEN -> CLOSED` và `CLOSED -> RUNNING` (khi đã có match và đến giờ `starts_at`) đã có; vẫn cần monitor job |
 | Cafe tham gia | Có `contest_cafes`, `participating_cafe_ids`, chỉ cho cafe ACTIVE thuộc Provider | Update participating_cafe_ids khi đã có registration cần merge metadata thay vì xóa |
 | Track type | Có `track_type_id`; registration rental phải có booking cùng track type | FE cần hiển thị rõ host/participating branches |
 | Contest↔Booking rental | Có `BookingSource.CONTEST` + `bookings.contest_id` (FK SET NULL); ContestBookingBridge áp `config.rental_policy` (miễn phí sân, cọc FULL/REDUCED/WAIVED, slot_window); WF-A `POST /bookings/contest-rental`; WF-B register kèm `rental_slot`; check-in xe tự sync registration CHECKED_IN; `GET /contests/:id/bookings` | Không còn gap ở backend core; FE theo spec 016 |
 | Khóa sân/cafe | Có `config.resource_locks`, `FULL_BRANCH`, `SELECTED_TRACKS`; backend chặn booking trùng contest | FE cần phản ánh đây là current feature, không phải backlog |
-| Entry fee | Có `entry_fee`, `entry_fee_amount`, `payment_status`; Provider mark paid/waive thủ công; `CONTEST_ENTRY` payment subject; chặn duplicate payment URL | Chưa nối VNPay IPN tự động xác nhận; refund tiền thật do payment flow xử lý |
+| Entry fee | Có `entry_fee`, `entry_fee_amount`, `payment_status`; Provider mark paid/waive thủ công; `CONTEST_ENTRY` payment subject; chặn duplicate payment URL; ghi audit khi tạo link thanh toán và khi thanh toán thất bại; tạo REFUND PENDING khi contest bị hủy; Provider/Admin có endpoint xác nhận hoàn tiền | Chưa nối VNPay IPN tự động xác nhận; refund tiền thật do payment flow xử lý (hoặc xác nhận thủ công) |
 | Revenue dashboard | Metrics có registration/match/leaderboard/global sync + revenue summary | Gross/paid/pending/waived/conversion đã có ở metrics |
 | Prize | Có thể lưu trong `contests.config.prizes` để hiển thị | Chưa có reward claim, payout, tự phát voucher/package |
 | Runtime format | Có `KNOCKOUT`, `TIME_TRIAL` và `QUALIFYING_FINAL` qua `runtime_format`; dùng `contest_matches` | Multi-driver heat nâng cao chưa phải UI/runtime chính |
-| Leaderboard | Có publish local leaderboard vào `contests.config.published_leaderboard`; contest -> `COMPLETED` | Public cần đọc snapshot này rõ ràng; global leaderboard đọc `race_records` sau sync |
-| Audit | Có `contest_audit_logs`, Provider đọc `/audit-logs` với pagination | FE cần tab Audit; chưa có incident/ban riêng cho contest |
+| Leaderboard | Có publish local leaderboard vào `contests.config.published_leaderboard`; contest -> `COMPLETED`; áp privacy mask theo `racing_profile.public_profile_enabled` / `leaderboard_opt_in` cho public view | Global leaderboard đọc `race_records` sau sync; sync audit ghi cả id từng race record |
+| Audit | Có `contest_audit_logs`, Provider đọc `/audit-logs` với pagination; `buildContestAuditSummary` trả về câu tiếng Việt đọc được | FE đã có tab Audit; chưa có incident/ban riêng cho contest (ban đã có) |
 | Ban/phá giải | Có `contest_bans` với scope `CONTEST`/`PROVIDER`, evidence, expires, lift | Chưa có contest-specific incident table; chưa có rule tự động chặn đăng ký lại |
 
 ---
@@ -60,7 +60,7 @@ Validation hiện có:
 - `registration_opens_at < registration_closes_at`
 - `registration_closes_at <= starts_at`
 - cafe tham gia phải ACTIVE và thuộc Provider
-- `track_type_id` phải active
+- `track_type_id` phải active và phải thuộc danh sách track configs của **ít nhất một** chi nhánh tham gia (`contest_cafe.track_config_ids`). FE chỉ hiển thị các loại đường đua mà chi nhánh đã thực sự có.
 - contest type/format/template phải active và khớp nhau
 - không được tạo contest nếu resource lock trùng booking đang `PENDING` hoặc `CONFIRMED`
 
@@ -137,10 +137,8 @@ Customer chỉ đăng ký được khi:
 - capacity chưa đầy
 - user chưa có registration active trong contest
 - phải khớp `vehicle_rule.vehicle_policy` (`RENTAL_ONLY`, `BYOC_ONLY`, `MIXED`)
-- với `RENTAL`, có 2 cách:
-  1. Dùng booking đã có: booking thuộc customer, `CONFIRMED` (hoặc đang tạo từ rental slot), cùng `track_type_id`, thuộc cafe tham gia contest, giao với thời gian contest, có `vehicle_id` thuộc booking.
-  2. Thuê xe ngay trong form đăng ký qua `rental_slot`: backend tạo booking PENDING, customer thanh toán booking trước khi provider duyệt đăng ký.
-- với `BYOC`, khai báo tên xe/hãng/class và chờ provider duyệt.
+- với `RENTAL`, khách chọn khung giờ thuê ngay trong form đăng ký qua `rental_slot`; backend tạo booking `PENDING` và gộp phí thuê xe + lệ phí giải (nếu có) thành **một giao dịch VNPay duy nhất**.
+- với `BYOC`, khai báo tên xe/hãng/class, chờ Provider duyệt; khách có thể sửa khai báo khi registration còn `PENDING`.
 
 Endpoint:
 
@@ -148,17 +146,7 @@ Endpoint:
 POST /api/v1/contests/:contestId/register
 ```
 
-Payload RENTAL với booking đã có:
-
-```json
-{
-  "booking_id": "uuid",
-  "vehicle_id": "uuid",
-  "vehicle_source": "RENTAL"
-}
-```
-
-Payload RENTAL thuê xe ngay:
+Payload RENTAL:
 
 ```json
 {
@@ -173,6 +161,8 @@ Payload RENTAL thuê xe ngay:
 }
 ```
 
+Backend trả về thêm `booking { id, status, payment_expires_at, total_amount }`. Nếu contest có lệ phí, tổng tiền thanh toán đã gộp cả lệ phí; thành phần `CONTEST_ENTRY_FEE` được giữ `HELD` trong booking snapshot cho tới khi giao dịch thành công.
+
 Payload BYOC:
 
 ```json
@@ -185,7 +175,13 @@ Payload BYOC:
 }
 ```
 
-Đăng ký thành công tạo notification in-app và email xác nhận cho customer.
+Khách có thể sửa khai báo BYOC khi registration còn `PENDING`:
+
+```text
+PATCH /api/v1/contest-registrations/:registrationId/byoc-declaration
+```
+
+Chỉ chủ registration (customer) được gọi; sửa xong ghi audit `registration.byoc_declaration_updated`.
 
 ### Contest↔Booking Integration (đã implement 2026-07-23)
 
@@ -210,10 +206,13 @@ Booking thuê xe cho contest là **booking thật**, không phải booking giả
 - `slot_window`: slot thuê phải nằm trong `starts_at - before_min` → `ends_at + after_min` (default 60/60); vi phạm → lỗi `CONTEST_SLOT_OUTSIDE_WINDOW`.
 - Policy chỉ áp lúc pricing; giá thực thu freeze vào snapshot → refund cọc sau checkout tự đúng cho cả 3 chế độ.
 
-**Hai entry point:**
+**Luồng đăng ký kèm thuê xe (RENTAL):**
 
-- **WF-A — thuê xe riêng, chưa đăng ký:** `POST /api/v1/bookings/contest-rental`. Tạo booking `source=CONTEST` + `contest_id`, KHÔNG tạo registration. FE: entry "Thuê xe thi đấu" trong CreateBookingPage.
-- **WF-B — đăng ký kèm thuê xe:** register với `rental_slot` (payload ở trên) trả thêm `booking { id, status, payment_expires_at, total_amount }` trong response. FE: stepper 3 bước (nguồn xe → xe/slot → xác nhận thanh toán gộp). Provider chỉ approve khi booking đã CONFIRMED.
+- Register với `rental_slot` (payload ở trên) tạo booking `PENDING` ngay trong cùng request.
+- Nếu contest có lệ phí, backend thêm thành phần `CONTEST_ENTRY_FEE` vào booking snapshot; khách thanh toán **phí thuê xe + lệ phí giải trong một giao dịch VNPay**.
+- FE chỉ cần một màn hình đăng ký duy nhất: chọn nguồn xe (thuê/BYOC), điền thông tin, xác nhận tổng tiền, thanh toán. Không còn stepper 3 bước riêng biệt.
+- Provider chỉ approve registration khi booking đã `CONFIRMED`.
+- Nếu khách không thanh toán booking đúng hạn, backend tự hủy booking PENDING và cascade hủy registration liên kết (zombie cleanup).
 
 **Cleanup booking khi reject/cancel registration:**
 
@@ -269,25 +268,20 @@ POST /api/v1/contest-registrations/:registrationId/waive-entry-fee
 
 Hiện backend **đã có VNPay contest payment** qua `POST /api/v1/contest-registrations/:registrationId/create-entry-fee-payment`. Hệ thống tạo payment transaction với subject `CONTEST_ENTRY`, link `contest_registration_id`. VNPay return/IPN cập nhật `payment_status`.
 
-Khi dùng `rental_slot` để thuê xe ngay trong đăng ký, booking thuê xe được tạo ở trạng thái PENDING. Customer thanh toán booking riêng; provider chỉ duyệt đăng ký contest khi booking thuê xe đã `CONFIRMED`. Không dùng booking giả để thu entry fee.
-- audit `registration.entry_fee_paid`
-- refund policy khi contest bị cancel
+Khi dùng `rental_slot` để thuê xe ngay trong đăng ký:
 
-Revenue metrics hiện còn thiếu. `GET /api/v1/contests/:contestId/metrics` hiện có:
+- Booking thuê xe được tạo ở trạng thái `PENDING`.
+- Nếu contest có lệ phí, backend gộp lệ phí vào snapshot booking dưới dạng thành phần `CONTEST_ENTRY_FEE` với status `HELD`.
+- Khách thanh toán **một giao dịch VNPay duy nhất** bao gồm tiền thuê xe (slot/cọc) + lệ phí giải.
+- Khi booking thanh toán thành công, registration tự chuyển `paymentStatus` sang `MARKED_PAID` (nếu chưa waived).
+- Provider chỉ duyệt đăng ký khi booking đã `CONFIRMED`.
 
-- registration counts
-- match counts
-- leaderboard status
-- global sync status
+Khi dùng `BYOC`, khách dùng `create-entry-fee-payment` để thanh toán lệ phí riêng; hoặc Provider có thể mark paid/waive thủ công.
 
-Nếu FE cần dashboard doanh thu contest, backend cần bổ sung:
-
-- expected gross = active registrations * entry fee
-- paid gross = registrations `MARKED_PAID`
-- waived amount/count
-- pending amount/count
-- cancelled/refunded amount/count nếu có payment thật
-- payment conversion rate
+- audit `registration.entry_fee_payment_initiated` khi tạo link thanh toán.
+- audit `registration.entry_fee_payment_failed` khi thanh toán thất bại.
+- audit `registration.entry_fee_paid` khi thanh toán thành công.
+- refund policy khi contest bị cancel (tạo `PaymentTransaction` REFUND PENDING, Provider/Admin confirm thủ công qua `POST /contest-registrations/:registrationId/refunds/:refundTxnId/confirm`).
 
 ---
 
@@ -343,6 +337,8 @@ POST /api/v1/contest-registrations/:registrationId/check-in
 - Staff phải assigned đúng cafe đó
 - Provider owner có thể thao tác toàn bộ cafe trong contest
 - Check-in code được tạo ngẫu nhiên bảo mật và có unique constraint DB
+- **BYOC check-in:** staff phải xác nhận (`byocConfirmed=true`) và gửi ít nhất 2 ảnh + checklist bắt buộc (`body`, `power_system`, `wheels`). Nếu bất kỳ hạng mục nào `NOT_OK` hoặc thiếu ảnh/checklist → từ chối check-in. Khai báo BYOC phải đầy đủ (`vehicle_name`) trước khi check-in.
+- Transition `CONFIRMED -> CHECKED_IN` thực hiện bằng atomic UPDATE `WHERE status = CONFIRMED`, tránh race condition khi staff check-in và đồng bộ check-in xe cùng lúc.
 
 FE Customer không nên hiển thị quá nhiều trạng thái kỹ thuật. Dùng journey status rút gọn:
 
@@ -487,6 +483,8 @@ Guard hiện có:
 - publish bị chặn nếu còn match `DRAFT`, `READY`, `RUNNING` hoặc thiếu result
 - publish local leaderboard vào `contests.config.published_leaderboard`
 - contest chuyển `COMPLETED`
+- **publish leaderboard chỉ cho phép Provider owner; STAFF không được publish**
+- **không thể submit/correct result sau khi leaderboard đã publish** (409 `CONTEST_LEADERBOARD_PUBLISHED`)
 
 Public sau giải:
 
@@ -505,7 +503,11 @@ Audit:
 GET /api/v1/contests/:contestId/audit-logs?page=1&limit=20
 ```
 
-Response dạng paginated: `data`, `meta.total`, `meta.page`, `meta.limit`.
+Response dạng paginated: `data`, `meta.total`, `meta.page`, `meta.limit`. Mỗi row có thêm:
+
+- `actionSummary`: câu mô tả tiếng Việt ngắn gọn (vd: "Tạo đăng ký #a1b2c3d4 tham gia contest", "Sửa kết quả trận #e5f6...")
+- `actorName`: full name của actor khi có actor id; SYSTEM thì để null
+- raw `before_json`, `after_json`, `metadata`, `reason` vẫn giữ để audit chi tiết
 
 Metrics:
 
@@ -554,7 +556,7 @@ FE Provider cần có tab Audit để xem:
 Backend hiện xử lý được:
 
 - reject/cancel/disqualify registration có reason; disqualify đồng thời xóa participant khỏi matches chưa completed
-- cancel contest: hủy registrations, đánh dấu refund_needed cho paid, chuyển matches sang CANCELLED, ghi audit
+- cancel contest: hủy registrations, đánh dấu refund_needed cho paid, chuyển matches sang CANCELLED, ghi audit (chỉ Provider owner được cancel)
 - contest-specific ban list với scope `CONTEST`/`PROVIDER`, evidence, expires, lift
 - sửa result có audit
 - chặn Staff thao tác sai cafe
@@ -562,6 +564,11 @@ Backend hiện xử lý được:
 - chặn booking trùng contest lock
 - chặn duplicate entry-fee payment URL
 - atomic capacity check + unique check-in code
+- cleanup PENDING registration khi booking thuê xe hết hạn thanh toán (zombie cleanup)
+- QUALIFYING_FINAL format đúng (không bị ép về KNOCKOUT)
+- assign contest staff chỉ cho phép staff thuộc cafe của provider
+- ADMIN có thể đọc audit log contest để oversight
+- các thao tác tác động lớn chỉ Provider owner: cancel, update, publish leaderboard, generate final bracket, waive entry fee
 
 Backend chưa có:
 

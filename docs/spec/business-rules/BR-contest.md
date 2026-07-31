@@ -1,6 +1,6 @@
 # BR-Contest
 
-**Last updated:** 2026-07-23  
+**Last updated:** 2026-07-31  
 **Status:** Aligned to current backend
 
 ---
@@ -42,6 +42,10 @@ NOTE: capacity check phải atomic (transaction + row-level lock) để tránh r
 IF: contest `OPEN` và `registration_closes_at` đã qua  
 THEN: cron job tự chuyển sang `CLOSED`. Register endpoint vẫn reject theo thời gian là fallback.
 
+**BR-CT-015 — Auto-running CLOSED -> RUNNING khi đến giờ thi**  
+IF: contest `CLOSED`, `starts_at` đã qua, `ends_at` chưa qua và đã có ít nhất một `contest_match`  
+THEN: cron job tự chuyển sang `RUNNING`. Nếu chưa có match nào thì giữ `CLOSED` cho operator generate matches trước.
+
 ---
 
 ## 3. Cafe, Track Type, Resource Lock
@@ -50,9 +54,9 @@ THEN: cron job tự chuyển sang `CLOSED`. Register endpoint vẫn reject theo 
 IF: Provider tạo/update contest  
 THEN: mọi `participating_cafe_ids` phải active và thuộc Provider đó.
 
-**BR-CT-021 — Contest phải có active track type**  
+**BR-CT-021 — Contest phải dùng track type mà chi nhánh tham gia thực sự có**  
 IF: create/update contest  
-THEN: `track_type_id` phải valid.
+THEN: `track_type_id` phải valid và thuộc danh sách track configs của ít nhất một chi nhánh trong `participating_cafe_ids`; FE chỉ được hiển thị các loại đường đua mà chi nhánh đã có.
 
 **BR-CT-022 — Resource lock là current feature**  
 IF: contest có race window  
@@ -78,9 +82,13 @@ THEN: reject bằng conflict.
 IF: user đã có registration chưa `CANCELLED`  
 THEN: reject duplicate registration.
 
-**BR-CT-031 — RENTAL registration phải link booking thật**  
+**BR-CT-031 — RENTAL registration chỉ qua inline rental_slot**  
 IF: `vehicle_source = RENTAL`  
-THEN: phải có `booking_id`, `vehicle_id`, booking phải `CONFIRMED`, đúng owner, đúng cafe contest, đúng track type, overlap race window.
+THEN: phải gửi `rental_slot`; backend tạo booking `PENDING` với `source = CONTEST`, link `contest_id`; không còn luồng dùng booking có sẵn làm đầu vào đăng ký.
+
+**BR-CT-031a — Entry fee gộp vào booking thanh toán một lần**  
+IF: registration dùng `rental_slot` VÀ contest có `entry_fee > 0`  
+THEN: backend thêm thành phần `CONTEST_ENTRY_FEE` vào booking snapshot với status `HELD`; khách thanh toán phí thuê xe + lệ phí giải trong một giao dịch VNPay; khi booking `CONFIRMED`, registration tự chuyển `paymentStatus` hợp lệ để Provider approve.
 
 **BR-CT-032 — BYOC registration đã là current backend behavior**  
 IF: `vehicle_rule.vehicle_policy != RENTAL_ONLY`  
@@ -89,6 +97,10 @@ THEN: customer có thể register với `vehicle_source = BYOC` và khai báo xe
 **BR-CT-033 — BYOC hiện mới dừng ở declaration-based flow**  
 IF: customer register BYOC  
 THEN: backend đang lưu declaration trong `metadata`; chưa coi `customer_vehicle_id` là contract production-ready hoàn chỉnh.
+
+**BR-CT-033a — BYOC declaration chỉ sửa khi PENDING**  
+IF: customer gọi `PATCH /contest-registrations/:id/byoc-declaration`  
+THEN: chỉ chủ registration được sửa, chỉ khi registration đang `PENDING`, và phải ghi audit `registration.byoc_declaration_updated`.
 
 **BR-CT-034 — Payment status ban đầu phụ thuộc entry fee**  
 IF: `entry_fee > 0`  
@@ -113,9 +125,21 @@ NOTE: chỉ cho phép một transaction `CONTEST_ENTRY` đang active (PENDING/PE
 IF: Provider/Staff cần duyệt phí thủ công  
 THEN: dùng `mark-entry-fee-paid` hoặc `waive-entry-fee`.
 
+**BR-CT-042a — Ghi audit khi khách tạo link thanh toán lệ phí**  
+IF: customer gọi `create-entry-fee-payment`  
+THEN: ghi audit `registration.entry_fee_payment_initiated` với `txn_ref`, `amount`, `gateway` để truy vết cả các link chưa thanh toán.
+
+**BR-CT-042b — Ghi audit khi thanh toán lệ phí thất bại**  
+IF: VNPay/IPN trả về thất bại cho transaction `CONTEST_ENTRY`  
+THEN: ghi audit `registration.entry_fee_payment_failed` với `response_code` để provider biết lý do.
+
 **BR-CT-043 — Contest cancel kích hoạt lifecycle cleanup**  
 IF: contest chuyển sang `CANCELLED`  
-THEN: hủy tất cả registrations chưa cancelled, đánh dấu paid registrations cần refund, chuyển matches sang `CANCELLED`, và ghi audit. Refund tiền thật vẫn do VNPay/IPN flow xử lý.
+THEN: hủy tất cả registrations chưa cancelled, đánh dấu paid registrations cần refund (`refund_needed=true`, tạo `PaymentTransaction` REFUND PENDING), chuyển matches sang `CANCELLED`, và ghi audit `registration.refund_requested`. Refund tiền thật vẫn do VNPay/IPN flow xử lý.
+
+**BR-CT-043a — Provider/Admin xác nhận hoàn tiền thủ công**  
+IF: contest đã bị hủy và có `PaymentTransaction` REFUND PENDING cho registration  
+THEN: Provider hoặc Admin gọi `POST /contest-registrations/:registrationId/refunds/:refundTxnId/confirm` để đánh dấu đã hoàn tiền (dù gateway chưa tự động), ghi audit `registration.refund_confirmed`.
 
 ---
 
@@ -133,9 +157,17 @@ THEN: reject approve hoặc check-in.
 IF: registration chưa `CONFIRMED`  
 THEN: reject check-in.
 
+**BR-CT-052a — BYOC check-in yêu cầu kiểm tra xe thật**  
+IF: registration `vehicle_source = BYOC` và staff gọi check-in  
+THEN: khai báo phải có `vehicle_name`; staff phải gửi `byocConfirmed=true`, ít nhất 2 ảnh, và checklist đầy đủ các hạng mục bắt buộc (`body`, `power_system`, `wheels`). Nếu bất kỳ hạng mục nào `NOT_OK` hoặc thiếu ảnh/checklist → từ chối check-in. Transition `CONFIRMED -> CHECKED_IN` thực hiện bằng atomic UPDATE `WHERE status = CONFIRMED` để tránh race.
+
 **BR-CT-053 — Staff phải assigned đúng cafe**  
 IF: staff lookup/check-in/runtime action  
 THEN: staff phải là assigned staff của contest VÀ được assigned vào cafe nơi thao tác diễn ra (`checked_in_cafe_id` hoặc `match.cafe_id`). Provider owner được quyền trên toàn bộ cafe trong contest.
+
+**BR-CT-054 — Các thao tác tác động lớn chỉ thuộc Provider owner**  
+IF: cancel contest, update contest info, publish leaderboard, generate final bracket, hoặc waive entry fee  
+THEN: chỉ Provider owner của contest được phép; STAFF không được phép thực hiện để giảm rủi ro gian lận và đảm bảo có đầu mối chịu trách nhiệm pháp lý. Các thao tác vận hành ngày thi (check-in, generate matches, submit/correct results, approve/reject registrations, open/close registrations) vẫn cho phép STAFF đã được phân công.
 
 ---
 
@@ -158,6 +190,10 @@ THEN: backend lưu `config.published_leaderboard` và đưa contest sang `COMPLE
 **BR-CT-063 — Local leaderboard không phải global leaderboard**  
 IF: muốn bảng xếp hạng toàn hệ thống  
 THEN: đọc từ `race_records`, không đọc trực tiếp từ config contest.
+
+**BR-CT-063a — Published leaderboard tôn trọng privacy của VĐV**
+IF: customer xem bảng xếp hạng công bố của contest (không phải operator/admin/bản thân VĐV)  
+THEN: backend mask tên/driver_handle/title của những VĐV có `racing_profile.public_profile_enabled = false` hoặc `racing_profile.leaderboard_opt_in = false` thành "VĐV ẩn danh"; operator/admin/self vẫn thấy rõ.
 
 **BR-CT-064 — Metrics hiện đã có revenue summary cơ bản**  
 IF: FE gọi metrics  
@@ -192,8 +228,8 @@ THEN: đó vẫn là gap, chưa phải current contract.
 ## 9. Contest↔Booking Rental
 
 **BR-CT-080 — Contest rental booking là booking thật, không booking giả**  
-IF: customer thuê xe cho contest (WF-A `POST /bookings/contest-rental` hoặc WF-B register kèm `rental_slot`)  
-THEN: tạo booking với `source = CONTEST` và `bookings.contest_id` (FK → contests, `ON DELETE SET NULL`); booking đi qua core booking/payment/session engine (snapshot pricing, VNPay flow, expiry, checkout/refund) như booking thường. Không được tạo payment path hay state machine riêng cho contest.
+IF: customer thuê xe cho contest bằng `rental_slot` trong đăng ký  
+THEN: tạo booking với `source = CONTEST` và `bookings.contest_id` (FK → contests, `ON DELETE SET NULL`); booking đi qua core booking/payment/session engine (snapshot pricing, VNPay flow, expiry, checkout/refund) như booking thường. Không được tạo payment path hay state machine riêng cho contest. WF-A cũ (`POST /bookings/contest-rental`) không còn là entry chính.
 
 **BR-CT-081 — Slot thuê xe contest phải nằm trong slot_window**  
 IF: tạo contest rental booking  
@@ -209,9 +245,9 @@ THEN: registration tự chuyển `CHECKED_IN`, ghi audit `registration.checked_i
 IF: không có registration hợp lệ (chưa duyệt/đã hủy/đã check-in/không tồn tại)  
 THEN: check-in xe vẫn thành công bình thường, `synced=false`, không side effect vào contest. Chiều ngược lại (check-in contest thủ công → xe) không tự động. Checkout trả xe ghi audit `booking.vehicle_checked_out`.
 
-**BR-CT-084 — Cleanup booking theo trạng thái tiền khi reject/cancel registration**  
-IF: registration có booking contest kèm theo (WF-B) bị reject hoặc cancel  
-THEN: booking còn `PENDING` → bị cancel + audit `booking.contest_rental_cancelled`; booking đã thanh toán → giữ nguyên + audit `booking.contest_rental_retained` (không hủy tiền đã thu).
+**BR-CT-084 — Cleanup booking khi reject/cancel/timeout registration**  
+IF: registration có booking contest kèm theo bị reject, cancel, hoặc booking PENDING hết hạn thanh toán  
+THEN: booking còn `PENDING` → bị cancel + audit `booking.contest_rental_cancelled` và cascade hủy registration (zombie cleanup); booking đã thanh toán → giữ nguyên + audit `booking.contest_rental_retained` (không hủy tiền đã thu).
 
 **BR-CT-085 — Seeding QUALIFYING_FINAL**  
 IF: `runtime_format = QUALIFYING_FINAL`  
