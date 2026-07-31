@@ -406,6 +406,7 @@ UI Provider/Staff cần:
 - form nhập `finish_position`, `is_winner`, `score`, `result_note`
 - action `Advance winner`
 - correction flow có reason và `force_cascade` chỉ cho Provider
+- **drag-and-drop advance popup**: khi kéo thả người thi đấu sang vòng sâu hơn, hiển thị popup xác nhận to, responsive (`sm:max-w-3xl`, 95vw mobile), cho phép nhập nhanh đầy đủ kết quả: `finish_position`, `score`, `best_lap_seconds`, `total_time_seconds`, `status` (READY/STARTED/FINISHED/DNS/DNF/DQ), `result_note`, `is_winner`. Toggle "Cập nhật nhanh kết quả trận nguồn" để tránh ghi đè kết quả ngoài ý muốn. Nếu không nhập vị trí về đích, hệ thống tự điền từ cờ winner; status mặc định FINISHED.
 
 ### Time Trial
 
