@@ -1,6 +1,6 @@
 # BR-Contest
 
-**Last updated:** 2026-07-27  
+**Last updated:** 2026-07-31  
 **Status:** Aligned to current backend
 
 ---
@@ -54,9 +54,9 @@ THEN: cron job tự chuyển sang `RUNNING`. Nếu chưa có match nào thì gi�
 IF: Provider tạo/update contest  
 THEN: mọi `participating_cafe_ids` phải active và thuộc Provider đó.
 
-**BR-CT-021 — Contest phải có active track type**  
+**BR-CT-021 — Contest phải dùng track type mà chi nhánh tham gia thực sự có**  
 IF: create/update contest  
-THEN: `track_type_id` phải valid.
+THEN: `track_type_id` phải valid và thuộc danh sách track configs của ít nhất một chi nhánh trong `participating_cafe_ids`; FE chỉ được hiển thị các loại đường đua mà chi nhánh đã có.
 
 **BR-CT-022 — Resource lock là current feature**  
 IF: contest có race window  
@@ -82,9 +82,13 @@ THEN: reject bằng conflict.
 IF: user đã có registration chưa `CANCELLED`  
 THEN: reject duplicate registration.
 
-**BR-CT-031 — RENTAL registration phải link booking thật**  
+**BR-CT-031 — RENTAL registration chỉ qua inline rental_slot**  
 IF: `vehicle_source = RENTAL`  
-THEN: phải có `booking_id`, `vehicle_id`, booking phải `CONFIRMED`, đúng owner, đúng cafe contest, đúng track type, overlap race window.
+THEN: phải gửi `rental_slot`; backend tạo booking `PENDING` với `source = CONTEST`, link `contest_id`; không còn luồng dùng booking có sẵn làm đầu vào đăng ký.
+
+**BR-CT-031a — Entry fee gộp vào booking thanh toán một lần**  
+IF: registration dùng `rental_slot` VÀ contest có `entry_fee > 0`  
+THEN: backend thêm thành phần `CONTEST_ENTRY_FEE` vào booking snapshot với status `HELD`; khách thanh toán phí thuê xe + lệ phí giải trong một giao dịch VNPay; khi booking `CONFIRMED`, registration tự chuyển `paymentStatus` hợp lệ để Provider approve.
 
 **BR-CT-032 — BYOC registration đã là current backend behavior**  
 IF: `vehicle_rule.vehicle_policy != RENTAL_ONLY`  
@@ -93,6 +97,10 @@ THEN: customer có thể register với `vehicle_source = BYOC` và khai báo xe
 **BR-CT-033 — BYOC hiện mới dừng ở declaration-based flow**  
 IF: customer register BYOC  
 THEN: backend đang lưu declaration trong `metadata`; chưa coi `customer_vehicle_id` là contract production-ready hoàn chỉnh.
+
+**BR-CT-033a — BYOC declaration chỉ sửa khi PENDING**  
+IF: customer gọi `PATCH /contest-registrations/:id/byoc-declaration`  
+THEN: chỉ chủ registration được sửa, chỉ khi registration đang `PENDING`, và phải ghi audit `registration.byoc_declaration_updated`.
 
 **BR-CT-034 — Payment status ban đầu phụ thuộc entry fee**  
 IF: `entry_fee > 0`  
@@ -148,6 +156,10 @@ THEN: reject approve hoặc check-in.
 **BR-CT-052 — Check-in chỉ cho registration CONFIRMED**  
 IF: registration chưa `CONFIRMED`  
 THEN: reject check-in.
+
+**BR-CT-052a — BYOC check-in yêu cầu kiểm tra xe thật**  
+IF: registration `vehicle_source = BYOC` và staff gọi check-in  
+THEN: khai báo phải có `vehicle_name`; staff phải gửi `byocConfirmed=true`, ít nhất 2 ảnh, và checklist đầy đủ các hạng mục bắt buộc (`body`, `power_system`, `wheels`). Nếu bất kỳ hạng mục nào `NOT_OK` hoặc thiếu ảnh/checklist → từ chối check-in. Transition `CONFIRMED -> CHECKED_IN` thực hiện bằng atomic UPDATE `WHERE status = CONFIRMED` để tránh race.
 
 **BR-CT-053 — Staff phải assigned đúng cafe**  
 IF: staff lookup/check-in/runtime action  
@@ -216,8 +228,8 @@ THEN: đó vẫn là gap, chưa phải current contract.
 ## 9. Contest↔Booking Rental
 
 **BR-CT-080 — Contest rental booking là booking thật, không booking giả**  
-IF: customer thuê xe cho contest (WF-A `POST /bookings/contest-rental` hoặc WF-B register kèm `rental_slot`)  
-THEN: tạo booking với `source = CONTEST` và `bookings.contest_id` (FK → contests, `ON DELETE SET NULL`); booking đi qua core booking/payment/session engine (snapshot pricing, VNPay flow, expiry, checkout/refund) như booking thường. Không được tạo payment path hay state machine riêng cho contest.
+IF: customer thuê xe cho contest bằng `rental_slot` trong đăng ký  
+THEN: tạo booking với `source = CONTEST` và `bookings.contest_id` (FK → contests, `ON DELETE SET NULL`); booking đi qua core booking/payment/session engine (snapshot pricing, VNPay flow, expiry, checkout/refund) như booking thường. Không được tạo payment path hay state machine riêng cho contest. WF-A cũ (`POST /bookings/contest-rental`) không còn là entry chính.
 
 **BR-CT-081 — Slot thuê xe contest phải nằm trong slot_window**  
 IF: tạo contest rental booking  
@@ -233,9 +245,9 @@ THEN: registration tự chuyển `CHECKED_IN`, ghi audit `registration.checked_i
 IF: không có registration hợp lệ (chưa duyệt/đã hủy/đã check-in/không tồn tại)  
 THEN: check-in xe vẫn thành công bình thường, `synced=false`, không side effect vào contest. Chiều ngược lại (check-in contest thủ công → xe) không tự động. Checkout trả xe ghi audit `booking.vehicle_checked_out`.
 
-**BR-CT-084 — Cleanup booking theo trạng thái tiền khi reject/cancel registration**  
-IF: registration có booking contest kèm theo (WF-B) bị reject hoặc cancel  
-THEN: booking còn `PENDING` → bị cancel + audit `booking.contest_rental_cancelled`; booking đã thanh toán → giữ nguyên + audit `booking.contest_rental_retained` (không hủy tiền đã thu).
+**BR-CT-084 — Cleanup booking khi reject/cancel/timeout registration**  
+IF: registration có booking contest kèm theo bị reject, cancel, hoặc booking PENDING hết hạn thanh toán  
+THEN: booking còn `PENDING` → bị cancel + audit `booking.contest_rental_cancelled` và cascade hủy registration (zombie cleanup); booking đã thanh toán → giữ nguyên + audit `booking.contest_rental_retained` (không hủy tiền đã thu).
 
 **BR-CT-085 — Seeding QUALIFYING_FINAL**  
 IF: `runtime_format = QUALIFYING_FINAL`  
