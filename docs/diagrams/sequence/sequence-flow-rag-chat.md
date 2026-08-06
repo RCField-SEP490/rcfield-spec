@@ -33,7 +33,7 @@ Luồng đồng bộ của Widget embed và Full Page Chat — cùng dùng chung
 sequenceDiagram
     autonumber
     participant U as Customer
-    participant M as Frontend<br/>(React / ChatWidget)
+    participant M as Component<br/>(ChatWidget)
     participant B as API<br/>(Express / ChatController)
     participant NLU as NLU Service<br/>(Python / FastAPI)
     participant GEM as Gemini<br/>(Google GenAI)
@@ -104,7 +104,7 @@ Khác biệt chính so với non-streaming: quota check trước `flushHeaders`,
 sequenceDiagram
     autonumber
     participant U as Customer
-    participant M as Frontend<br/>(React / ChatWidget)
+    participant M as Component<br/>(ChatWidget)
     participant B as API<br/>(Express / ChatController)
     participant NLU as NLU Service<br/>(Python / FastAPI)
     participant GEM as Gemini<br/>(Google GenAI)
@@ -573,6 +573,80 @@ flowchart LR
     class FAST,TH,FW,REPHRASE happy
     class X1 error
     class AVAIL,GEM2 wait
+```
+
+---
+
+## 10. Class Diagram: RAG Chat
+
+```mermaid
+classDiagram
+    class ChatWidget {
+        +sendMessage()
+        +openStream()
+        +renderAnswer()
+    }
+    class CafeFullPageChatPage {
+        +loadCafeContext()
+        +sendMessage()
+    }
+    class ChannelSettingsPage {
+        +configureWidget()
+        +connectFacebook()
+    }
+    class ChatController {
+        +chat()
+        +chatStream()
+        +getWidgetConfig()
+    }
+    class FbWebhookController {
+        +verifyWebhook()
+        +handleWebhook()
+        +processEvent()
+    }
+    class ChatService {
+        +ragChat()
+        +ragChatStream()
+        +route()
+        +dispatchTool()
+    }
+    class KbService {
+        +searchChunks()
+        +embedQuery()
+    }
+    class RagCache {
+        +get()
+        +set()
+    }
+    class FbMessengerService {
+        +markSeen()
+        +typingOn()
+        +sendMessage()
+    }
+    class NluService {
+        +classifyIntent()
+    }
+    class GeminiClient {
+        +generateContent()
+        +streamGenerateContent()
+    }
+    class KbDocument
+    class KbChunk
+    class CafeChannel
+    class CafeWidgetConfig
+
+    ChatWidget --> ChatController
+    CafeFullPageChatPage --> ChatController
+    ChannelSettingsPage --> ChatController
+    FbWebhookController --> ChatService
+    ChatController --> ChatService
+    ChatService --> KbService
+    ChatService --> RagCache
+    ChatService --> NluService
+    ChatService --> GeminiClient
+    FbWebhookController --> FbMessengerService
+    KbDocument "1" --> "*" KbChunk
+    CafeChannel "1" --> "0..1" CafeWidgetConfig
 ```
 
 ---

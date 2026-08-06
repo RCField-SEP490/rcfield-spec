@@ -385,6 +385,81 @@ flowchart LR
 
 ---
 
+## 10. Class Diagram: Redis Usage
+
+```mermaid
+classDiagram
+    class LoginPage {
+        +submitLogin()
+    }
+    class CreateBookingPage {
+        +reserveSlot()
+        +submitBooking()
+    }
+    class ChannelSettingsPage {
+        +connectFacebook()
+    }
+    class FbWebhookController {
+        +handleWebhook()
+        +deduplicateMessage()
+    }
+    class AuthController {
+        +login()
+    }
+    class BookingController {
+        +create()
+    }
+    class FbChannelController {
+        +connect()
+        +callback()
+    }
+    class AuthService {
+        +loginWithPassword()
+        +recordFailedLogin()
+        +clearFailedLogin()
+    }
+    class BookingService {
+        +lockRentalVehicleSlot()
+        +incrementByocCapacity()
+        +releaseSlotLocks()
+    }
+    class FbChannelService {
+        +createOAuthNonce()
+        +verifyOAuthNonce()
+    }
+    class RedisClient {
+        +get()
+        +set()
+        +setNxEx()
+        +incrBy()
+        +decrBy()
+        +del()
+    }
+    class User
+    class Booking
+    class BookingVehicle
+    class CafeChannel
+    class FacebookMessage
+
+    LoginPage --> AuthController
+    CreateBookingPage --> BookingController
+    ChannelSettingsPage --> FbChannelController
+    AuthController --> AuthService
+    BookingController --> BookingService
+    FbChannelController --> FbChannelService
+    FbWebhookController --> RedisClient
+    AuthService --> RedisClient
+    BookingService --> RedisClient
+    FbChannelService --> RedisClient
+    AuthService --> User
+    BookingService --> Booking
+    Booking "1" --> "*" BookingVehicle
+    FbChannelService --> CafeChannel
+    FbWebhookController --> FacebookMessage
+```
+
+---
+
 ## Reference
 
 ### Source files analyzed (via codegraph)

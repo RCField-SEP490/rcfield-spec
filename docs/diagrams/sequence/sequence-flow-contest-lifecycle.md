@@ -131,23 +131,26 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant S as Staff/Provider
-    participant W as Staff App
-    participant API as API
-    participant DB as PostgreSQL
-    participant Audit as ContestAudit
+    actor S as Staff/Provider
+    participant W as Screen<br/>(StaffContestCheckInPage)
+    participant API as API<br/>(Express / ContestController)
+    participant CS as ContestService<br/>(contest/registrations.ts)
+    participant DB as Database<br/>(PostgreSQL)
+    participant Audit as ContestAudit<br/>(contest_audit_logs)
 
     S->>W: Nhập/quét check_in_code
-    W->>API: GET /contests/:id/registrations/lookup?check_in_code=...
-    API->>DB: Find registration in contest
+    W->>API: GET /api/v1/contests/:id/registrations/lookup?check_in_code=...
+    API->>CS: lookupRegistration()
+    CS->>DB: Find registration in contest
     API-->>W: Registration summary
     S->>W: Confirm check-in cafe
-    W->>API: POST /contest-registrations/:id/check-in
-    API->>DB: Validate registration CONFIRMED
-    API->>DB: Validate cafe in contest_cafes
-    API->>DB: If STAFF, validate assigned cafe
-    API->>DB: UPDATE registration CHECKED_IN
-    API->>Audit: registration.checked_in
+    W->>API: POST /api/v1/contest-registrations/:id/check-in
+    API->>CS: checkInRegistration()
+    CS->>DB: Validate registration CONFIRMED
+    CS->>DB: Validate cafe in contest_cafes
+    CS->>DB: If STAFF, validate assigned cafe
+    CS->>DB: UPDATE registration CHECKED_IN
+    CS->>Audit: registration.checked_in
     API-->>W: Checked-in registration
 ```
 
@@ -250,25 +253,98 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant A as Actor
-    participant API as API
-    participant DB as PostgreSQL
-    participant Audit as ContestAudit
+    actor A as Provider / Staff / Customer
+    participant FE as Screen<br/>(ProviderContestWorkspacePage or MyRegistrationSection)
+    participant API as API<br/>(Express / ContestController)
+    participant CS as ContestService<br/>(contest services)
+    participant DB as Database<br/>(PostgreSQL)
+    participant Audit as ContestAudit<br/>(contest_audit_logs)
 
     alt Cancel registration
-        A->>API: POST /contest-registrations/:id/cancel
-        API->>DB: Validate cancellable status/actor
-        API->>DB: UPDATE registration CANCELLED + reason
-        API->>Audit: registration.cancelled
-        API-->>A: Cancelled registration
+        A->>FE: Click cancel registration
+        FE->>API: POST /api/v1/contest-registrations/:id/cancel
+        API->>CS: cancelRegistration(actor, id, reason)
+        CS->>DB: Validate cancellable status/actor
+        CS->>DB: UPDATE registration CANCELLED + reason
+        CS->>Audit: registration.cancelled
+        API-->>FE: Cancelled registration
     else Cancel contest
-        A->>API: POST /contests/:id/cancel
-        API->>DB: Validate Provider owner and contest not COMPLETED
-        API->>DB: UPDATE contest CANCELLED
-        API->>DB: Optionally cancel active registrations
-        API->>Audit: contest.cancelled
-        API-->>A: Cancelled contest
+        A->>FE: Click cancel contest
+        FE->>API: POST /api/v1/contests/:id/cancel
+        API->>CS: cancelContest(providerId, contestId)
+        CS->>DB: Validate Provider owner and contest not COMPLETED
+        CS->>DB: UPDATE contest CANCELLED
+        CS->>DB: Optionally cancel active registrations
+        CS->>Audit: contest.cancelled
+        API-->>FE: Cancelled contest
     end
+```
+
+---
+
+## 11. Class Diagram: Contest Lifecycle
+
+```mermaid
+classDiagram
+    class ProviderContestFormPage {
+        +createContest()
+        +publishContest()
+    }
+    class PublicContestDetailPage {
+        +register()
+        +viewLeaderboard()
+    }
+    class ProviderContestWorkspacePage {
+        +reviewRegistrations()
+        +generateMatches()
+        +manageResults()
+        +publishLeaderboard()
+    }
+    class StaffContestRuntimePage {
+        +checkIn()
+        +submitResult()
+    }
+    class ContestController {
+        +create()
+        +publish()
+        +register()
+        +approveRegistration()
+        +generateMatches()
+        +submitResults()
+        +cancel()
+    }
+    class ContestService {
+        +createContest()
+        +registerForContest()
+        +transitionContest()
+    }
+    class ContestRuntimeService {
+        +lookupRegistration()
+        +generateMatches()
+        +submitResults()
+        +advanceWinner()
+        +publishLeaderboard()
+    }
+    class Contest
+    class ContestCafe
+    class ContestRegistration
+    class ContestMatch
+    class ContestMatchParticipant
+    class ContestStaffAssignment
+    class ContestAuditLog
+
+    ProviderContestFormPage --> ContestController
+    PublicContestDetailPage --> ContestController
+    ProviderContestWorkspacePage --> ContestController
+    StaffContestRuntimePage --> ContestController
+    ContestController --> ContestService
+    ContestController --> ContestRuntimeService
+    Contest "1" --> "*" ContestCafe
+    Contest "1" --> "*" ContestRegistration
+    Contest "1" --> "*" ContestMatch
+    ContestMatch "1" --> "*" ContestMatchParticipant
+    Contest "1" --> "*" ContestStaffAssignment
+    Contest "1" --> "*" ContestAuditLog
 ```
 
 ---

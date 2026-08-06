@@ -18,32 +18,36 @@ No cung mo ta check-in, match operations, result correction va leaderboard guard
 ```mermaid
 sequenceDiagram
     autonumber
-    participant C as Customer
-    participant FE as Customer UI
-    participant BAPI as Booking API
-    participant CAPI as Contest API
-    participant DB as PostgreSQL
-    participant Audit as ContestAudit
+    actor C as Customer
+    participant FE as Screen<br/>(PublicContestDetailPage)
+    participant BAPI as API<br/>(Express / BookingController)
+    participant BS as BookingService<br/>(booking.service.ts)
+    participant CAPI as API<br/>(Express / ContestController)
+    participant CS as ContestService<br/>(contest/registrations.ts)
+    participant DB as Database<br/>(PostgreSQL)
+    participant Audit as ContestAudit<br/>(contest_audit_logs)
 
     C->>FE: Chon contest RENTAL_ONLY hoac MIXED + RENTAL
-    FE->>BAPI: Tao booking rental binh thuong
-    BAPI->>DB: Validate slot / vehicle / payment
-    BAPI->>DB: Save booking + booking_vehicles
+    FE->>BAPI: POST /api/v1/bookings
+    BAPI->>BS: createBooking()
+    BS->>DB: Validate slot / vehicle / payment
+    BS->>DB: Save booking + booking_vehicles
     BAPI-->>FE: Booking CONFIRMED
 
     C->>FE: Dang ky contest voi booking_id + vehicle_id
-    FE->>CAPI: POST /contests/:id/register
-    CAPI->>DB: Load contest
-    CAPI->>DB: Validate vehicle_policy
-    CAPI->>DB: Load booking by booking_id + customer_id
-    CAPI->>DB: Validate booking CONFIRMED
-    CAPI->>DB: Validate booking cafe in contest_cafes
-    CAPI->>DB: Validate booking track_type = contest.track_type_id
-    CAPI->>DB: Validate booking time covers contest window
-    CAPI->>DB: Validate vehicle_id belongs to booking
-    CAPI->>DB: Validate vehicle not already active in same contest
-    CAPI->>DB: INSERT contest_registrations(status=PENDING, booking_id, vehicle_id)
-    CAPI->>Audit: registration.created
+    FE->>CAPI: POST /api/v1/contests/:id/register
+    CAPI->>CS: registerForContest(customerId, payload)
+    CS->>DB: Load contest
+    CS->>DB: Validate vehicle_policy
+    CS->>DB: Load booking by booking_id + customer_id
+    CS->>DB: Validate booking CONFIRMED
+    CS->>DB: Validate booking cafe in contest_cafes
+    CS->>DB: Validate booking track_type = contest.track_type_id
+    CS->>DB: Validate booking time covers contest window
+    CS->>DB: Validate vehicle_id belongs to booking
+    CS->>DB: Validate vehicle not already active in same contest
+    CS->>DB: INSERT contest_registrations(status=PENDING, booking_id, vehicle_id)
+    CS->>Audit: registration.created
     CAPI-->>FE: Registration PENDING
 ```
 
@@ -54,31 +58,35 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant C as Customer
-    participant FE as Customer UI
-    participant CAPI as Contest API
-    participant DB as PostgreSQL
-    participant Staff as Staff/Provider
-    participant Audit as ContestAudit
+    actor C as Customer
+    participant FE as Screen<br/>(PublicContestDetailPage)
+    participant CAPI as API<br/>(Express / ContestController)
+    participant CS as ContestService<br/>(contest/registrations.ts)
+    participant DB as Database<br/>(PostgreSQL)
+    participant Staff as Screen<br/>(ProviderContestWorkspacePage)
+    participant Audit as ContestAudit<br/>(contest_audit_logs)
 
     C->>FE: Tao hoac chon customer vehicle
-    FE->>CAPI: POST /me/customer-vehicles
-    CAPI->>DB: INSERT customer_vehicles(customer_id,...)
+    FE->>CAPI: POST /api/v1/me/customer-vehicles
+    CAPI->>CS: createCustomerVehicle()
+    CS->>DB: INSERT customer_vehicles(customer_id,...)
     CAPI-->>FE: customer_vehicle_id
 
     C->>FE: Dang ky contest bang BYOC
-    FE->>CAPI: POST /contests/:id/register
-    CAPI->>DB: Load contest + validate vehicle_policy
-    CAPI->>DB: Load customer_vehicle by customer_id
-    CAPI->>DB: Validate vehicle not already active in same contest
-    CAPI->>DB: INSERT contest_registrations(status=PENDING, customer_vehicle_id)
-    CAPI->>Audit: registration.created
+    FE->>CAPI: POST /api/v1/contests/:id/register
+    CAPI->>CS: registerForContest()
+    CS->>DB: Load contest + validate vehicle_policy
+    CS->>DB: Load customer_vehicle by customer_id
+    CS->>DB: Validate vehicle not already active in same contest
+    CS->>DB: INSERT contest_registrations(status=PENDING, customer_vehicle_id)
+    CS->>Audit: registration.created
     CAPI-->>FE: Registration PENDING
 
-    Staff->>CAPI: POST /contest-registrations/:id/approve
-    CAPI->>DB: Validate Provider owner hoac Staff assigned
-    CAPI->>DB: UPDATE contest_registrations -> CONFIRMED
-    CAPI->>Audit: registration.approved
+    Staff->>CAPI: POST /api/v1/contest-registrations/:id/approve
+    CAPI->>CS: approveRegistration()
+    CS->>DB: Validate Provider owner hoac Staff assigned
+    CS->>DB: UPDATE contest_registrations -> CONFIRMED
+    CS->>Audit: registration.approved
     CAPI-->>Staff: Registration CONFIRMED
 ```
 
@@ -89,17 +97,19 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Staff as Staff/Provider
-    participant CAPI as Contest API
-    participant DB as PostgreSQL
-    participant FE as Customer UI
-    participant C as Customer
-    participant Audit as ContestAudit
+    participant Staff as Screen<br/>(ProviderContestWorkspacePage)
+    participant CAPI as API<br/>(Express / ContestController)
+    participant CS as ContestService<br/>(contest/registrations.ts)
+    participant DB as Database<br/>(PostgreSQL)
+    participant FE as Screen<br/>(PublicContestDetailPage)
+    actor C as Customer
+    participant Audit as ContestAudit<br/>(contest_audit_logs)
 
-    Staff->>CAPI: POST /contest-registrations/:id/reject { reason }
-    CAPI->>DB: Validate operator permission
-    CAPI->>DB: UPDATE contest_registrations -> CANCELLED
-    CAPI->>Audit: registration.rejected
+    Staff->>CAPI: POST /api/v1/contest-registrations/:id/reject { reason }
+    CAPI->>CS: rejectRegistration()
+    CS->>DB: Validate operator permission
+    CS->>DB: UPDATE contest_registrations -> CANCELLED
+    CS->>Audit: registration.rejected
     CAPI-->>FE: registration cancelled + rejection_reason
 
     FE-->>C: Hien ly do reject
@@ -117,26 +127,29 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant O as Provider/Staff
-    participant FE as Operator UI
-    participant CAPI as Contest API
-    participant DB as PostgreSQL
-    participant Audit as ContestAudit
+    actor O as Provider/Staff
+    participant FE as Screen<br/>(StaffContestCheckInPage)
+    participant CAPI as API<br/>(Express / ContestController)
+    participant CS as ContestService<br/>(contest/registrations.ts)
+    participant DB as Database<br/>(PostgreSQL)
+    participant Audit as ContestAudit<br/>(contest_audit_logs)
 
     O->>FE: Nhap check_in_code
-    FE->>CAPI: GET /contests/:id/registrations/lookup
-    CAPI->>DB: Load registration
+    FE->>CAPI: GET /api/v1/contests/:id/registrations/lookup
+    CAPI->>CS: lookupRegistration()
+    CS->>DB: Load registration
     CAPI-->>FE: Registration summary
 
     O->>FE: Xac nhan cafe check-in
-    FE->>CAPI: POST /contest-registrations/:id/check-in
-    CAPI->>DB: Validate registration CONFIRMED
-    CAPI->>DB: Validate cafe in contest_cafes
+    FE->>CAPI: POST /api/v1/contest-registrations/:id/check-in
+    CAPI->>CS: checkInRegistration()
+    CS->>DB: Validate registration CONFIRMED
+    CS->>DB: Validate cafe in contest_cafes
     alt Actor = STAFF
-        CAPI->>DB: Validate staff_cafe_assignments includes cafe_id
+        CS->>DB: Validate staff_cafe_assignments includes cafe_id
     end
-    CAPI->>DB: UPDATE registration CHECKED_IN + checked_in_cafe_id
-    CAPI->>Audit: registration.checked_in
+    CS->>DB: UPDATE registration CHECKED_IN + checked_in_cafe_id
+    CS->>Audit: registration.checked_in
     CAPI-->>FE: CHECKED_IN
 ```
 
@@ -147,24 +160,26 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant P as Provider
-    participant FE as Provider UI
-    participant CAPI as Contest API
-    participant DB as PostgreSQL
-    participant Audit as ContestAudit
+    actor P as Provider
+    participant FE as Screen<br/>(ProviderContestWorkspacePage)
+    participant CAPI as API<br/>(Express / ContestController)
+    participant Runtime as ContestRuntimeService<br/>(contest-runtime.service.ts)
+    participant DB as Database<br/>(PostgreSQL)
+    participant Audit as ContestAudit<br/>(contest_audit_logs)
 
     P->>FE: Chon registrations + cafe + track config
-    FE->>CAPI: POST /contests/:id/matches/generate
-    CAPI->>DB: Validate contest state
-    CAPI->>DB: Validate registrations CONFIRMED/CHECKED_IN
-    CAPI->>DB: INSERT contest_matches(cafe_id, track_config_id)
-    CAPI->>DB: INSERT contest_match_participants
-    CAPI->>DB: Scan bye matches
+    FE->>CAPI: POST /api/v1/contests/:id/matches/generate
+    CAPI->>Runtime: generateMatches()
+    Runtime->>DB: Validate contest state
+    Runtime->>DB: Validate registrations CONFIRMED/CHECKED_IN
+    Runtime->>DB: INSERT contest_matches(cafe_id, track_config_id)
+    Runtime->>DB: INSERT contest_match_participants
+    Runtime->>DB: Scan bye matches
     opt Match chi co 1 participant
         CAPI->>DB: Auto mark source match COMPLETED
         CAPI->>DB: Auto advance participant sang next_match_id
     end
-    CAPI->>Audit: match.schedule_generated
+    Runtime->>Audit: match.schedule_generated
     CAPI-->>FE: Match list
 ```
 
@@ -175,27 +190,30 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant O as Provider/Staff
-    participant FE as Operator UI
-    participant CAPI as Contest API
-    participant DB as PostgreSQL
-    participant Audit as ContestAudit
+    actor O as Provider/Staff
+    participant FE as Screen<br/>(ContestMatchDetailPanel)
+    participant CAPI as API<br/>(Express / ContestController)
+    participant Runtime as ContestRuntimeService<br/>(contest-runtime.service.ts)
+    participant DB as Database<br/>(PostgreSQL)
+    participant Audit as ContestAudit<br/>(contest_audit_logs)
 
     O->>FE: Nhap ket qua
-    FE->>CAPI: POST /contest-matches/:id/results
-    CAPI->>DB: Load match + participants
+    FE->>CAPI: POST /api/v1/contest-matches/:id/results
+    CAPI->>Runtime: submitResults()
+    Runtime->>DB: Load match + participants
     alt Actor = STAFF
         CAPI->>DB: Validate staff assigned to contest_matches.cafe_id
     end
     CAPI->>DB: Update participant result fields
     CAPI->>DB: Update match status COMPLETED
-    CAPI->>Audit: match.result_submitted
+    Runtime->>Audit: match.result_submitted
     CAPI-->>FE: Match completed
 
     opt Co next_match_id
-        FE->>CAPI: POST /contest-matches/:id/advance
-        CAPI->>DB: Insert advancing participants to next match
-        CAPI->>Audit: match.advanced
+        FE->>CAPI: POST /api/v1/contest-matches/:id/advance
+        CAPI->>Runtime: advanceWinner()
+        Runtime->>DB: Insert advancing participants to next match
+        Runtime->>Audit: match.advanced
         CAPI-->>FE: Next match updated
     end
 ```
@@ -207,15 +225,17 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant O as Provider/Staff
-    participant FE as Operator UI
-    participant CAPI as Contest API
-    participant DB as PostgreSQL
-    participant Audit as ContestAudit
+    actor O as Provider/Staff
+    participant FE as Screen<br/>(ContestMatchDetailPanel)
+    participant CAPI as API<br/>(Express / ContestController)
+    participant Runtime as ContestRuntimeService<br/>(contest-runtime.service.ts)
+    participant DB as Database<br/>(PostgreSQL)
+    participant Audit as ContestAudit<br/>(contest_audit_logs)
 
     O->>FE: Mo correction dialog
-    FE->>CAPI: POST /contest-matches/:id/results/correct
-    CAPI->>DB: Load match + descendants
+    FE->>CAPI: POST /api/v1/contest-matches/:id/results/correct
+    CAPI->>Runtime: correctResults()
+    Runtime->>DB: Load match + descendants
     alt Actor = STAFF
         CAPI->>DB: Validate staff assigned to match cafe
         CAPI->>DB: Check downstream not COMPLETED
@@ -226,7 +246,7 @@ sequenceDiagram
     end
     CAPI->>DB: Rewrite participant results
     CAPI->>DB: Update match/result summary
-    CAPI->>Audit: match.result_corrected
+    Runtime->>Audit: match.result_corrected
     CAPI-->>FE: Corrected match
 ```
 
@@ -237,21 +257,23 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant P as Provider
-    participant FE as Provider UI
-    participant CAPI as Contest API
-    participant DB as PostgreSQL
-    participant Audit as ContestAudit
+    actor P as Provider
+    participant FE as Screen<br/>(ContestLeaderboardPanel)
+    participant CAPI as API<br/>(Express / ContestController)
+    participant Runtime as ContestRuntimeService<br/>(contest-runtime.service.ts)
+    participant DB as Database<br/>(PostgreSQL)
+    participant Audit as ContestAudit<br/>(contest_audit_logs)
 
     P->>FE: Publish leaderboard
-    FE->>CAPI: POST /contests/:id/leaderboard/publish
-    CAPI->>DB: Count contest_matches with status not in (COMPLETED, CANCELLED)
+    FE->>CAPI: POST /api/v1/contests/:id/leaderboard/publish
+    CAPI->>Runtime: publishLeaderboard()
+    Runtime->>DB: Count contest_matches with status not in (COMPLETED, CANCELLED)
     alt Van con unfinished matches
         CAPI-->>FE: 409 CONTEST_LEADERBOARD_MATCHES_UNFINISHED
     else All terminal
-        CAPI->>DB: Build standings from final completed matches
-        CAPI->>DB: Save leaderboard snapshot to contests.config
-        CAPI->>Audit: leaderboard.published
+        Runtime->>DB: Build standings from final completed matches
+        Runtime->>DB: Save leaderboard snapshot to contests.config
+        Runtime->>Audit: leaderboard.published
         CAPI-->>FE: Standings published
     end
 ```
@@ -265,3 +287,80 @@ sequenceDiagram
 - Staff permission cho check-in va match ops phai localize theo cafe.
 - Correction phai de lai audit trail day du.
 - Metrics va audit logs la phan bat buoc de theo doi event day operations.
+
+---
+
+## 10. Class Diagram: Contest Vehicle Operations
+
+```mermaid
+classDiagram
+    class PublicContestDetailPage {
+        +registerRental()
+        +registerByoc()
+        +showMyRegistration()
+    }
+    class StaffContestCheckInPage {
+        +lookupCode()
+        +checkInRegistration()
+    }
+    class ProviderContestWorkspacePage {
+        +approveRegistration()
+        +generateMatches()
+        +publishLeaderboard()
+    }
+    class ContestMatchDetailPanel {
+        +submitResults()
+        +correctResults()
+        +advanceWinner()
+    }
+    class BookingController {
+        +create()
+    }
+    class ContestController {
+        +register()
+        +approveRegistration()
+        +checkInRegistration()
+        +generateMatches()
+        +submitResults()
+        +publishLeaderboard()
+    }
+    class BookingService
+    class ContestRegistrationService {
+        +registerForContest()
+        +approveRegistration()
+        +rejectRegistration()
+        +checkInRegistration()
+    }
+    class ContestRuntimeService {
+        +generateMatches()
+        +submitResults()
+        +correctResults()
+        +publishLeaderboard()
+    }
+    class Contest
+    class ContestCafe
+    class ContestRegistration
+    class ContestMatch
+    class ContestMatchParticipant
+    class ContestAuditLog
+    class Booking
+    class BookingVehicle
+    class CustomerVehicle
+
+    PublicContestDetailPage --> BookingController
+    PublicContestDetailPage --> ContestController
+    StaffContestCheckInPage --> ContestController
+    ProviderContestWorkspacePage --> ContestController
+    ContestMatchDetailPanel --> ContestController
+    BookingController --> BookingService
+    ContestController --> ContestRegistrationService
+    ContestController --> ContestRuntimeService
+    Contest "1" --> "*" ContestCafe
+    Contest "1" --> "*" ContestRegistration
+    Contest "1" --> "*" ContestMatch
+    ContestMatch "1" --> "*" ContestMatchParticipant
+    ContestRegistration "*" --> "0..1" Booking
+    Booking "1" --> "*" BookingVehicle
+    ContestRegistration "*" --> "0..1" CustomerVehicle
+    Contest "1" --> "*" ContestAuditLog
+```

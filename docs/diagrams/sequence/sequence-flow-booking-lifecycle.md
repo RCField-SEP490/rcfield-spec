@@ -41,7 +41,7 @@ Customer gọi `POST /api/v1/bookings`. Service thực hiện toàn bộ validat
 sequenceDiagram
     autonumber
     participant U as Customer
-    participant M as Frontend<br/>(React / BookingPage)
+    participant M as Screen<br/>(BookingPage)
     participant B as API<br/>(Express / BookingController)
     participant SM as StateMachine<br/>(booking.service)
     participant DB as PostgreSQL
@@ -145,7 +145,7 @@ Customer nhấn "Thanh toán". Service tính lại tổng từ các child rows, 
 sequenceDiagram
     autonumber
     participant U as Customer
-    participant M as Frontend<br/>(React / PaymentPage)
+    participant M as Screen<br/>(PaymentPage)
     participant B as API<br/>(Express / BookingController)
     participant PE as PaymentEngine<br/>(payment.service)
     participant V as VNPay
@@ -531,6 +531,81 @@ flowchart LR
     class D2,D4 happy
     class D3 error
     class D1 wait
+```
+
+---
+
+## 10. Class Diagram: Booking Lifecycle
+
+```mermaid
+classDiagram
+    class CafeDetailPage {
+        +openBooking()
+        +selectSlot()
+    }
+    class CreateBookingPage {
+        +submitBooking()
+        +goToCheckout()
+    }
+    class PaymentResultPage {
+        +readVnpayReturn()
+        +showStatus()
+    }
+    class CustomerBookingsPage {
+        +cancelBooking()
+        +viewDetail()
+    }
+    class BookingController {
+        +create()
+        +checkout()
+        +cancel()
+        +listMine()
+    }
+    class VnpayController {
+        +createPaymentUrl()
+        +handleIpn()
+        +handleReturn()
+    }
+    class BookingService {
+        +createBooking()
+        +transition()
+        +cancelBooking()
+        +handleTimeouts()
+    }
+    class PaymentService {
+        +freezeSnapshot()
+        +createCheckout()
+        +confirmPayment()
+        +refund()
+    }
+    class VnpayService {
+        +buildPaymentUrl()
+        +verifySecureHash()
+    }
+    class Booking
+    class BookingParticipant
+    class BookingVehicle
+    class FnbOrder
+    class PaymentTransaction
+    class PaymentComponent
+    class CustomerPackage
+    class Cafe
+
+    CafeDetailPage --> CreateBookingPage
+    CreateBookingPage --> BookingController
+    PaymentResultPage --> VnpayController
+    CustomerBookingsPage --> BookingController
+    BookingController --> BookingService
+    BookingController --> PaymentService
+    VnpayController --> VnpayService
+    VnpayController --> PaymentService
+    Booking "1" --> "*" BookingParticipant
+    Booking "1" --> "*" BookingVehicle
+    Booking "1" --> "*" FnbOrder
+    Booking "1" --> "*" PaymentComponent
+    PaymentTransaction "*" --> "1" Booking
+    CustomerPackage "0..1" --> "*" Booking
+    Cafe "1" --> "*" Booking
 ```
 
 ---

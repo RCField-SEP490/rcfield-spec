@@ -41,7 +41,7 @@ The provider fills in a public registration form. The account is created with `R
 sequenceDiagram
     autonumber
     participant P as Provider
-    participant M as Frontend<br/>(React / ProviderRegisterPage)
+    participant M as Screen<br/>(ProviderRegisterPage)
     participant B as API<br/>(Express + TS / ProviderOnboardingController)
     participant DB as PostgreSQL
 
@@ -74,7 +74,7 @@ Admin reviews pending registrations from `AdminProvidersPage`. Approving trigger
 sequenceDiagram
     autonumber
     participant A as Admin
-    participant MA as Frontend<br/>(React / AdminProvidersPage)
+    participant MA as Screen<br/>(AdminProvidersPage)
     participant B as API<br/>(Express + TS / ProviderOnboardingController)
     participant DB as PostgreSQL
     participant N as NotificationService
@@ -169,7 +169,7 @@ When a provider's trial is nearing expiry (or already in GRACE_PERIOD / EXPIRED)
 sequenceDiagram
     autonumber
     participant P as Provider
-    participant MP as Frontend<br/>(React / ProviderSubscriptionsPage)
+    participant MP as Screen<br/>(ProviderSubscriptionsPage)
     participant B as API<br/>(Express + TS / PaymentRequestController)
     participant DB as PostgreSQL
 
@@ -209,7 +209,7 @@ Admin reviews bank-transfer evidence on `AdminPaymentRequestsPage`. Confirming a
 sequenceDiagram
     autonumber
     participant A as Admin
-    participant MA as Frontend<br/>(React / AdminPaymentRequestsPage)
+    participant MA as Screen<br/>(AdminPaymentRequestsPage)
     participant B as API<br/>(Express + TS / PaymentRequestController)
     participant DB as PostgreSQL
     participant N as NotificationService
@@ -259,7 +259,7 @@ Admin can suspend an active provider for policy violations. The `requireActivePr
 sequenceDiagram
     autonumber
     participant A as Admin
-    participant MA as Frontend<br/>(React / AdminProvidersPage)
+    participant MA as Screen<br/>(AdminProvidersPage)
     participant B as API<br/>(Express + TS / ProviderOnboardingController)
     participant DB as PostgreSQL
     participant N as NotificationService
@@ -337,7 +337,7 @@ The `NotificationBell` component in the Provider shell header polls for unread n
 sequenceDiagram
     autonumber
     participant P as Provider
-    participant MB as Frontend<br/>(React / NotificationBell)
+    participant MB as Component<br/>(NotificationBell)
     participant B as API<br/>(Express + TS / NotificationController)
     participant DB as PostgreSQL
 
@@ -523,6 +523,79 @@ flowchart LR
     class AR3,PF3,TL4,QG1,QG2,QG3 happy
     class AR4,PF4,TL2 error
     class TL1,TL3,PF1,NB1,PR2 wait
+```
+
+---
+
+## 10. Class Diagram: Provider Onboarding and Subscription
+
+```mermaid
+classDiagram
+    class ProviderRegisterPage {
+        +submitRegistration()
+    }
+    class AdminProvidersPage {
+        +approveProvider()
+        +rejectProvider()
+        +suspendProvider()
+    }
+    class ProviderSubscriptionsPage {
+        +loadSubscription()
+        +submitPaymentRequest()
+    }
+    class AdminPaymentRequestsPage {
+        +confirmPayment()
+        +rejectPayment()
+    }
+    class NotificationBell {
+        +pollUnread()
+        +markRead()
+    }
+    class ProviderOnboardingController {
+        +registerProvider()
+        +approveProvider()
+        +rejectProvider()
+        +suspendProvider()
+        +unsuspendProvider()
+    }
+    class PaymentRequestController {
+        +getSubscription()
+        +createPaymentRequest()
+        +confirmPaymentRequest()
+        +rejectPaymentRequest()
+    }
+    class SubscriptionService {
+        +transition()
+        +checkBranchQuota()
+        +checkChannelQuota()
+        +incrementAIQuota()
+    }
+    class NotificationService {
+        +createNotification()
+    }
+    class User
+    class ProviderProfile
+    class ProviderSubscription
+    class SubscriptionPlan
+    class PaymentRequest
+    class Notification
+    class Cafe
+
+    ProviderRegisterPage --> ProviderOnboardingController
+    AdminProvidersPage --> ProviderOnboardingController
+    ProviderSubscriptionsPage --> PaymentRequestController
+    AdminPaymentRequestsPage --> PaymentRequestController
+    NotificationBell --> NotificationService
+    ProviderOnboardingController --> SubscriptionService
+    ProviderOnboardingController --> NotificationService
+    PaymentRequestController --> SubscriptionService
+    PaymentRequestController --> NotificationService
+    User "1" --> "0..1" ProviderProfile
+    ProviderProfile "1" --> "*" ProviderSubscription
+    SubscriptionPlan "1" --> "*" ProviderSubscription
+    ProviderProfile "1" --> "*" PaymentRequest
+    ProviderProfile "1" --> "*" Cafe
+    ProviderProfile "1" --> "*" Notification
 ```
 
 ---
