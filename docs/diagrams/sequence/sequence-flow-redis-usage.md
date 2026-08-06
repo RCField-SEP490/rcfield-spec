@@ -19,7 +19,7 @@ Mô tả toàn bộ các điểm Redis được sử dụng trong RCField backen
 | Key — FB dedup | `facebook:processed:{pageId}:{mid}` | TTL = 300s, SET NX |
 | Endpoint | `POST /api/v1/auth/login` | `auth.controller` → `authService.loginWithPassword` |
 | Endpoint | `POST /api/v1/bookings` | `booking.controller` → `createBooking` |
-| Endpoint | `GET /api/v1/channels/facebook/connect` | `fb-channel.service.buildAuthUrl` |
+| Endpoint | `GET /api/v1/channels/facebook/auth-url` | `fb-channel.service.buildAuthUrl` |
 | Endpoint | `GET /api/v1/channels/facebook/callback` | `fb-channel.service.handleCallback` |
 | Endpoint | `POST /api/v1/webhook/facebook` | `fb-webhook.controller.handleWebhook` |
 | Brute-force max | `BRUTE_FORCE_MAX = 5` lần sai | Sau đó trả 403 ACCOUNT_LOCKED |
@@ -162,7 +162,7 @@ sequenceDiagram
     participant R as Redis
     participant FB as Facebook<br/>(OAuth)
 
-    P->>B: GET /api/v1/channels/facebook/connect
+    P->>B: GET /api/v1/channels/facebook/auth-url
     Note over B: buildAuthUrl() — tạo nonce = randomBytes(16)
 
     B->>R: SET oauth:fb:nonce:{nonce} { cafeId, userId, returnPath } EX NONCE_TTL

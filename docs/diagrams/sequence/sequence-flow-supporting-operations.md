@@ -161,7 +161,7 @@ sequenceDiagram
     actor P as Provider
     actor S as Staff
     participant StaffMgmt as Screen<br/>(ProviderStaffPage / ProviderStaffDetailPage)
-    participant Activate as Screen<br/>(StaffActivatePage)
+    participant ActScreen as Screen<br/>(StaffActivatePage)
     participant StaffOps as Screen<br/>(StaffMaintenancePage / StaffFnbOrdersPage / StaffPackagesPage)
     participant Bell as Component<br/>(NotificationBell)
     participant API as API<br/>(Express / StaffInviteController + StaffController + NotificationController + UploadController)
@@ -175,10 +175,10 @@ sequenceDiagram
         StaffMgmt->>API: POST /api/v1/provider/staff/invites
         API->>StaffSvc: create invite token
         StaffSvc->>DB: INSERT staff_invite_tokens
-        S->>Activate: Open invite link
-        Activate->>API: GET /api/v1/auth/staff-invite/validate
+        S->>ActScreen: Open invite link
+        ActScreen->>API: GET /api/v1/auth/staff-invite/validate
         API->>DB: SELECT valid token
-        Activate->>API: POST /api/v1/auth/staff-invite/activate
+        ActScreen->>API: POST /api/v1/auth/staff-invite/activate
         API->>DB: INSERT/UPDATE staff user assignment
     else Staff utility operations
         S->>StaffOps: Search customer package / update F&B / maintenance

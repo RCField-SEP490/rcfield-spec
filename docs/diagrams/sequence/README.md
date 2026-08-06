@@ -41,6 +41,15 @@ sequenceDiagram
     FE-->>U: Navigate by role
 ```
 
+### Sequence Notation
+
+- `participant X as Screen<br/>(CreateBookingPage)` = man hinh/component that hien tren FE.
+- `API->>API: validate request body / auth role` = self-call, mui ten vong ve chinh no. Dung de bieu thi xu ly noi bo trong cung controller/service nhu validate, map DTO, compute amount, build response.
+- `activate X` / `deactivate X` = thoi gian object dang xu ly request.
+- `alt/else/end` = validate branch hoặc business error path.
+- `loop` = lap qua danh sach row/item/event.
+- `opt` = buoc co the co hoac khong.
+
 Moi file sequence chinh nen co them `classDiagram` ngan cho cac class/entity lien quan den chuc nang do.
 Doc cung business rules va architecture docs truoc khi implement endpoint hoac test
 tich hop.

@@ -24,18 +24,41 @@ sequenceDiagram
 
     U->>Home: Open public site
     Home->>PopupAPI: GET /api/v1/explore/featured-popup
+    activate PopupAPI
+    PopupAPI->>PopupAPI: validate active window + audience
     PopupAPI->>DB: SELECT active featured popup
+    alt No active popup
+        PopupAPI-->>Home: 204 or empty payload
+    else Popup active
+        PopupAPI-->>Home: popup content
+    end
+    deactivate PopupAPI
     Home->>CafeAPI: GET /api/v1/cafes
+    activate CafeAPI
+    CafeAPI->>CafeAPI: normalize public filters
     CafeAPI->>DB: SELECT active cafes + images + ratings
+    CafeAPI-->>Home: featured cafe list
+    deactivate CafeAPI
 
     U->>Explore: Search/filter cafes
     Explore->>CafeAPI: GET /api/v1/cafes?filters
+    activate CafeAPI
+    CafeAPI->>CafeAPI: validate query params and optional user token
     CafeAPI->>DB: SELECT cafes by city, track type, amenities, favorite state
     CafeAPI-->>Explore: cafe cards
+    deactivate CafeAPI
 
     U->>CafeDetail: Open cafe
     CafeDetail->>CafeAPI: GET /api/v1/cafes/:cafeId
+    activate CafeAPI
+    CafeAPI->>CafeAPI: validate cafeId UUID + public visibility
+    alt Cafe not found or inactive
+        CafeAPI-->>CafeDetail: 404 CAFE_NOT_FOUND
+    else Cafe visible
     CafeAPI->>DB: SELECT cafe detail + images + track configs
+    CafeAPI-->>CafeDetail: cafe detail
+    end
+    deactivate CafeAPI
     CafeDetail->>MenuAPI: GET /api/v1/cafes/:cafeId/menu and popular
     MenuAPI->>DB: SELECT menu categories/items
     CafeDetail->>PriceAPI: GET /api/v1/cafes/:cafeId/pricing-preview
@@ -66,10 +89,21 @@ sequenceDiagram
     alt Login/register/reset password
         C->>Auth: Submit auth form
         Auth->>AuthAPI: POST /api/v1/auth/login/register/forgot-password/reset-password
+        activate AuthAPI
+        AuthAPI->>AuthAPI: validate body schema + rate limit
+        alt Invalid payload or locked account
+            AuthAPI-->>Auth: 400 VALIDATION_ERROR or 429 TOO_MANY_ATTEMPTS
+        else Payload accepted
         AuthAPI->>AuthSvc: auth action
+        activate AuthSvc
+        AuthSvc->>AuthSvc: hash/compare password or build reset token
         AuthSvc->>Redis: brute-force or refresh-token support
         AuthSvc->>DB: SELECT/INSERT/UPDATE users and reset tokens
+        AuthSvc-->>AuthAPI: auth result
+        deactivate AuthSvc
         AuthAPI-->>Auth: user/tokens or reset status
+        end
+        deactivate AuthAPI
     else Profile
         C->>Profile: Update profile/passport settings
         Profile->>AuthAPI: GET/PATCH /api/v1/auth/me
@@ -95,7 +129,7 @@ sequenceDiagram
 sequenceDiagram
     autonumber
     actor C as Customer
-    participant Create as Screen<br/>(CreateBookingPage)
+    participant BookCreate as Screen<br/>(CreateBookingPage)
     participant Detail as Screen<br/>(BookingDetailPage / CustomerBookingsPage)
     participant PayResult as Screen<br/>(PaymentResultPage)
     participant Session as Screen<br/>(CustomerActiveSessionPage / CustomerInspectionConfirmPage)
@@ -107,22 +141,57 @@ sequenceDiagram
     participant VNPay as Third-party<br/>(VNPay)
     participant DB as Database<br/>(PostgreSQL)
 
-    C->>Create: Select cafe, track, slot, vehicles, F&B, promo, package
-    Create->>BookingAPI: POST /api/v1/bookings
+    C->>BookCreate: Select cafe, track, slot, vehicles, F&B, promo, package
+    BookCreate->>BookingAPI: POST /api/v1/bookings
+    activate BookingAPI
+    BookingAPI->>BookingAPI: validate create booking schema + customer role
+    alt Invalid request body
+        BookingAPI-->>BookCreate: 400 VALIDATION_ERROR
+    else Request body valid
     BookingAPI->>BookingSvc: createBooking(payload)
+    activate BookingSvc
+    BookingSvc->>BookingSvc: compute slot window, participant count, price snapshot
     BookingSvc->>DB: Validate cafe/slot/vehicle/package/promotion
+    alt Cafe inactive, slot unavailable, vehicle locked, package invalid
+        BookingSvc-->>BookingAPI: 409 BOOKING_CONSTRAINT_FAILED
+        BookingAPI-->>BookCreate: 409 error
+    else Availability valid
     BookingSvc->>DB: INSERT booking, participants, booking_vehicles, fnb_order
-    BookingAPI-->>Create: booking PENDING
+    BookingSvc-->>BookingAPI: booking PENDING
+    end
+    deactivate BookingSvc
+    BookingAPI-->>BookCreate: booking PENDING
+    end
+    deactivate BookingAPI
 
-    C->>Create: Start checkout
-    Create->>BookingAPI: POST /api/v1/bookings/:id/checkout
+    C->>BookCreate: Start checkout
+    BookCreate->>BookingAPI: POST /api/v1/bookings/:id/checkout
+    activate BookingAPI
+    BookingAPI->>BookingAPI: validate booking owner + status PENDING/AWAITING_PAYMENT
+    alt Checkout not allowed
+        BookingAPI-->>BookCreate: 409 CHECKOUT_NOT_ALLOWED
+    else Checkout allowed
     BookingAPI->>PaySvc: create checkout transaction
+    activate PaySvc
+    PaySvc->>PaySvc: freeze payment snapshot + compute amount
     PaySvc->>DB: INSERT payment_transaction
-    BookingAPI-->>Create: paymentUrl
-    Create->>VNPay: Redirect customer
+    PaySvc-->>BookingAPI: paymentUrl
+    deactivate PaySvc
+    BookingAPI-->>BookCreate: paymentUrl
+    end
+    deactivate BookingAPI
+    BookCreate->>VNPay: Redirect customer
     VNPay->>VnpayAPI: GET /api/v1/payments/vnpay/ipn
+    activate VnpayAPI
+    VnpayAPI->>VnpayAPI: verify secure hash + response code
+    alt Invalid signature or failed payment
+        VnpayAPI-->>VNPay: 200 acknowledged, transaction failed/ignored
+    else Paid successfully
     VnpayAPI->>PaySvc: confirm transaction
     PaySvc->>DB: UPDATE booking CONFIRMED + payment_transaction PAID
+    VnpayAPI-->>VNPay: 200 OK
+    end
+    deactivate VnpayAPI
     VNPay-->>PayResult: GET /api/v1/payments/vnpay/return
 
     alt Booking detail/QR/cancel
@@ -131,8 +200,20 @@ sequenceDiagram
         BookingAPI->>DB: SELECT booking detail + QR payload
         C->>Detail: Cancel booking
         Detail->>BookingAPI: POST /api/v1/bookings/:id/cancel
+        activate BookingAPI
+        BookingAPI->>BookingAPI: validate owner/provider role + cancellable status
+        alt Cancel not allowed
+            BookingAPI-->>Detail: 409 BOOKING_CANCEL_NOT_ALLOWED
+        else Cancel allowed
         BookingAPI->>BookingSvc: cancelBooking()
+        activate BookingSvc
+        BookingSvc->>BookingSvc: compute refund policy by slot time/payment state
         BookingSvc->>DB: UPDATE booking CANCELLED + refund components when eligible
+        BookingSvc-->>BookingAPI: cancelled booking
+        deactivate BookingSvc
+        BookingAPI-->>Detail: cancelled booking
+        end
+        deactivate BookingAPI
     else Active session response
         C->>Session: Confirm inspection or extension
         Session->>SessionAPI: POST /api/v1/sessions/:sessionId/inspection/confirm
@@ -165,8 +246,20 @@ sequenceDiagram
         PackageAPI->>DB: SELECT customer_packages + usage
         C->>Packages: Purchase package
         Packages->>PackageAPI: POST /api/v1/cafes/:cafeId/packages/:packageId/purchase
+        activate PackageAPI
+        PackageAPI->>PackageAPI: validate customer role + package active + cafe match
+        alt Package unavailable
+            PackageAPI-->>Packages: 404 PACKAGE_NOT_FOUND
+        else Package available
         PackageAPI->>PaySvc: create package payment when needed
+        activate PaySvc
+        PaySvc->>PaySvc: compute package payment amount
         PaySvc->>DB: INSERT payment transaction + customer_package
+        PaySvc-->>PackageAPI: package purchase result
+        deactivate PaySvc
+        PackageAPI-->>Packages: customer package or payment URL
+        end
+        deactivate PackageAPI
         Packages->>PackageAPI: GET usage or POST repay
         PackageAPI->>DB: SELECT usage history or create repay transaction
     else Review flow
@@ -175,14 +268,30 @@ sequenceDiagram
         ReviewAPI->>DB: SELECT completed bookings without review
         C->>Reviews: Submit/dismiss review
         Reviews->>ReviewAPI: POST /api/v1/customer/reviews or /:bookingId/dismiss
+        activate ReviewAPI
+        ReviewAPI->>ReviewAPI: validate completed booking + no duplicate review
+        alt Not eligible or duplicate
+            ReviewAPI-->>Reviews: 409 REVIEW_NOT_ALLOWED
+        else Review accepted
         ReviewAPI->>DB: INSERT review or dismissed reminder
+        ReviewAPI-->>Reviews: updated review state
+        end
+        deactivate ReviewAPI
     else Damage review
         C->>Damage: Open damage evidence
         Damage->>SessionAPI: GET /api/v1/sessions/:sessionId
         SessionAPI->>DB: SELECT inspection photos + damage items
         C->>Damage: Accept/dispute damage
         Damage->>SessionAPI: POST inspection confirm
+        activate SessionAPI
+        SessionAPI->>SessionAPI: validate customer owns session + damage response window
+        alt Response window expired
+            SessionAPI-->>Damage: 409 DAMAGE_RESPONSE_EXPIRED
+        else Response accepted
         SessionAPI->>DB: UPDATE damage acceptance/dispute state
+        SessionAPI-->>Damage: updated session state
+        end
+        deactivate SessionAPI
     end
 ```
 
@@ -219,16 +328,33 @@ sequenceDiagram
             BookingAPI->>DB: INSERT contest rental booking + booking_vehicles
         end
         ContestDetail->>ContestAPI: POST /api/v1/contests/:contestId/register
+        activate ContestAPI
+        ContestAPI->>ContestAPI: validate contest OPEN, capacity, vehicle policy, active ban
+        alt Registration blocked
+            ContestAPI-->>ContestDetail: 409 CONTEST_REGISTRATION_INVALID
+        else Registration accepted
         ContestAPI->>DB: INSERT contest_registration PENDING/CONFIRMED
+        ContestAPI-->>ContestDetail: registration state
+        end
         ContestDetail->>ContestAPI: POST create-entry-fee-payment when fee required
+        ContestAPI->>ContestAPI: validate registration requires entry fee
         ContestAPI->>DB: INSERT contest fee transaction
+        deactivate ContestAPI
     else My registrations
         C->>MyRegs: View registrations
         MyRegs->>ContestAPI: GET /api/v1/me/contest-registrations
         ContestAPI->>DB: SELECT registrations + contest state
         C->>MyRegs: Cancel or update BYOC declaration
         MyRegs->>ContestAPI: POST cancel or PATCH byoc-declaration
+        activate ContestAPI
+        ContestAPI->>ContestAPI: validate owner + registration status
+        alt Registration locked by event state
+            ContestAPI-->>MyRegs: 409 REGISTRATION_NOT_EDITABLE
+        else Update accepted
         ContestAPI->>DB: UPDATE contest_registrations
+        ContestAPI-->>MyRegs: updated registration
+        end
+        deactivate ContestAPI
     else Racing network
         C->>Passport: View/update passport and leaderboard
         Passport->>RacingAPI: GET /api/v1/me/driver-passport

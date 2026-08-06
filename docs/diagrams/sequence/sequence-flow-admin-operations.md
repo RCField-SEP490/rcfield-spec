@@ -19,11 +19,21 @@ sequenceDiagram
 
     A->>Screen: Open dashboard
     Screen->>API: GET /api/v1/admin/dashboard/summary
+    activate API
+    API->>API: validate JWT + role ADMIN
+    alt Not admin
+        API-->>Screen: 403 FORBIDDEN
+    else Admin allowed
     API->>Service: getSummary()
+    activate Service
+    Service->>Service: build reporting date windows
     Service->>DB: COUNT users, providers, cafes, bookings, revenue
     DB-->>Service: aggregate rows
     Service-->>API: summary cards + charts
+    deactivate Service
     API-->>Screen: 200 { summary }
+    end
+    deactivate API
     Screen-->>A: Render KPI overview
 ```
 
@@ -44,42 +54,70 @@ sequenceDiagram
 
     A->>List: Filter pending/active/suspended providers
     List->>API: GET /api/v1/admin/providers?status=...
+    activate API
+    API->>API: validate query params + ADMIN role
     API->>Service: getProviders(filters)
+    activate Service
     Service->>DB: SELECT users + provider_profiles + subscriptions
+    DB-->>Service: provider rows
+    Service-->>API: paginated providers
+    deactivate Service
     API-->>List: paginated providers
 
     A->>Detail: Open provider detail
     Detail->>API: GET /api/v1/admin/providers/:id
+    API->>API: validate provider id UUID
+    alt Provider not found
+        API-->>Detail: 404 NOT_FOUND
+    else Provider exists
     API->>Service: getProviderDetail(id)
     Service->>DB: SELECT provider profile, cafes, subscription, KYC docs
     API-->>Detail: provider detail
+    end
 
     alt Approve
         A->>Detail: Approve provider
         Detail->>API: POST /api/v1/admin/providers/:id/approve
+        API->>API: validate provider PENDING
+        alt Already processed
+            API-->>Detail: 400 ALREADY_PROCESSED
+        else Can approve
         API->>Service: approveProvider(id)
+        activate Service
+        Service->>DB: BEGIN TRANSACTION
         Service->>DB: UPDATE provider_profiles ACTIVE
         Service->>DB: INSERT provider_subscriptions TRIAL + first cafe
+        Service->>DB: COMMIT TRANSACTION
         Service->>Notify: ACCOUNT_APPROVED
+        Service-->>API: approved provider
+        deactivate Service
+        API-->>Detail: 200 approved
+        end
     else Reject
         A->>Detail: Reject with reason
         Detail->>API: POST /api/v1/admin/providers/:id/reject
+        API->>API: validate reason + provider PENDING
         API->>Service: rejectProvider(id, reason)
         Service->>DB: UPDATE provider_profiles REJECTED
         Service->>Notify: ACCOUNT_REJECTED
+        API-->>Detail: 200 rejected
     else Suspend or unsuspend
         A->>Detail: Suspend/unsuspend
         Detail->>API: POST /api/v1/admin/providers/:id/suspend or unsuspend
+        API->>API: validate current registration_status
         API->>Service: transition registration_status
         Service->>DB: UPDATE provider_profiles
         Service->>Notify: status notification
+        API-->>Detail: 200 updated
     else Impersonate
         A->>Detail: Impersonate provider
         Detail->>API: POST /api/v1/admin/providers/:id/impersonate
+        API->>API: validate target provider ACTIVE
         API->>Service: issue impersonation token
         Service->>DB: INSERT audit/session record
         API-->>Detail: scoped token
     end
+    deactivate API
 ```
 
 ---
@@ -102,24 +140,52 @@ sequenceDiagram
     alt Review provider subscription payment
         A->>PayScreen: Open payment requests
         PayScreen->>PayAPI: GET /api/v1/admin/payment-requests
+        activate PayAPI
+        PayAPI->>PayAPI: validate ADMIN role + filters
         PayAPI->>DB: SELECT payment_requests JOIN providers/plans
         PayAPI-->>PayScreen: pending/history list
         A->>PayScreen: Confirm or reject request
         PayScreen->>PayAPI: POST /api/v1/admin/payment-requests/:id/confirm or reject
+        PayAPI->>PayAPI: validate request PENDING + notes/reason
+        alt Request already processed
+            PayAPI-->>PayScreen: 400 ALREADY_PROCESSED
+        else Valid decision
         PayAPI->>SubSvc: activateFromPayment() or reject()
+        activate SubSvc
+        SubSvc->>DB: BEGIN TRANSACTION
         SubSvc->>DB: UPDATE payment_requests + provider_subscriptions
+        SubSvc->>DB: COMMIT TRANSACTION
+        deactivate SubSvc
+        PayAPI-->>PayScreen: updated request
+        end
+        deactivate PayAPI
     else Update subscription plan
         A->>PlanScreen: Edit plan quota/price
         PlanScreen->>PlanAPI: PATCH /api/v1/admin/subscription-plans/:id
+        activate PlanAPI
+        PlanAPI->>PlanAPI: validate quota and price are non-negative
+        alt Invalid plan payload
+            PlanAPI-->>PlanScreen: 400 VALIDATION_ERROR
+        else Valid plan update
         PlanAPI->>DB: UPDATE subscription_plans
         PlanAPI-->>PlanScreen: updated plan
+        end
+        deactivate PlanAPI
     else Review contest fee order
         A->>FeeScreen: Open contest fee orders
         FeeScreen->>FeeAPI: GET /api/v1/admin/contest-fee-orders
         FeeAPI->>DB: SELECT contest_fee_orders JOIN contests/providers
         A->>FeeScreen: Confirm/reject transfer
         FeeScreen->>FeeAPI: POST /api/v1/admin/contest-fee-orders/:orderId/confirm or reject
+        activate FeeAPI
+        FeeAPI->>FeeAPI: validate order PENDING_REVIEW
+        alt Order not pending
+            FeeAPI-->>FeeScreen: 409 CONTEST_FEE_ORDER_INVALID
+        else Valid decision
         FeeAPI->>DB: UPDATE contest_fee_orders
+        FeeAPI-->>FeeScreen: updated order
+        end
+        deactivate FeeAPI
     end
 ```
 
@@ -142,21 +208,40 @@ sequenceDiagram
     alt Amenity or track type catalog
         A->>Catalog: Create/update catalog item
         Catalog->>CatalogAPI: GET/POST/PATCH/DELETE admin catalog endpoints
+        activate CatalogAPI
+        CatalogAPI->>CatalogAPI: validate ADMIN role + payload uniqueness
+        alt Duplicate code/title
+            CatalogAPI-->>Catalog: 409 CATALOG_DUPLICATE
+        else Valid catalog request
         CatalogAPI->>DB: SELECT/INSERT/UPDATE amenity_catalogs or track_types
         CatalogAPI-->>Catalog: catalog result
+        end
+        deactivate CatalogAPI
     else Feature flags
         A->>Flags: Toggle provider feature flag
         Flags->>FlagAPI: GET /api/v1/admin/feature-flags
         FlagAPI->>DB: SELECT feature_flags
         Flags->>FlagAPI: PATCH /api/v1/admin/feature-flags/:key
+        FlagAPI->>FlagAPI: validate feature key exists
+        alt Unknown key
+            FlagAPI-->>Flags: 404 FEATURE_FLAG_NOT_FOUND
+        else Known key
         FlagAPI->>DB: UPDATE feature_flags
+        FlagAPI-->>Flags: updated flag
+        end
     else Featured popup moderation
         A->>Popups: Create or review popup
         Popups->>PopupAPI: GET/POST/PATCH /api/v1/admin/featured-popups
         PopupAPI->>DB: SELECT/INSERT/UPDATE featured_popups
         A->>Popups: Approve/reject pending popup
         Popups->>PopupAPI: POST /api/v1/admin/featured-popups/:popupId/review
+        PopupAPI->>PopupAPI: validate pending popup + review decision
+        alt Popup already reviewed
+            PopupAPI-->>Popups: 409 POPUP_ALREADY_REVIEWED
+        else Valid review
         PopupAPI->>DB: UPDATE review_status
+        PopupAPI-->>Popups: updated popup
+        end
     end
 ```
 
