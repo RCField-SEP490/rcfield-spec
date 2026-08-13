@@ -22,22 +22,25 @@ Không có inspection hợp lệ → không có cơ sở tính `DAMAGE_CHARGE` h
 1. Staff mở app → chọn booking → bắt đầu Check-in
 2. System tạo Session (status = CHECKED_IN)
 3. Staff lấy xe từ fleet (vehicle.status → IN_USE)
-3. Staff chụp ảnh 4 góc: FRONT, BACK, LEFT, RIGHT
-   - Mỗi ảnh upload lên S3, nhận URL
-   - Tất cả 4 ảnh bắt buộc — không thể bỏ qua
-4. Staff hoàn thành checklist:
+4. Staff chụp ảnh tình trạng xe theo bốn góc quy ước: FRONT, BACK, LEFT, RIGHT
+   - Mỗi ảnh upload lên Cloudinary, lưu URL về DB
+   - Zod cho phép TỐI ĐA 6 ảnh và KHÔNG bắt buộc ảnh nào
+     (`photos: z.array(...).max(6).optional()`)
+   - Bốn góc là quy ước vận hành, hệ thống không chặn khi thiếu
+5. Staff hoàn thành checklist:
    - scratches: string (mô tả vết trầy, hoặc "none")
    - cracks: string
    - missing_parts: string
    - notes: string (tự do)
-5. Nếu có hư hỏng có sẵn → bật pre_existing_flag = true
-6. System tạo Inspection (type: CHECK_IN) gắn với session
-7. Staff gắn inspection vào từng session_vehicle (multi-vehicle support)
-8. Push notification đến Customer app
-9. Customer xem ảnh + checklist → bấm "Xác nhận"
-   - customer_confirmed = true, customer_confirmed_at = now()
-   - Timeout: 15 phút. Nếu không confirm → auto-confirm (log lại)
-10. Session transition: CHECKED_IN → ACTIVE
+6. Nếu có hư hỏng có sẵn → bật pre_existing_flag = true
+7. System tạo Inspection (type: CHECK_IN) gắn với session
+8. Staff gắn inspection vào từng session_vehicle (multi-vehicle support)
+9. Gửi thông báo đến Customer
+10. Customer xem ảnh + checklist → bấm "Xác nhận"
+    - customer_confirmed = true, customer_confirmed_at = now()
+    - POST /sessions/:sessionId/inspection/confirm
+    - KHÔNG có tự động xác nhận. Chưa xác nhận thì cứ chờ.
+11. Session transition: CHECKED_IN → ACTIVE
 ```
 
 ### BYOC mode
@@ -61,27 +64,23 @@ Bước 1-4 tương tự nhưng:
 ```
 1. Staff mở app → chọn booking → chọn session đang ACTIVE → bắt đầu Check-out
 2. Session transition: ACTIVE → CHECKING_OUT
-3. Staff chụp lại 4 góc (cùng góc với check-in) cho từng xe
+3. Staff chụp lại theo cùng bốn góc với check-in cho từng xe
 4. Staff hoàn thành checklist (giống check-in format) cho từng xe
-5. System so sánh tự động:
-   - So sánh photos (staff review, không phải AI tự động trong MVP)
-   - So sánh checklist: highlight điểm mới so với check-in
+5. Staff tự đối chiếu với bản check-in để quyết định có hư hỏng mới hay không
+   - KHÔNG có so sánh tự động. Hệ thống chỉ hiển thị hai bản ghi cạnh nhau.
 6. Staff đánh dấu: "Có damage mới" hoặc "Không có damage"
 7. Nếu có damage:
-   - Staff nhập damage description + ước tính damage_cost
-   - System tính damage_charge = damage_cost × damage_multiplier
-   - Push notification đến Customer
-   - Customer xem evidence → Xác nhận hoặc phản đối kết quả
-     * Timeout: 24h. Im lặng = auto-confirm damage
-     * Nếu phản đối: tạo `incidents` (policy-based) hoặc mở `disputes` (Admin xét xử)
+   - Staff nhập từng hạng mục vào `damage_line_items` (parts_price, labor_price)
+   - damage_charge = Σ (parts_price + labor_price)   ← không nhân multiplier
+   - Gửi thông báo đến Customer kèm bằng chứng
+   - Customer xác nhận hoặc phản đối
 8. Nếu không có damage:
-   - Push notification đến Customer để confirm check-out
-   - Timeout: 2h. Im lặng = auto-confirm
-9. Sau confirm (hoặc auto-confirm):
-   - Session transition: CHECKING_OUT → COMPLETED sau khi damage được xác nhận
-     hoặc incident/dispute được resolve/waive
-   - PaymentEngine.settle(sessionId) được gọi
-   - vehicle.status → AVAILABLE (RENTAL mode)
+   - Gửi thông báo đến Customer để xác nhận check-out
+9. Sau khi staff hoàn tất check-out:
+   - Session transition: CHECKING_OUT → COMPLETED
+   - Thu nốt các component còn PENDING (gia hạn, F&B tại quán, hư hỏng)
+   - vehicle.status → AVAILABLE, hoặc → MAINTENANCE nếu có ghi nhận hư hỏng
+     (`staff.service.ts:2936`)
    - Nếu tất cả sessions của booking đã COMPLETED → booking.status → COMPLETED
 ```
 
@@ -89,13 +88,18 @@ Bước 1-4 tương tự nhưng:
 
 ## Validation Rules
 
-| Rule | Mô tả |
-|------|-------|
-| **4 ảnh bắt buộc** | Thiếu 1 trong 4 góc → không thể submit inspection |
-| **Checklist đầy đủ** | Tất cả fields required (string rỗng = "none", không được null) |
-| **pre_existing_flag chỉ có giá trị khi** | 4 ảnh + checklist đầy đủ + customer confirmed |
-| **Staff phải được assign vào cafe** | Kiểm tra qua `staff_cafe_assignments` — không thể check-in booking của cafe khác |
-| **Không thể check-in 2 lần** | Mỗi session chỉ có 1 CHECK_IN inspection |
+| Rule | Mô tả | Hệ thống có chặn? |
+|------|-------|---|
+| **Staff phải được assign vào cafe** | Kiểm tra qua `staff_cafe_assignments` — không thể check-in booking của cafe khác | ✅ có |
+| **Không thể check-in 2 lần** | Mỗi session chỉ có 1 CHECK_IN inspection | ✅ có |
+| **Tối đa 6 ảnh mỗi inspection** | `z.array(...).max(6)` | ✅ có |
+| **Chụp đủ bốn góc** | FRONT, BACK, LEFT, RIGHT | ❌ **không** — ảnh là `optional()`, đây là quy ước vận hành |
+| **Checklist đầy đủ** | scratches / cracks / missing_parts / notes | ❌ không bắt buộc ở tầng schema |
+
+> Bản trước ghi *"Thiếu 1 trong 4 góc → không thể submit inspection"*. Ràng buộc
+> đó chưa được cài đặt. Nếu muốn bằng chứng bàn giao thật sự chặt — vốn là giá
+> trị cốt lõi của sản phẩm — cần thêm validation ở `validate/index.ts` chứ không
+> dựa vào staff nhớ.
 
 ---
 

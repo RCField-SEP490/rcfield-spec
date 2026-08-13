@@ -15,20 +15,21 @@ Không có inspection hợp lệ → không có cơ sở tính `DAMAGE_CHARGE`.
 
 ## 2. Yêu cầu ảnh & checklist
 
-**BR-IN-001** — 4 ảnh bắt buộc  
+**BR-IN-001** — Ảnh theo bốn góc (quy ước, chưa cưỡng chế)  
 IF: Staff đang submit inspection (check-in hoặc check-out)  
-THEN: Phải upload đủ 4 ảnh: FRONT, BACK, LEFT, RIGHT  
-NOTE: Thiếu 1 trong 4 → không thể submit
+THEN: Chụp theo bốn góc FRONT, BACK, LEFT, RIGHT  
+NOTE: Schema hiện tại là `photos: z.array(...).max(6).optional()` — **tối đa 6 ảnh
+và không bắt buộc ảnh nào**. Thiếu góc vẫn submit được. Muốn cưỡng chế phải thêm
+validation, xem 04-inspection-flow.md.
 
-**BR-IN-002** — Checklist đầy đủ  
-Tất cả fields trong checklist đều required: `scratches`, `cracks`, `missing_parts`, `notes`  
-String rỗng hợp lệ (= "none"), nhưng không được null
+**BR-IN-002** — Checklist  
+Các trường `scratches`, `cracks`, `missing_parts`, `notes` được thiết kế để staff
+điền đủ, nhưng tầng schema chưa bắt buộc.
 
-**BR-IN-003** — Pre_existing_flag chỉ có giá trị khi  
-Cả 3 điều kiện phải đúng:
-1. 4 ảnh đầy đủ
-2. Checklist đầy đủ
-3. Customer đã confirm inspection
+**BR-IN-003** — Pre_existing_flag  
+Có giá trị khi inspection có ảnh, có checklist, và Customer đã xác nhận. Vì hai
+điều kiện đầu chưa được hệ thống cưỡng chế, giá trị chứng cứ của cờ này phụ thuộc
+vào kỷ luật vận hành của staff.
 
 ---
 
@@ -53,10 +54,11 @@ Checklist an toàn: `battery_secured`, `no_sharp_protrusions`, `weight_compliant
 **BR-IN-008** — Customer confirm check-in  
 IF: Inspection CHECK_IN được tạo  
 THEN: Push notification đến Customer → Customer xem ảnh + checklist → confirm  
-Timeout: 15 phút. Nếu không confirm → auto-confirm (log lại)
+Không có timeout. Chưa xác nhận thì inspection cứ chờ — hệ thống không tự
+xác nhận thay khách.
 
 **BR-IN-009** — Session chuyển ACTIVE sau check-in  
-IF: Customer confirm (hoặc auto-confirm) check-in  
+IF: Customer confirm check-in  
 THEN: `session.status → ACTIVE`
 
 ---
@@ -67,20 +69,19 @@ THEN: `session.status → ACTIVE`
 IF: Staff bắt đầu check-out  
 THEN: `session.status → CHECKING_OUT` ngay lập tức
 
-**BR-IN-011** — Chụp cùng 4 góc như check-in  
-Staff chụp lại 4 góc (FRONT, BACK, LEFT, RIGHT) để so sánh với ảnh check-in
+**BR-IN-011** — Chụp cùng bốn góc như check-in  
+Staff chụp lại theo bốn góc để đối chiếu với ảnh check-in
 
 **BR-IN-012** — Staff đánh dấu damage  
-Sau khi so sánh ảnh check-in vs check-out, Staff phải chọn:
-- "Không có damage" → notify Customer confirm check-out
-- "Có damage mới" → nhập mô tả + ước tính damage_cost → notify Customer
+Hệ thống **không so sánh tự động**; staff tự đối chiếu hai bản ghi rồi chọn:
+- "Không có damage" → thông báo Customer xác nhận check-out
+- "Có damage mới" → nhập từng hạng mục vào `damage_line_items` → thông báo Customer
 
-**BR-IN-013** — Customer confirm không có damage  
-Timeout: 2 giờ. Im lặng = auto-confirm  
-IF: Confirmed → `session.status → COMPLETED`
+**BR-IN-013** — Customer xác nhận không có damage  
+Không có timeout tự động. Session chuyển COMPLETED khi staff hoàn tất check-out.
 
-**BR-IN-014** — Customer nhận damage notification  
-Timeout: 24 giờ. Im lặng = auto-confirm damage charge  
+**BR-IN-014** — Customer nhận thông báo damage  
+Không có timeout tự động chốt tiền.  
 IF: Customer xác nhận → COMPLETED  
 IF: Customer từ chối → có 2 hướng xử lý:
 - Tạo `incidents` (incident policy-based): Staff/Admin áp rule, ghi `responsible_party` + `resolution_note`

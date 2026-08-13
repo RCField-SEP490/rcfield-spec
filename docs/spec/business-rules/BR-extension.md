@@ -27,14 +27,14 @@ IF: Còn X phút trước `session.planned_end_at` (thời gian cụ thể TBD)
 
 ## 2. Giới hạn phí gia hạn
 
-**BR-EX-004** — Extension fee cap  
-```
-max_extension_fee = security_deposit × 50%
-```
+**BR-EX-004** — Không có trần phí gia hạn  
+Bản trước quy định `max_extension_fee = security_deposit × 50%`. Quy tắc này
+không còn hiệu lực: hệ thống đã bỏ cọc, và mã nguồn không có đoạn kiểm tra
+trần nào.
 
-**BR-EX-005** — Từ chối khi vượt cap  
-IF: `tổng extension_fee tích lũy + extension_fee_mới > max_extension_fee`  
-THEN: Từ chối extension proposal. Notify Customer đã đạt giới hạn gia hạn.
+**BR-EX-005** — Giới hạn thực tế  
+Đề xuất gia hạn bị từ chối khi khung giờ mới vượt giờ hoạt động của chi nhánh
+hoặc đường đua đã kín chỗ, không phải vì chạm trần tiền.
 
 **BR-EX-004** — Nhiều lần gia hạn
 Cho phép gia hạn nhiều lần trong 1 session, với điều kiện tổng phí không vượt cap (BR-EX-005)

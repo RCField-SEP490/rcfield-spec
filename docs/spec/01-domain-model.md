@@ -13,19 +13,16 @@
 erDiagram
     users ||--o{ cafes : "provider owns"
     users ||--o{ bookings : "customer makes"
-    users ||--o{ customer_vehicles : "owns BYOC"
     cafes ||--o{ cafe_images : "images"
     cafes ||--o{ vehicles : "fleet"
     cafes ||--o{ menu_items : "menu"
     cafes ||--o{ packages : "offers"
-    cafes ||--o{ subscriptions : "supports"
     cafes ||--o{ bookings : "receives"
     cafes ||--o{ sessions : "runs"
     vehicles ||--o{ vehicle_images : "images"
     vehicles ||--o{ vehicle_maintenance_logs : "maintenance"
     vehicles ||--o{ booking_vehicles : "planned"
     vehicles ||--o{ session_vehicles : "actual use"
-    customer_vehicles ||--o{ session_vehicles : "BYOC use"
     bookings ||--o{ booking_participants : "planned people"
     bookings ||--o{ booking_vehicles : "planned rental vehicles"
     bookings ||--o{ sessions : "actual sessions"
@@ -37,25 +34,16 @@ erDiagram
     sessions ||--o{ session_vehicles : "actual vehicles"
     sessions ||--o{ inspections : "inspections"
     sessions ||--o{ extension_proposals : "extensions"
-    sessions ||--o{ incidents : "incidents"
     inspections ||--o{ inspection_photos : "photos"
     inspections ||--o{ inspection_checklists : "checklists"
     fnb_orders ||--o{ fnb_order_items : "items"
     menu_items ||--o{ fnb_order_items : "menu item"
     packages ||--o{ customer_packages : "purchased"
-    customer_packages ||--o{ package_usages : "usage history"
-    bookings ||--o{ package_usages : "uses package"
-    subscriptions ||--o{ bookings : "generates"
     users ||--o{ contests : "provider creates"
     contests ||--o{ contest_cafes : "participating branches"
     cafes ||--o{ contest_cafes : "hosts event"
     contests ||--o{ contest_registrations : "registrations"
     cafes ||--o{ promotions : "promotions"
-    promotions ||--o{ promotion_usages : "usage history"
-    bookings ||--o| promotion_usages : "applies promo"
-    users ||--o{ notification_logs : "notifications"
-    users ||--o{ trust_score_logs : "trust audit"
-    bookings ||--o{ trust_score_logs : "triggered by"
     users ||--o| provider_profiles : "has profile"
     users ||--o{ provider_subscriptions : "subscription"
     users ||--o{ payment_requests : "payment requests"
@@ -590,8 +578,6 @@ Promotion là mã giảm giá cơ bản cho booking. Một booking tối đa m�
 ### Review, NotificationLog, TrustScoreLog, FeatureFlag
 
 - `reviews`: đánh giá sau booking.
-- `notification_logs`: audit notification đã gửi.
-- `trust_score_logs`: lịch sử thay đổi điểm uy tín.
 - `feature_flags`: bật/tắt module và lưu `config` cho Phase 2.
 
 ### ProviderProfile

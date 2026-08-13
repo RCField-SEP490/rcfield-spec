@@ -1,6 +1,6 @@
 # BR-Contest
 
-**Last updated:** 2026-07-31  
+**Last updated:** 2026-08-05  
 **Status:** Aligned to current backend
 
 ---
@@ -48,15 +48,17 @@ THEN: cron job tự chuyển sang `RUNNING`. Nếu chưa có match nào thì gi�
 
 ---
 
-## 3. Cafe, Track Type, Resource Lock
+## 3. Cafe, Track Type, Thể Thức, Resource Lock
 
 **BR-CT-020 — Cafe contest phải thuộc Provider**  
 IF: Provider tạo/update contest  
 THEN: mọi `participating_cafe_ids` phải active và thuộc Provider đó.
 
-**BR-CT-021 — Contest phải dùng track type mà chi nhánh tham gia thực sự có**  
+**BR-CT-021 — MỌI chi nhánh tham gia phải có track type của giải**  
 IF: create/update contest  
-THEN: `track_type_id` phải valid và thuộc danh sách track configs của ít nhất một chi nhánh trong `participating_cafe_ids`; FE chỉ được hiển thị các loại đường đua mà chi nhánh đã có.
+THEN: `track_type_id` phải valid và **mọi** cafe trong `participating_cafe_ids` đều phải có ít nhất một `cafe_track_config` active thuộc track type đó; FE chỉ hiển thị giao (intersection) các loại đường đua của những chi nhánh đã chọn.  
+RATIONALE: trước đây chỉ cần một chi nhánh có là qua. Điều đó cho phép tạo giải ở ba chi nhánh nhưng chỉ một nơi có sân Drift — VĐV check-in ở hai chi nhánh còn lại không có chỗ thi đấu, trong khi resource lock vẫn chặn booking thường ở đó.  
+NOTE: lỗi `CONTEST_TRACK_TYPE_UNAVAILABLE` trả về `details.missing_cafe_ids` và nêu tên chi nhánh thiếu trong message.
 
 **BR-CT-022 — Resource lock là current feature**  
 IF: contest có race window  
@@ -70,9 +72,48 @@ THEN: booking thường overlapping ở cafe đó bị chặn.
 IF: lock scope = `SELECTED_TRACKS`  
 THEN: booking bị chặn khi trùng track config, hoặc fallback theo `track_type_id` nếu booking thiếu `track_config_id`.
 
+**BR-CT-024a — Sân đúng loại đường đua của giải luôn bị khóa**  
+IF: lock scope = `SELECTED_TRACKS`  
+THEN: `resolveContestResourceLocks` bắt buộc gộp thêm mọi `cafe_track_config` active có `track_type_id = contest.track_type_id`, kể cả khi provider không chọn; FE hiển thị các sân này ở trạng thái đã tick và không cho bỏ tick.  
+RATIONALE: `contestLockBlocksTrack` vốn đã chặn mọi booking trùng loại đường đua của giải (fallback cuối hàm), trong khi `findContestBookingConflicts` lúc tạo giải chỉ soi các sân được chọn. Không đồng bộ hai bên thì provider tưởng sân thi đấu vẫn nhận khách trong khi thực tế đã bị khóa, và booking đang tồn tại trên sân đó không chặn được việc tạo giải đè lên.
+
 **BR-CT-025 — Không cho create/update contest đè booking hiện hữu**  
 IF: có booking `PENDING` hoặc `CONFIRMED` overlap lock  
 THEN: reject bằng conflict.
+
+**BR-CT-026 — Chỉ tạo giải trên thể thức đã phát hành**  
+IF: create contest, hoặc update contest có ĐỔI `contest_format_id` sang thể thức khác  
+THEN: `contest_formats.is_released` phải `true`; ngược lại reject `CONTEST_FORMAT_NOT_RELEASED` (400) kèm `details.contest_format_code`, message nêu đích danh tên thể thức.  
+IF: update contest KHÔNG đổi thể thức (giải cũ đang nằm trên thể thức chưa phát hành)  
+THEN: không chặn — provider vẫn sửa được tên, giờ, sức chứa và vẫn huỷ được giải.  
+RATIONALE: `is_active` chỉ nói "còn trong catalog hay không". Tắt `is_active` thì thể thức đang làm dở biến mất khỏi tầm mắt provider; để nguyên thì provider trả phí tổ chức xong mới phát hiện chế độ mình chọn chưa chạy được. Cột riêng cho phép vẫn bày ra kèm nhãn "Sắp có" mà không bán được. Chặn ở mọi lần update thì khoá cứng giải cũ, nên điều kiện phải là "đang đổi thể thức", không phải "thể thức hiện tại chưa mở".  
+NOTE: từ 2026-08-05 cả ba thể thức đều `is_released = true`. Cột này giữ lại cho các thể thức thêm về sau.
+
+**BR-CT-027 — Lượt chạy tính giờ: nhiều lượt, lấy lượt nhanh nhất**  
+IF: `runtime_format` là `TIME_TRIAL` hoặc `QUALIFYING_FINAL`  
+THEN: mỗi VĐV được `config.runs_per_driver` lượt (1–5, mặc định 3), mỗi lượt là một `contest_match` riêng với `round_no` = số thứ tự lượt; bảng xếp hạng lấy lap nhanh nhất trong các lượt của cùng một người.  
+RATIONALE: đua tính giờ thật cho mỗi người vài lượt. Trước đây đúng một lượt, mà muốn chạy lại thì phải bốc thăm lại — và bốc lại bị chặn ngay khi có một lượt hoàn tất, nên không có đường nào.
+
+**BR-CT-028 — Lượt chạy một mình không có người thắng**  
+IF: match có `match_type = TIME_ATTACK`  
+THEN: tôn trọng `advancement_rule.winners_to_advance = 0` — không gán `is_winner` cho ai.  
+IF: match đối kháng (`HEAD_TO_HEAD`, `FINAL`), kể cả trận tranh hạng 3 vốn khai `winners_to_advance = 0` vì không đẩy ai đi tiếp  
+THEN: vẫn phải chốt đúng một người thắng.  
+RATIONALE: `Math.max(1, winnersToAdvance || 1)` nuốt mất số 0 do toán tử `||`, nên mọi lượt chạy một mình đều bị gắn người thắng — vô nghĩa với đua tính giờ và cộng một trận thắng ảo cho tất cả mọi người ở thể thức vòng loại + chung kết. Ranh giới đúng là loại trận, không phải con số.
+
+**BR-CT-029 — Vào chung kết phải có thành tích thật**  
+IF: sinh nhánh chung kết của `QUALIFYING_FINAL`  
+THEN: chỉ xét người có ít nhất một lượt hợp lệ (không `DNS`/`DNF`/`DQ` và có `best_lap` hoặc `total_time`); mỗi người gộp về một dòng lấy thành tích tốt nhất trước khi xếp hạng; nhánh chung kết bắt đầu từ vòng ngay sau vòng loại cuối.  
+IF: số người có thành tích ít hơn `config.finalists`  
+THEN: chung kết chỉ gồm những người có thành tích, chỗ trống để trống — không lấp bằng người chưa hoàn thành lượt nào.  
+RATIONALE: trước đây thời gian rỗng bị coi như vô cực nhưng vẫn nằm trong danh sách, nên người chưa từng chạy xong vẫn lọt vào chung kết khi còn trống suất. Và khi mỗi người chạy nhiều lượt, xếp hạng trên danh sách thô cho phép một người nhanh chiếm luôn nhiều suất.
+
+**BR-CT-029a — Dựng lại nhánh chung kết khi chưa ai đấu**  
+IF: nhánh chung kết đã sinh nhưng chưa match nào `RUNNING`/`COMPLETED` do thi đấu  
+THEN: `generate-final-bracket` xoá nhánh cũ và dựng lại.  
+IF: đã có trận chung kết thi đấu  
+THEN: reject `FINAL_BRACKET_ALREADY_PLAYED` (409).  
+RATIONALE: sinh nhầm từng là ngõ cụt — `generate matches` bị khoá vì vòng loại đã xong, còn endpoint này chặn cứng, lối thoát duy nhất là sửa thẳng DB.
 
 ---
 
@@ -252,3 +293,58 @@ THEN: booking còn `PENDING` → bị cancel + audit `booking.contest_rental_can
 **BR-CT-085 — Seeding QUALIFYING_FINAL**  
 IF: `runtime_format = QUALIFYING_FINAL`  
 THEN: phase QUALIFYING là match `TIME_ATTACK` cho mỗi VĐV `CHECKED_IN`, xếp theo `best_lap_ms`; sau khi mọi match QUALIFYING `COMPLETED`, `generate-final-bracket` đưa top N (`config.finalists`, default 4) vào bracket FINAL knockout với seed đối xứng: rank 1 gặp rank N, rank 2 gặp rank N-1, ...; số VĐV đủ điều kiện ít hơn N thì bracket chỉ gồm VĐV thực tế; leaderboard mode `KNOCKOUT_WINS`.
+
+---
+
+## 10. Phí Tổ Chức Giải Và Quảng Bá
+
+**BR-CT-090 — Phí tổ chức tính theo từng giải, tách khỏi gói SaaS**  
+IF: Provider muốn mở đăng ký cho một giải  
+THEN: phải có đơn `contest_fee_orders` ở trạng thái `PAID` cho chính giải đó. Gói đăng ký hằng tháng còn hiệu lực **không** thay thế được khoản này, và ngược lại.  
+RATIONALE: hai khoản phục vụ hai việc khác nhau — gói SaaS trả cho việc vận hành chi nhánh, phí tổ chức trả cho một sự kiện cụ thể có suất hiển thị riêng.
+
+**BR-CT-091 — Cửa thu phí đặt ở DRAFT → OPEN**  
+IF: `changeContestStatus` chuyển sang `OPEN`  
+THEN: `assertContestFeePaid` chặn nếu chưa có đơn `PAID`, trả 402 `CONTEST_FEE_REQUIRED`. Chưa đặt gói và đã đặt nhưng chờ đối soát có message khác nhau.  
+IF: chuyển sang `CLOSED` hoặc `CANCELLED`  
+THEN: không chặn — không được nhốt provider trong một giải họ muốn bỏ.
+
+**BR-CT-092 — Mỗi giải chỉ một đơn còn hiệu lực**  
+IF: giải đã có đơn ở `PENDING_PAYMENT`, `PENDING_REVIEW` hoặc `PAID`  
+THEN: tạo đơn mới bị reject `CONTEST_FEE_ORDER_EXISTS` (409). `REJECTED` và `CANCELLED` không nằm trong nhóm chặn (unique index từng phần), nên provider bị từ chối vẫn đặt lại được.
+
+**BR-CT-093 — Đơn chốt giá tại thời điểm đặt**  
+IF: tạo đơn  
+THEN: `amount` và `featured_days` copy từ `contest_fee_plans` vào đơn. Sửa bảng giá về sau không đổi đơn đã đặt.
+
+**BR-CT-094 — Chỉ đặt gói khi giải còn là bản nháp**  
+IF: contest không ở `DRAFT`  
+THEN: tạo đơn bị reject `CONTEST_FEE_CONTEST_NOT_DRAFT` (400).
+
+**BR-CT-095 — Provider chỉ huỷ đơn khi chưa khai báo chuyển khoản**  
+IF: đơn ở `PENDING_PAYMENT`  
+THEN: huỷ được để đổi gói khác.  
+IF: đơn đã sang `PENDING_REVIEW` hoặc `PAID`  
+THEN: reject `CONTEST_FEE_ORDER_NOT_CANCELLABLE` (409) — tiền có thể đã vào tài khoản, việc đóng đơn thuộc về admin.
+
+**BR-CT-096 — Từ chối đơn phí bắt buộc có lý do**  
+IF: admin reject đơn  
+THEN: `admin_notes` bắt buộc và được gửi cho provider qua notification; provider khai báo lại chuyển khoản được.  
+IF: admin confirm  
+THEN: đơn sang `PAID`, ghi `reviewed_by` + `reviewed_at`.
+
+**BR-CT-097 — Trả tiền không đồng nghĩa nội dung lên trang chủ**  
+IF: đơn được confirm và `featured_days > 0`  
+THEN: sinh `featured_popups` với `review_status = PENDING`, `is_active = false`, nội dung lấy từ contest (tên, mô tả, ảnh bìa). Admin duyệt nội dung ở hàng đợi riêng.  
+IF: popup chưa `APPROVED`  
+THEN: `getActiveFeaturedPopup` không trả về — điều kiện là `is_active = true` VÀ `review_status = APPROVED`.  
+NOTE: khung ngày hiển thị tính từ lúc admin duyệt phí, không phải lúc provider chuyển khoản, để đối soát chậm không ăn vào ngày quảng bá đã bán.
+
+**BR-CT-098 — Nền tảng không lấy phần trăm trên lệ phí VĐV**  
+IF: giải thu lệ phí từ VĐV  
+THEN: toàn bộ khoản đó thuộc Provider. Doanh thu nền tảng từ giải chỉ gồm phí tổ chức ở mục này.
+
+**BR-CT-099 — Thanh toán phí tổ chức hiện là thủ công**  
+IF: provider khai báo chuyển khoản  
+THEN: `transfer_amount` ghi vào đơn luôn là `order.amount`, không lấy số provider tự gõ; `transfer_reference` và `transfer_date` chỉ để admin tra sao kê.  
+NOTE: chưa nối payment gateway; chưa có luồng refund phí tổ chức khi giải bị huỷ sau khi đã trả.

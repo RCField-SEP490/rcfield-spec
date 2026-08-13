@@ -16,9 +16,12 @@ Ba tier cho xe trong fleet, theo thứ tự tăng dần về giá trị và rủ
 | PREMIUM | Trung bình | 1.5x | Đủ điều kiện |
 | RESTRICTED | Cao | 2.0x | Hạn chế, xét duyệt |
 
-**BR-FL-002** — Giá và deposit per-branch  
+**BR-FL-002** — Giá thuê theo từng chi nhánh  
 IF: Provider cấu hình xe cho 1 chi nhánh  
-THEN: `hourly_rate` và `security_deposit` là config riêng của chi nhánh đó — các chi nhánh khác có thể khác nhau
+THEN: `hourly_rate` là config riêng của chi nhánh đó — các chi nhánh khác có thể khác nhau
+
+> `vehicle_catalogs.security_deposit` vẫn còn cột nhưng không vào công thức tính
+> tiền nào: hệ thống đã bỏ cọc.
 
 ---
 

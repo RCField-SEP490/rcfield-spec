@@ -64,7 +64,11 @@ IF discount_type = 'FIXED':
 ```
 
 **BR-PR-005** — Những gì KHÔNG được discount  
-`security_deposit` không bị ảnh hưởng — đây là tiền giữ, không phải phí.
+Mã giảm giá chỉ áp lên `slot_fee` và `rental_fee`. Không áp lên `fnb_preorder`,
+`contest_entry_fee`, phí gia hạn hay tiền hư hỏng.
+
+> Bản trước ghi "`security_deposit` không bị ảnh hưởng". Hệ thống đã bỏ cọc, quy
+> tắc đó không còn đối tượng để áp dụng.
 
 ---
 
@@ -112,10 +116,11 @@ discount_amount = tính theo BR-PR-004
 total_charge    = subtotal - discount_amount
 
 Khi COMPLETED:
-  platform_fee = 0.15 × (total_charge + extension_fee + damage_charge)
+  platform_fee = 0
 ```
 
-Provider nhận phần sau khi trừ platform_fee — platform không bù phần discount thay Provider.
+Provider nhận trọn số tiền khách trả. Nền tảng không trừ phần trăm nào, và cũng
+không bù phần discount thay Provider — mã giảm giá do Provider tự chịu.
 
 ---
 
@@ -127,8 +132,7 @@ Provider nhận phần sau khi trừ platform_fee — platform không bù phần
 {
   "slot_fee_rate": 150000,
   "rental_fee": 100000,
-  "security_deposit": 500000,
-  "platform_fee_pct": 15,
+  "platform_fee_pct": 0,
   "track_type": "DRIFT",
   "slot_count": 2,
   "promo": {

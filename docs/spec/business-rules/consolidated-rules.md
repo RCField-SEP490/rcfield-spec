@@ -34,23 +34,23 @@
 | **BR-BK-000-D** | — Availability check BYOC IF: Customer muốn đặt BYOC trong khung giờ T THEN: BYOC available khi: 1. Số BYOC booking trong khung giờ T có `status NOT IN ('CANCELLED')` < `cafe.byoc_capacity` 2. `booking.track_type` phải thuộc `cafe.track_types` (sân đó phải tồn tại tại chi nhánh) NOTE: Hệ thống KHÔNG kiểm tra xe của customer có phù hợp sân không — customer tự chịu trách nhiệm |
 | **BR-BK-000-E** | — Nhiều khách cùng slot Nhiều customer có thể book cùng 1 khung giờ nếu mỗi người đặt xe khác nhau (RENTAL) hoặc còn chỗ BYOC: ``` Slot 10:00–11:00: Khách A → xe Traxxas Slash   ✅ Khách B → xe Arrma Kraton    ✅ (xe khác, không conflict) Khách C → BYOC               ✅ (nếu byoc_capacity chưa đầy) Khách D → xe Traxxas Slash   ❌ (xe đã bị A đặt) ``` |
 | **BR-BK-000-F** | — Track type selection Customer chọn loại sân (`DRIFT` / `CIRCUIT` / `OFFROAD`) trước khi chọn xe: |
-| **BR-BK-000-G** | — Multi-vehicle booking (RENTAL) IF: Customer muốn thuê nhiều xe trong 1 booking (`play_mode = MIXED` hoặc 2+ RENTAL vehicles) THEN: Tất cả xe đều phải available trong cùng khung giờ. Mỗi xe tạo 1 row trong `booking_vehicles`. NOTE: Mỗi xe có rental_fee + security_deposit riêng. Xử lý refund/damage per-vehicle độc lập. |
+| **BR-BK-000-G** | — Multi-vehicle booking (RENTAL) IF: Customer muốn thuê nhiều xe trong 1 booking (2+ RENTAL vehicles) THEN: Tất cả xe đều phải available trong cùng khung giờ. Mỗi xe tạo 1 row trong `booking_vehicles`. NOTE: Mỗi xe có `rental_fee` riêng. NOTE: `play_mode` chỉ nhận RENTAL hoặc BYOC; giá trị MIXED còn trong enum DB nhưng code không tạo được. |
 | **BR-BK-000-H** | — Guest participants (không có app) IF: Customer booking cho người khác không có app THEN: Tạo `booking_participant` với `participant_type = WALK_IN_GUEST`, điền tên + SĐT. NOTE: Người đặt chính (`is_primary_responsible = true`) vẫn chịu trách nhiệm tài chính. |
-| **BR-BK-000-I** | — MIXED mode booking IF: `play_mode = MIXED` THEN: `booking_vehicles` chỉ chứa xe RENTAL dự kiến; xe BYOC được chốt khi check-in qua `session_vehicles.customer_vehicle_id`. RENTAL vehicles: kiểm tra availability, tính rental_fee + deposit. BYOC vehicles: kiểm tra byoc_capacity, không tính rental_fee/deposit. - Sân phải thuộc `cafe.track_types` - RENTAL: hệ thống chỉ hiển thị xe có `compatible_track_types` rỗng hoặc chứa sân đã chọn - BYOC: hiển thị tất cả sân của cafe, customer tự quyết định |
-| **BR-BK-001** | — Snapshot giá tại thời điểm tạo IF: Customer tạo booking THEN: System snapshot toàn bộ giá (slot_fee_rate, rental_fee, security_deposit, damage_multiplier, platform_fee_pct) vào `booking.snapshot` NOTE: Mọi tính toán tiền SAU ĐÓ đều dùng snapshot — không dùng giá hiện tại của Cafe/Vehicle |
-| **BR-BK-002** | — Booking mode IF: Customer chọn xe từ fleet của quán THEN: `play_mode = RENTAL` hoặc `MIXED`, tạo một hoặc nhiều row trong `booking_vehicles` IF: Customer mang xe cá nhân THEN: `play_mode = BYOC` hoặc `MIXED`; không lưu xe BYOC trong `booking_vehicles`, chốt xe thực tế ở `session_vehicles` |
+| **BR-BK-000-I** | ⛔ **KHÔNG CÒN HIỆU LỰC** — `play_mode` chỉ nhận RENTAL hoặc BYOC; giá trị MIXED không tạo được. Cột `session_vehicles.customer_vehicle_id` đã bị xoá. Nhóm vừa thuê vừa mang xe riêng phải tách thành hai booking. - Sân phải thuộc `cafe.track_types` - RENTAL: hệ thống chỉ hiển thị xe có `compatible_track_types` rỗng hoặc chứa sân đã chọn - BYOC: hiển thị tất cả sân của cafe, customer tự quyết định |
+| **BR-BK-001** | — Snapshot giá tại thời điểm tạo IF: Customer tạo booking THEN: System snapshot toàn bộ giá (slot_fee_rate, rental_fee, damage_multiplier, platform_fee_pct) vào `booking.snapshot` NOTE: `platform_fee_pct` luôn bằng 0; `security_deposit_snapshot` còn cột nhưng luôn bằng 0 NOTE: Mọi tính toán tiền SAU ĐÓ đều dùng snapshot — không dùng giá hiện tại của Cafe/Vehicle |
+| **BR-BK-002** | — Play mode IF: Customer chọn xe từ fleet của quán THEN: `play_mode = RENTAL`, tạo một hoặc nhiều row trong `booking_vehicles` IF: Customer mang xe cá nhân THEN: `play_mode = BYOC`; chốt xe thực tế ở `session_vehicles` |
 | **BR-BK-003** | — Cafe phải ACTIVE IF: Cafe có `status ≠ ACTIVE` THEN: Không cho phép tạo booking tại cafe đó |
 | **BR-BK-004** | — Không được đặt trùng slot IF: Xe đã có booking PENDING hoặc CONFIRMED trong khung giờ đó THEN: Từ chối booking mới cho xe đó trong cùng khung giờ |
 | **BR-BK-005** | — Booking channels Customer có thể tạo booking qua 3 kênh: - App trực tiếp (Customer tự đặt) - Shareable link (Provider/Staff tạo link → Customer bấm vào đặt) - Staff tạo thủ công (walk-in hoặc gọi điện) |
 | **BR-BK-006** | — Slot lock bằng Redis trước khi tạo booking IF: Customer xác nhận đặt lịch THEN: Hệ thống thực hiện theo thứ tự: 1. SET NX Redis key cho slot (RENTAL) hoặc INCR counter (BYOC) — TTL 1800s 2. Nếu Redis báo slot đang bị giữ → từ chối ngay, KHÔNG tạo booking 3. Nếu Redis thành công → tạo booking (status = PENDING) trong DB |
-| **BR-BK-006-B** | — Window thanh toán IF: Booking ở status = PENDING THEN: Customer phải hoàn thành thanh toán trong 30 phút (`payment_expires_at = created_at + 30m`) IF: Thanh toán thành công THEN: `booking.status = CONFIRMED`, DEL Redis key IF: Hết 30 phút chưa thanh toán THEN: Redis key hết TTL tự giải phóng slot. Cron cập nhật status = CANCELLED + rollback promo. |
+| **BR-BK-006-B** | — Window thanh toán IF: Booking ở status = PENDING THEN: Customer phải hoàn thành thanh toán trước `payment_expires_at` — mặc định 30 phút, đổi được qua `PAYMENT_WINDOW_MINUTES` IF: Thanh toán thành công THEN: `booking.status = CONFIRMED`, DEL Redis key IF: Hết 30 phút chưa thanh toán THEN: Redis key hết TTL tự giải phóng slot. Cron cập nhật status = CANCELLED + rollback promo. |
 | **BR-BK-007** | — F&B pre-order gộp vào 1 lần thanh toán IF: Customer chọn F&B pre-order khi đặt lịch THEN: Tổng thanh toán = booking fee + F&B pre-order fee (1 transaction duy nhất) |
-| **BR-BK-008** | — Customer huỷ trước 24h IF: Customer huỷ và thời điểm huỷ > 24h trước `slot_start` THEN: Hoàn 100% SLOT_FEE + 100% RENTAL_FEE + 100% DEPOSIT |
-| **BR-BK-009** | — Customer huỷ 12–24h trước giờ chơi IF: Customer huỷ và thời điểm huỷ trong khoảng 12–24h trước `slot_start` THEN: Hoàn 50% SLOT_FEE + 100% RENTAL_FEE + 100% DEPOSIT |
-| **BR-BK-010** | — Customer huỷ dưới 12h trước giờ chơi IF: Customer huỷ và thời điểm huỷ < 12h trước `slot_start` THEN: Hoàn 0% SLOT_FEE + 100% RENTAL_FEE + 100% DEPOSIT |
+| **BR-BK-008** | — Customer huỷ trước 24h IF: Customer huỷ và thời điểm huỷ > 24h trước `slot_start` THEN: Hoàn 100% SLOT_FEE + 100% RENTAL_FEE + 100% F&B pre-order |
+| **BR-BK-009** | — Customer huỷ 12–24h trước giờ chơi IF: Customer huỷ và thời điểm huỷ trong khoảng 12–24h trước `slot_start` THEN: Hoàn 50% SLOT_FEE + 100% RENTAL_FEE + 100% F&B pre-order |
+| **BR-BK-010** | — Customer huỷ dưới 12h trước giờ chơi IF: Customer huỷ và thời điểm huỷ < 12h trước `slot_start` THEN: Hoàn 0% SLOT_FEE + 100% RENTAL_FEE + 100% F&B pre-order |
 | **BR-BK-011** | — Provider/Staff huỷ booking IF: Provider hoặc Staff huỷ booking (bất kỳ thời điểm nào) THEN: Hoàn 100% tất cả components. Platform KHÔNG thu phí |
 | **BR-BK-012** | — Huỷ sau khi đã check-in IF: Booking đã có session thực tế đang `ACTIVE`, `CHECKING_OUT` hoặc `COMPLETED` THEN: Không thể huỷ booking; xử lý bằng check-out, payment settlement và incident policy nếu có sự cố |
-| **BR-BK-013** | — Timeout no-show IF: Booking đang CONFIRMED và Staff không check-in trong vòng 30 phút sau `slot_start` THEN: Auto-cancel - SLOT_FEE: hoàn 0% (phí huỷ muộn) - RENTAL_FEE: hoàn 100% - SECURITY_DEPOSIT: hoàn 100% |
+| **BR-BK-013** | — Timeout no-show IF: Booking đang CONFIRMED và Staff không check-in trong vòng 30 phút sau `slot_start` THEN: Auto-cancel - SLOT_FEE: hoàn 0% (phí huỷ muộn) - RENTAL_FEE: hoàn 100% - F&B pre-order: hoàn 100% |
 | **BR-BK-014** | — Eligibility BYOC IF: Customer chọn BYOC THEN: Không cần điều kiện đặc biệt về trust_score |
 | **BR-BK-015** | — Eligibility RENTAL xe STANDARD IF: Customer muốn thuê xe STANDARD THEN: Cho phép tất cả customer (không phụ thuộc trust_score) |
 | **BR-BK-016** | — Eligibility RENTAL xe PREMIUM IF: Customer muốn thuê xe PREMIUM THEN: Cần đủ điều kiện (điều kiện cụ thể TBD — trust_score hoặc lịch sử booking) |
@@ -64,7 +64,7 @@
 | **BR-BL-001** | [Booking la ke hoach, Session la thuc te]  IF: Customer tao don dat lich THEN: He thong tao `Booking` de giu ke hoach: cafe, slot, mode, participants du kien, rental vehicles du kien, gia snapshot. NOTE: Khong xem Booking la "dang choi". Khach chi thuc su vao san khi Staff check-in va tao `Session`. |
 | **BR-BL-002** | [Khong bao gio luu xe thuc te truc tiep tren Booking]  IF: Booking co thue xe cua quan THEN: Xe du kien nam trong `booking_vehicles`. IF: Khach mang xe rieng THEN: Xe BYOC chi duoc chot khi check-in qua `session_vehicles.customer_vehicle_id`. |
 | **BR-BL-003** | [Check-in phai qua Staff]  IF: Booking da `CONFIRMED` va customer den quan THEN: Staff quet ma/nhap ma booking, kiem tra booking hop le, tao `Session(status=CHECKED_IN)`, ghi nhan nguoi/xe thuc te, thuc hien inspection dau vao. NOTE: Customer khong tu chuyen booking sang ACTIVE. |
-| **BR-BL-004** | [Evidence la dieu kien de tinh damage]  IF: Provider muon tinh `DAMAGE_CHARGE` THEN: Phai co inspection check-in va check-out hop le: anh bat buoc, checklist day du, baseline duoc customer confirm hoac auto-confirm. NOTE: Thieu evidence hop le thi Provider mat co so tinh damage. |
+| **BR-BL-004** | [Evidence la dieu kien de tinh damage]  IF: Provider muon tinh `DAMAGE_CHARGE` THEN: Phai co inspection check-in va check-out hop le: co anh va checklist, baseline duoc customer xac nhan (khong co auto-confirm). NOTE: Thieu evidence hop le thi Provider mat co so tinh damage. |
 | **BR-BL-005** | [Payment settlement theo Session]  IF: Session hoan tat check-out THEN: `PaymentEngine.settle(sessionId)` xu ly component cua phien do. NOTE: Booking chi chuyen `COMPLETED` khi tat ca sessions cua booking da `COMPLETED`. |
 | **BR-BL-006** | [Booking mode khong thay doi session protocol]  IF: Booking da duoc xac nhan du dieu kien vao san THEN: `SINGLE`, `PACKAGE`, `SUBSCRIPTION` deu di qua cung luong Staff check-in -> Session -> inspection -> active -> checkout. |
 | **BR-BL-007** | [Availability luon la bat buoc]  IF: Customer dung package hoac lich dinh ky THEN: He thong van phai check slot, rental vehicle, BYOC capacity, cafe closure va operating hours nhu booking binh thuong. NOTE: Mua goi/lap lich truoc khong co nghia la duoc chen vao slot da full. |
@@ -104,14 +104,14 @@
 | **BR-BL-070** | [BYOC khong co rental fee/deposit xe quan]  IF: Booking `play_mode = BYOC` THEN: Khong tao `booking_vehicles`, khong co rental fee/security deposit cho fleet vehicle. NOTE: Van co slot fee va co the co F&B/pre-order/package/promotion. |
 | **BR-BL-071** | [BYOC capacity check khi booking]  IF: Customer dat BYOC THEN: He thong check `cafe.byoc_capacity` theo slot va track type cua cafe. |
 | **BR-BL-072** | [BYOC vehicle chot khi check-in]  IF: Customer den quan voi xe ca nhan THEN: Staff chon/tao `customer_vehicle`, tao `session_vehicle(vehicle_source=BYOC)`, thuc hien inspection check-in cho xe BYOC va facility baseline neu can. |
-| **BR-BL-073** | [MIXED tach rental va BYOC]  IF: Booking `play_mode = MIXED` THEN: Rental part di qua `booking_vehicles`; BYOC part chi chot o `session_vehicles` tai check-in. Settlement tinh rental/deposit cho rental vehicles, khong tinh rental/deposit cho BYOC vehicles. |
+| **BR-BL-073** | ⛔ **KHONG CON HIEU LUC** — `play_mode` chi nhan RENTAL hoac BYOC; cot `session_vehicles.customer_vehicle_id` da bi xoa cung bang `customer_vehicles`. |
 | **BR-BL-080** | [QR/code chi la dinh danh, khong phai quyen vao san]  IF: Customer dua QR/code THEN: Staff scan de tim booking, nhung he thong van phai validate status, cafe, time window, payment va risk flags. |
 | **BR-BL-081** | [Time window check-in]  IF: Current time < slot_start tru mot khoang early check-in cho phep THEN: Khong cho start session, hoac can manager override. IF: Current time > slot_start + 30 phut va chua co session THEN: Booking bi xu ly `NO_SHOW`. |
 | **BR-BL-082** | [Staff phai thuoc cafe]  IF: Staff khong duoc assign vao cafe cua booking THEN: Khong duoc check-in/check-out booking do. |
 | **BR-BL-083** | [Planned vs actual participants]  IF: Nguoi den thuc te khac danh sach dat truoc THEN: Staff cap nhat `session_participants`; khong sua nguoc `booking_participants` tru khi co luong edit booking rieng. |
 | **BR-BL-090** | [Check-out bat dau tu Session ACTIVE]  IF: Customer het gio hoac muon dung som THEN: Staff chuyen session `ACTIVE -> CHECKING_OUT` va thuc hien inspection check-out. |
-| **BR-BL-091** | [Khong damage]  IF: Check-out inspection khong co damage moi THEN: Customer confirm hoac auto-confirm sau 2 gio; settlement tinh slot/rental/extension/F&B preorder va hoan tat session. |
-| **BR-BL-092** | [Co damage]  IF: Staff danh dau damage moi THEN: Staff nhap mo ta, estimate cost; he thong tinh `damage_charge = cost * damage_multiplier`; customer confirm hoac phan doi. NOTE: Im lang 24 gio = auto-confirm damage charge theo state machine. |
+| **BR-BL-091** | [Khong damage]  IF: Check-out inspection khong co damage moi THEN: Staff hoan tat check-out; settlement tinh slot/rental/extension/F&B va hoan tat session. Khong co auto-confirm. |
+| **BR-BL-092** | [Co damage]  IF: Staff danh dau damage moi THEN: Staff nhap mo ta, estimate cost; he thong tinh `damage_charge = tong (parts_price + labor_price)` cua damage_line_items; customer confirm hoac phan doi. NOTE: Khong co timeout tu dong chot tien hu hong. |
 | **BR-BL-093** | [Phan doi damage]  IF: Customer khong dong y damage THEN: He thong tao incident/dispute tuy muc do; deposit/payment hold giu theo policy cho den khi resolved/waived. |
 | **BR-BL-094** | [Vehicle release]  IF: Session completed va rental vehicle khong can maintenance THEN: `vehicle.status -> AVAILABLE`. IF: Damage can xu ly THEN: Staff/Provider co the dua xe sang `MAINTENANCE`. |
 
@@ -121,7 +121,7 @@
 | ID | Định nghĩa Quy tắc Nghiệp vụ |
 |---|---|
 | **BR-FL-001** | — Phân loại tier Ba tier cho xe trong fleet, theo thứ tự tăng dần về giá trị và rủi ro: |
-| **BR-FL-002** | — Giá và deposit per-branch IF: Provider cấu hình xe cho 1 chi nhánh THEN: `hourly_rate` và `security_deposit` là config riêng của chi nhánh đó — các chi nhánh khác có thể khác nhau |
+| **BR-FL-002** | — Giá thuê theo từng chi nhánh IF: Provider cấu hình xe cho 1 chi nhánh THEN: `hourly_rate` là config riêng của chi nhánh đó. `vehicle_catalogs.security_deposit` còn cột nhưng không vào công thức nào — hệ thống đã bỏ cọc. |
 | **BR-FL-003** | — Xe chỉ cho thuê khi AVAILABLE IF: `vehicle.status ≠ AVAILABLE` THEN: Không thể tạo booking RENTAL cho xe đó |
 | **BR-FL-004** | — Xe chuyển sang IN_USE khi check-in (session) IF: Staff check-in thành công → tạo session THEN: Với mỗi session_vehicle có `vehicle_source = 'RENTAL'`, `vehicle.status → IN_USE` |
 | **BR-FL-005** | — Xe trở về AVAILABLE sau check-out (session) IF: Session COMPLETED (hoặc CANCELLED sau khi đã IN_USE) THEN: Với mỗi session_vehicle có `vehicle_source = 'RENTAL'`, `vehicle.status → AVAILABLE` |
@@ -153,20 +153,20 @@
 
 | ID | Định nghĩa Quy tắc Nghiệp vụ |
 |---|---|
-| **BR-IN-001** | — 4 ảnh bắt buộc IF: Staff đang submit inspection (check-in hoặc check-out) THEN: Phải upload đủ 4 ảnh: FRONT, BACK, LEFT, RIGHT NOTE: Thiếu 1 trong 4 → không thể submit |
-| **BR-IN-002** | — Checklist đầy đủ Tất cả fields trong checklist đều required: `scratches`, `cracks`, `missing_parts`, `notes` String rỗng hợp lệ (= "none"), nhưng không được null |
+| **BR-IN-001** | — Ảnh theo bốn góc (quy ước, CHƯA cưỡng chế). Schema hiện tại `photos: z.array(...).max(6).optional()` — tối đa 6 ảnh, không bắt buộc ảnh nào. Thiếu góc vẫn submit được. |
+| **BR-IN-002** | — Checklist: các trường `scratches`, `cracks`, `missing_parts`, `notes` được thiết kế để điền đủ, nhưng tầng schema chưa bắt buộc. |
 | **BR-IN-003** | — Pre_existing_flag chỉ có giá trị khi Cả 3 điều kiện phải đúng: 1. 4 ảnh đầy đủ 2. Checklist đầy đủ 3. Customer đã confirm inspection |
 | **BR-IN-004** | — Chỉ 1 check-in per session Mỗi session chỉ được có đúng 1 `Inspection` loại `CHECK_IN` |
 | **BR-IN-005** | — Staff phải thuộc chi nhánh IF: Staff không được assign vào chi nhánh của session đó (`staff_cafe_assignments`) THEN: Không thể thực hiện check-in |
 | **BR-IN-006** | — RENTAL check-in: lấy xe từ fleet IF: `play_mode = RENTAL` hoặc session vehicle có `vehicle_source = RENTAL` THEN: Staff lấy xe → `vehicle.status → IN_USE` → chụp 4 góc xe → checklist |
 | **BR-IN-007** | — BYOC check-in: xe của Customer IF: `play_mode = BYOC` hoặc session vehicle có `vehicle_source = BYOC` THEN: Staff chụp 4 góc xe của Customer + ảnh cơ sở vật chất (track, barriers) Checklist an toàn: `battery_secured`, `no_sharp_protrusions`, `weight_compliant`, `notes` |
-| **BR-IN-008** | — Customer confirm check-in IF: Inspection CHECK_IN được tạo THEN: Push notification đến Customer → Customer xem ảnh + checklist → confirm Timeout: 15 phút. Nếu không confirm → auto-confirm (log lại) |
-| **BR-IN-009** | — Session chuyển ACTIVE sau check-in IF: Customer confirm (hoặc auto-confirm) check-in THEN: `session.status → ACTIVE` |
+| **BR-IN-008** | — Customer confirm check-in IF: Inspection CHECK_IN được tạo THEN: Push notification đến Customer → Customer xem ảnh + checklist → confirm Không có timeout. Chưa xác nhận thì inspection cứ chờ — hệ thống không tự xác nhận thay khách. |
+| **BR-IN-009** | — Session chuyển ACTIVE sau check-in IF: Customer confirm check-in THEN: `session.status → ACTIVE` |
 | **BR-IN-010** | — Check-out bắt đầu từ ACTIVE IF: Staff bắt đầu check-out THEN: `session.status → CHECKING_OUT` ngay lập tức |
 | **BR-IN-011** | — Chụp cùng 4 góc như check-in Staff chụp lại 4 góc (FRONT, BACK, LEFT, RIGHT) để so sánh với ảnh check-in |
-| **BR-IN-012** | — Staff đánh dấu damage Sau khi so sánh ảnh check-in vs check-out, Staff phải chọn: - "Không có damage" → notify Customer confirm check-out - "Có damage mới" → nhập mô tả + ước tính damage_cost → notify Customer |
-| **BR-IN-013** | — Customer confirm không có damage Timeout: 2 giờ. Im lặng = auto-confirm IF: Confirmed → `session.status → COMPLETED` |
-| **BR-IN-014** | — Customer nhận damage notification Timeout: 24 giờ. Im lặng = auto-confirm damage charge IF: Customer xác nhận → COMPLETED IF: Customer từ chối → có 2 hướng xử lý: - Tạo `incidents` (incident policy-based): Staff/Admin áp rule, ghi `responsible_party` + `resolution_note` - Mở `disputes` (tranh chấp chính thức): Admin xét xử dựa trên digital evidence từ inspection |
+| **BR-IN-012** | — Staff đánh dấu damage Hệ thống KHÔNG so sánh tự động; staff tự đối chiếu hai bản ghi rồi chọn: - "Không có damage" → notify Customer confirm check-out - "Có damage mới" → nhập mô tả + ước tính damage_cost → notify Customer |
+| **BR-IN-013** | — Customer xác nhận không có damage. Không có timeout tự động; session chuyển COMPLETED khi staff hoàn tất check-out. |
+| **BR-IN-014** | — Customer nhận damage notification Không có timeout tự động chốt tiền hư hỏng. IF: Customer xác nhận → COMPLETED IF: Customer từ chối → có 2 hướng xử lý: - Tạo `incidents` (incident policy-based): Staff/Admin áp rule, ghi `responsible_party` + `resolution_note` - Mở `disputes` (tranh chấp chính thức): Admin xét xử dựa trên digital evidence từ inspection |
 | **BR-IN-015** | — Cloudinary folder convention ``` inspections/{session_id}/{session_vehicle_id}/{check_in\|check_out}/{front\|back\|left\|right} ``` Upload lên Cloudinary → lấy URL về lưu vào `inspection_photos.url`; checklist lưu ở `inspection_checklists`. |
 | **BR-IN-016** | — Retention - Tối thiểu 90 ngày sau booking COMPLETED - Nếu có incident: giữ đến 30 ngày sau incident RESOLVED/WAIVED - Nếu có dispute: giữ đến 30 ngày sau dispute RESOLVED |
 
@@ -178,7 +178,7 @@
 | **BR-EX-001** | — Chỉ gia hạn khi session ACTIVE IF: `session.status ≠ ACTIVE` THEN: Không thể đề xuất gia hạn NOTE: Đặc biệt — không cho phép gia hạn khi đang ở CHECKING_OUT |
 | **BR-EX-002** | — Staff đề xuất, Customer quyết định IF: Staff bấm "Đề xuất gia hạn" THEN: `session.status → EXTENDING` + Push notification đến Customer Customer chọn: Approve → gia hạn \| Reject → tiếp tục session bình thường |
 | **BR-EX-003** | — Gần hết giờ → notify IF: Còn X phút trước `session.planned_end_at` (thời gian cụ thể TBD) |
-| **BR-EX-004** | — Extension fee cap ``` max_extension_fee = security_deposit × 50% ``` |
+| **BR-EX-004** | — Không có trần phí gia hạn. Quy tắc cũ `max_extension_fee = security_deposit × 50%` không còn hiệu lực: đã bỏ cọc và mã nguồn không có đoạn kiểm tra trần nào. |
 | **BR-EX-004** | — Nhiều lần gia hạn Cho phép gia hạn nhiều lần trong 1 session, với điều kiện tổng phí không vượt cap (BR-EX-005) |
 | **BR-EX-005** | — Từ chối khi vượt cap IF: `tổng extension_fee tích lũy + extension_fee_mới > max_extension_fee` THEN: Từ chối extension proposal. Notify Customer đã đạt giới hạn gia hạn. |
 | **BR-EX-005** | — Slot_end cập nhật IF: Extension được approve THEN: `session.planned_end_at` cập nhật theo thời gian gia hạn mới |
@@ -194,17 +194,17 @@
 | **BR-PM-003** | — Component isolation Mỗi PaymentComponent có vòng đời độc lập (PENDING → HELD → DISBURSED / REFUNDED) |
 | **BR-PM-004** | — Components khi booking CONFIRMED IF: Booking chuyển sang CONFIRMED (thanh toán thành công) THEN: Tạo các components sau: - `SLOT_FEE` (HELD) — luôn tạo - `RENTAL_FEE` (HELD) — tạo cho mỗi xe thuê trong `booking_vehicles` - `SECURITY_DEPOSIT` (HELD) — tạo cho mỗi xe thuê trong `booking_vehicles` |
 | **BR-PM-004** | [a] — FB_PREORDER component IF: Booking có F&B pre-order THEN: Tạo `FB_PREORDER` (HELD) component, gộp vào 1 lần thanh toán |
-| **BR-PM-005** | — Extension fee component IF: Extension được approve (theo session) THEN: Tạo `EXTENSION_FEE` (HELD), liên kết `session_id`; cộng dồn tổng không vượt 50% security_deposit |
-| **BR-PM-006** | — Damage charge component IF: Check-out có damage và customer confirm (hoặc auto-confirm) THEN: Tạo `DAMAGE_CHARGE` (HELD → DISBURSED) |
+| **BR-PM-005** | — Extension fee component IF: Extension được approve (theo session) THEN: Tạo `EXTENSION_FEE` (PENDING), liên kết `session_id`, thu ở checkout. Không có trần cộng dồn. |
+| **BR-PM-006** | — Damage charge component IF: Check-out có damage và staff ghi nhận hạng mục hư hỏng THEN: Tạo `DAMAGE_CHARGE`, thu ở checkout |
 | **BR-PM-007** | — Disburse về Provider (khi session COMPLETED) Khi session COMPLETED, disburse các components sau về Provider cho session đó: - `SLOT_FEE` (toàn bộ hoặc pro-rata nếu early checkout) - `RENTAL_FEE` (từng xe) - `EXTENSION_FEE` - `DAMAGE_CHARGE` (nếu có) |
 | **BR-PM-008** | — Hoàn deposit về Customer (khi session COMPLETED) Khi session COMPLETED: - Nếu không có damage: hoàn 100% `SECURITY_DEPOSIT` về Customer - Nếu có damage: hoàn phần còn lại sau khi trừ `DAMAGE_CHARGE` |
-| **BR-PM-009** | — Platform fee ``` platform_fee = 15% × tổng amount disbursed về Provider ``` Tính trên: SLOT_FEE + RENTAL_FEE + EXTENSION_FEE + DAMAGE_CHARGE KHÔNG tính trên: SECURITY_DEPOSIT (tiền của Customer, không phải doanh thu) Platform fee = 0% trên F&B (cả pre-order và on-site) |
+| **BR-PM-009** | — Platform fee ``` platform_fee = 0 ``` Nền tảng không thu phần trăm trên bất kỳ khoản nào của booking. `platform_fee_pct` đặt cứng bằng 0 trong payment.service.ts. Doanh thu nền tảng là phí thuê bao SaaS và phí tổ chức giải. |
 | **BR-PM-010** | — R1: Customer huỷ (theo thời điểm) |
 | **BR-PM-011** | — R2: Provider huỷ IF: Provider huỷ booking THEN: Hoàn 100% tất cả components. Platform KHÔNG thu phí. |
-| **BR-PM-012** | — R3: Timeout / No-show IF: Customer no-show (không check-in trong 30 phút sau slot_start) THEN: - SLOT_FEE: hoàn 0% - RENTAL_FEE: hoàn 100% - SECURITY_DEPOSIT: hoàn 100% |
+| **BR-PM-012** | — R3: Timeout / No-show IF: Customer no-show (không check-in trong 30 phút sau slot_start) THEN: - SLOT_FEE: hoàn 0% - RENTAL_FEE: hoàn 100% - F&B pre-order: hoàn 100% |
 | **BR-PM-013** | — Công thức tính damage ``` damage_charge = base_damage_cost × vehicle.damage_multiplier ``` |
-| **BR-PM-014** | — Damage trong giới hạn deposit IF: `damage_charge ≤ security_deposit` THEN: Trừ vào deposit, hoàn phần còn lại về Customer |
-| **BR-PM-015** | — Damage vượt deposit IF: `damage_charge > security_deposit` THEN: Trừ toàn bộ deposit. Tạo charge request bổ sung (xử lý thủ công — ngoài scope MVP) |
+| **BR-PM-014** | — Không bù trừ vào cọc. Không có cọc để trừ; toàn bộ `damage_charge` là khoản thu thêm ở checkout. |
+| **BR-PM-015** | — (đã gộp vào BR-PM-014: không còn cọc để so sánh) |
 | **BR-PM-016** | — Pre-existing damage không tính IF: Hư hỏng đã được flag ở check-in (`pre_existing_flag = true`) VÀ customer đã confirm THEN: KHÔNG tính `damage_charge` cho hư hỏng đó |
 | **BR-PM-017** | — F&B pre-order: gộp 1 transaction IF: Customer đặt F&B pre-order khi booking THEN: Thanh toán F&B pre-order gộp cùng booking fee vào 1 lần qua gateway |
 | **BR-PM-018** | — F&B on-site: ngoài platform IF: Staff ghi F&B order tại quán THEN: Customer trả thẳng Provider (tiền mặt hoặc chuyển khoản). Platform không xử lý khoản này. |
@@ -218,7 +218,7 @@
 | **BR-PR-002** | — Ai được tạo mã |
 | **BR-PR-003** | — Thứ tự validate (fail nhanh — dừng ngay lỗi đầu tiên) |
 | **BR-PR-004** | — Công thức tính giảm giá |
-| **BR-PR-005** | — Những gì KHÔNG được discount `security_deposit` không bị ảnh hưởng — đây là tiền giữ, không phải phí. |
+| **BR-PR-005** | — Những gì KHÔNG được discount. Mã giảm giá chỉ áp lên `slot_fee` và `rental_fee`; không áp lên F&B, lệ phí giải, phí gia hạn hay tiền hư hỏng. |
 | **BR-PR-006** | — Thời điểm lock usage Mã được lock tại thời điểm tạo booking (status = PENDING): |
 | **BR-PR-007** | — Rollback khi booking bị huỷ trước khi thanh toán IF: Booking bị auto-cancel do hết 30 phút payment window (status PENDING → CANCELLED) THEN: Cron job xử lý (không dùng Redis — promo rollback là DB operation): ``` UPDATE promotions SET uses_count = uses_count - 1 WHERE id = :promoId; DELETE FROM promotion_usages WHERE booking_id = :bookingId; ``` NOTE: Redis TTL chỉ giải phóng slot (availability). Promo rollback do cron đảm nhiệm sau đó. |
 | **BR-PR-008** | — 1 booking chỉ dùng 1 mã `promotion_usages.booking_id` có UNIQUE constraint — không thể áp 2 mã cho 1 booking. |
@@ -269,7 +269,7 @@
 | **BR-RP-041** | [Branch payout override là optional]  IF: Provider muốn mỗi chi nhánh nhận tiền vào tài khoản riêng THEN: Cho phép `cafe_payout_profile` override profile provider. NOTE: Phase 1 có thể chưa cần bảng riêng, chỉ cần revenue report theo cafe và payout về provider-level bank. |
 | **BR-RP-042** | [Không payout khi còn dispute nghiêm trọng]  IF: Session có dispute/damage chưa resolved THEN: Khoản liên quan giữ ở trạng thái `PENDING_SETTLEMENT` hoặc `ON_HOLD` trong report. |
 | **BR-RP-050** | [Settlement report theo chu kỳ]  IF: Đến cuối ngày hoặc cuối tuần THEN: Hệ thống gom các session đã completed thành settlement report theo provider/cafe. |
-| **BR-RP-051** | [Payout amount]  ``` gross_revenue = SLOT_FEE + RENTAL_FEE + EXTENSION_FEE + DAMAGE_CHARGE + FNB_PREORDER commission_base = SLOT_FEE + RENTAL_FEE + EXTENSION_FEE + DAMAGE_CHARGE platform_fee = commission_base * platform_fee_pct net_payout = gross_revenue - platform_fee - refunds - provider_penalties ``` |
+| **BR-RP-051** | [Payout amount]  ``` gross_revenue = SLOT_FEE + RENTAL_FEE + EXTENSION_FEE + DAMAGE_CHARGE + FNB_PREORDER + FNB_ON_SITE + CONTEST_ENTRY_FEE platform_fee = 0 net_payout = gross_revenue - refunds - provider_penalties ``` |
 | **BR-RP-052** | [Payout status]  Mỗi payout/report nên có status: |
 
 

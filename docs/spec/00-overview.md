@@ -25,7 +25,9 @@ Hai nhóm khách chính:
 
 - **RENTAL customers**: thuê xe của quán.
 - **BYOC customers** (Bring Your Own Car): mang xe cá nhân đến chơi.
-- **MIXED mode**: một nhóm vừa thuê xe quán vừa mang xe cá nhân.
+> `bookings.play_mode` chỉ nhận `RENTAL` hoặc `BYOC`. Enum DB còn giá trị `MIXED`
+> nhưng code không tạo được và chưa booking nào dùng. Nhóm vừa thuê vừa mang xe
+> riêng hiện phải tách thành hai booking.
 
 **Kiến trúc dữ liệu cốt lõi:**
 
@@ -85,7 +87,7 @@ Phase 1 giữ các nghiệp vụ chính của hệ thống. Đây không chỉ l
 - **Staff-cafe assignment** — Staff thuộc đúng 1 chi nhánh (`cafe_staff`).
 - Vehicle fleet management cơ bản.
 - BYOC vehicle registry.
-- Booking lifecycle cho `RENTAL`, `BYOC`, `MIXED`.
+- Booking lifecycle cho `RENTAL` và `BYOC`.
 - Multi-vehicle booking qua `booking_vehicles`.
 - Planned participants và actual participants.
 - Multiple sessions per booking.
@@ -95,17 +97,17 @@ Phase 1 giữ các nghiệp vụ chính của hệ thống. Đây không chỉ l
 - Component-based payment và gateway transaction log.
 - F&B: menu, pre-order khi đặt lịch, on-site order trong session.
 - Packages/gói chơi và lịch sử sử dụng gói.
-- Subscriptions/lịch chơi định kỳ sinh booking.
+- ~~Subscriptions/lịch chơi định kỳ sinh booking~~ — **chưa làm**. Bảng `subscriptions` đã bị xoá; `bookings.booking_mode` thực tế luôn là `SINGLE`.
 - Contests/tournament: Provider tạo event trong phạm vi cafe của Provider, Customer đăng ký, Staff/Provider check-in, match/result/leaderboard local thủ công và audit monitoring.
 - Promotions cơ bản và usage audit.
-- Incident logging + policy-based resolution để xử lý hư hỏng/va chạm ở mức Phase 1.
+- ~~Incident logging + policy-based resolution~~ — **chưa làm**. Bảng `incidents` đã bị xoá. Hư hỏng ghi qua `damage_line_items` trên inspection check-out.
 - Vehicle maintenance logs để theo dõi bảo trì/sửa chữa xe.
 - Reviews.
-- Notification logs cơ bản.
-- Trust score hiện tại trên `users` và audit qua `trust_score_logs`.
+- Thông báo qua bảng `notifications` (bảng `notification_logs` đã bị xoá).
+- ~~Trust score + audit qua `trust_score_logs`~~ — **chưa làm**. Bảng đã bị xoá; cột trust score trên `users` không có đường ghi nào.
 - Feature flags có `config` để bật/tắt module và chuẩn bị AI Phase 2.
 
-**Phase 1 database target:** 50 bảng vận hành. Bao gồm SaaS billing, staff assignment, cafe closures/announcements, dispute cơ bản và Contest compact tournament flow (`contest_matches`, `contest_match_participants`, `contest_audit_logs`). Multi-party dispute workflow nâng cao và contest live timing/multi-class/reward-claim lifecycle chuyển sang Phase 2+.
+**Database hiện tại: 70 bảng vận hành** (xem `06-database.md` mục 3 — danh sách đối chiếu trực tiếp với `pg_tables`). Bao gồm SaaS billing, staff assignment, Contest compact tournament flow, F&B, gói chơi và thanh toán chuyển khoản ngân hàng. Cafe closures/announcements và dispute workflow **không được xây**. Contest live timing/multi-class/reward-claim chuyển sang Phase 2+.
 
 ### Phase 2 — AI nâng cao + Business Expansion
 
@@ -129,9 +131,9 @@ Các module sau không thuộc Phase 1:
 6. Booking phải lưu snapshot giá/policy.
 7. Payment phải dùng component-based ledger.
 8. Inspection phải có ảnh và checklist.
-9. Trust score phải có audit log.
+9. ~~Trust score phải có audit log~~ — chưa triển khai, bảng audit đã bị xoá.
 10. Package/subscription/contest/F&B/maintenance là Phase 1 core.
-11. Tranh chấp Phase 1 dùng bảng `disputes` + evidence từ inspection. Multi-party dispute workflow nâng cao là Phase 2.
+11. ~~Tranh chấp dùng bảng `disputes`~~ — bảng đã bị xoá, chưa có luồng tranh chấp nào. Bằng chứng vẫn nằm ở inspection.
 12. Phase 2 AI/SaaS phải mở rộng được mà không redesign Phase 1 core.
 13. Universal Racing Network phải đọc từ verified `race_records`, không dùng `contests.config.leaderboard` làm global leaderboard.
 

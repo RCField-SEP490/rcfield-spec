@@ -51,9 +51,11 @@ Slot 10:00–11:00:
 Customer chọn loại sân (`DRIFT` / `CIRCUIT` / `OFFROAD`) trước khi chọn xe:
 
 **BR-BK-000-G** — Multi-vehicle booking (RENTAL)
-IF: Customer muốn thuê nhiều xe trong 1 booking (`play_mode = MIXED` hoặc 2+ RENTAL vehicles)
+IF: Customer muốn thuê nhiều xe trong 1 booking (2+ RENTAL vehicles)
 THEN: Tất cả xe đều phải available trong cùng khung giờ. Mỗi xe tạo 1 row trong `booking_vehicles`.
-NOTE: Mỗi xe có rental_fee + security_deposit riêng. Xử lý refund/damage per-vehicle độc lập.
+NOTE: Mỗi xe có `rental_fee` riêng. Xử lý refund/damage per-vehicle độc lập.
+NOTE: `play_mode` chỉ nhận `RENTAL` hoặc `BYOC`. Giá trị `MIXED` còn trong enum DB
+      nhưng code không tạo được và chưa booking nào dùng.
 
 **BR-BK-000-H** — Guest participants (không có app)
 IF: Customer booking cho người khác không có app
@@ -61,10 +63,16 @@ THEN: Tạo `booking_participant` với `participant_type = WALK_IN_GUEST`, đi�
 NOTE: Người đặt chính (`is_primary_responsible = true`) vẫn chịu trách nhiệm tài chính.
 
 **BR-BK-000-I** — MIXED mode booking
-IF: `play_mode = MIXED`
-THEN: `booking_vehicles` chỉ chứa xe RENTAL dự kiến; xe BYOC được chốt khi check-in qua `session_vehicles.customer_vehicle_id`.
-RENTAL vehicles: kiểm tra availability, tính rental_fee + deposit.
-BYOC vehicles: kiểm tra byoc_capacity, không tính rental_fee/deposit.
+
+> ⛔ **QUY TẮC KHÔNG CÒN HIỆU LỰC.** `bookings.play_mode` chỉ nhận `RENTAL` hoặc
+> `BYOC`. Giá trị `MIXED` còn trong enum DB nhưng code không tạo được và chưa
+> booking nào dùng. Ngoài ra cột `session_vehicles.customer_vehicle_id` đã bị
+> xoá cùng bảng `customer_vehicles`.
+
+Nhóm vừa thuê xe quán vừa mang xe riêng hiện phải tách thành hai booking:
+một `RENTAL` và một `BYOC`.
+
+Quy tắc chọn sân vẫn áp dụng cho cả hai chế độ:
 - Sân phải thuộc `cafe.track_types`
 - RENTAL: hệ thống chỉ hiển thị xe có `compatible_track_types` rỗng hoặc chứa sân đã chọn
 - BYOC: hiển thị tất cả sân của cafe, customer tự quyết định
@@ -75,14 +83,15 @@ BYOC vehicles: kiểm tra byoc_capacity, không tính rental_fee/deposit.
 
 **BR-BK-001** — Snapshot giá tại thời điểm tạo  
 IF: Customer tạo booking  
-THEN: System snapshot toàn bộ giá (slot_fee_rate, rental_fee, security_deposit, damage_multiplier, platform_fee_pct) vào `booking.snapshot`  
+THEN: System snapshot toàn bộ giá (slot_fee_rate, rental_fee, damage_multiplier, platform_fee_pct) vào `booking.snapshot`  
+NOTE: `platform_fee_pct` luôn bằng `0`; `security_deposit_snapshot` còn cột nhưng luôn bằng `0`  
 NOTE: Mọi tính toán tiền SAU ĐÓ đều dùng snapshot — không dùng giá hiện tại của Cafe/Vehicle
 
-**BR-BK-002** — Booking mode  
+**BR-BK-002** — Play mode  
 IF: Customer chọn xe từ fleet của quán  
-THEN: `play_mode = RENTAL` hoặc `MIXED`, tạo một hoặc nhiều row trong `booking_vehicles`  
+THEN: `play_mode = RENTAL`, tạo một hoặc nhiều row trong `booking_vehicles`  
 IF: Customer mang xe cá nhân  
-THEN: `play_mode = BYOC` hoặc `MIXED`; không lưu xe BYOC trong `booking_vehicles`, chốt xe thực tế ở `session_vehicles`
+THEN: `play_mode = BYOC`; không lưu xe trong `booking_vehicles`, chốt xe thực tế ở `session_vehicles`
 
 **BR-BK-003** — Cafe phải ACTIVE  
 IF: Cafe có `status ≠ ACTIVE`  
@@ -114,10 +123,10 @@ Cron job cập nhật `booking.status = CANCELLED` và rollback promo sau đó (
 
 **BR-BK-006-B** — Window thanh toán  
 IF: Booking ở status = PENDING  
-THEN: Customer phải hoàn thành thanh toán trong 30 phút (`payment_expires_at = created_at + 30m`)  
+THEN: Customer phải hoàn thành thanh toán trước `payment_expires_at` — mặc định 30 phút, đổi được qua biến môi trường `PAYMENT_WINDOW_MINUTES`  
 IF: Thanh toán thành công  
 THEN: `booking.status = CONFIRMED`, DEL Redis key  
-IF: Hết 30 phút chưa thanh toán  
+IF: Quá `payment_expires_at` mà chưa thanh toán  
 THEN: Redis key hết TTL tự giải phóng slot. Cron cập nhật status = CANCELLED + rollback promo.
 
 **BR-BK-007** — F&B pre-order gộp vào 1 lần thanh toán  
@@ -130,15 +139,15 @@ THEN: Tổng thanh toán = booking fee + F&B pre-order fee (1 transaction duy nh
 
 **BR-BK-008** — Customer huỷ trước 24h  
 IF: Customer huỷ và thời điểm huỷ > 24h trước `slot_start`  
-THEN: Hoàn 100% SLOT_FEE + 100% RENTAL_FEE + 100% DEPOSIT
+THEN: Hoàn 100% SLOT_FEE + 100% RENTAL_FEE + 100% F&B pre-order
 
 **BR-BK-009** — Customer huỷ 12–24h trước giờ chơi  
 IF: Customer huỷ và thời điểm huỷ trong khoảng 12–24h trước `slot_start`  
-THEN: Hoàn 50% SLOT_FEE + 100% RENTAL_FEE + 100% DEPOSIT
+THEN: Hoàn 50% SLOT_FEE + 100% RENTAL_FEE + 100% F&B pre-order
 
 **BR-BK-010** — Customer huỷ dưới 12h trước giờ chơi  
 IF: Customer huỷ và thời điểm huỷ < 12h trước `slot_start`  
-THEN: Hoàn 0% SLOT_FEE + 100% RENTAL_FEE + 100% DEPOSIT
+THEN: Hoàn 0% SLOT_FEE + 100% RENTAL_FEE + 100% F&B pre-order
 
 **BR-BK-011** — Provider/Staff huỷ booking  
 IF: Provider hoặc Staff huỷ booking (bất kỳ thời điểm nào)  
@@ -157,7 +166,7 @@ IF: Booking đang CONFIRMED và Staff không check-in trong vòng 30 phút sau `
 THEN: Auto-cancel  
 - SLOT_FEE: hoàn 0% (phí huỷ muộn)  
 - RENTAL_FEE: hoàn 100%  
-- SECURITY_DEPOSIT: hoàn 100%
+- F&B pre-order: hoàn 100%
 
 ---
 

@@ -1,8 +1,16 @@
 # 05 — API Contracts
 
-**Last updated**: 2026-07-14
+**Last updated**: 2026-08-12
 > Convention: tất cả response đều wrap trong `{ data, meta?, error? }`
 > Auth header: `Authorization: Bearer <jwt_token>`
+
+> ⚠️ **Tài liệu này KHÔNG đầy đủ.** Backend hiện có **305 endpoint** trên 42 router;
+> file này mô tả khoảng một phần ba. Khi cần chắc chắn, đọc thẳng `src/routes/`
+> hoặc mở `/api-docs` (Swagger).
+>
+> Lưu ý khi tra: hầu hết thao tác của nhân viên nằm dưới tiền tố `/staff/...`,
+> không phải `/sessions/...` như bản trước ghi. Hai router `bank-webhook` và
+> `sandbox-bank` mount ở `app.ts` chứ không qua `routes/index.ts`.
 
 ---
 
@@ -38,6 +46,8 @@
 | PATCH | `/cafes/:cafeId/vehicles/:id` | PROVIDER | Update xe (tier, rate, status) |
 | DELETE | `/cafes/:cafeId/vehicles/:id` | PROVIDER | Retire xe (soft delete) |
 
+> Danh mục xe (`vehicle_catalogs`) và từng chiếc (`vehicles`) là hai tầng riêng; xem router `vehicle-catalog.routes.ts`.
+
 ---
 
 ## Bookings
@@ -48,7 +58,11 @@
 | GET | `/bookings/:id` | Auth | Chi tiết booking + sessions |
 | POST | `/bookings` | CUSTOMER | Tạo booking mới (hỗ trợ multi-vehicle + participants) |
 | POST | `/bookings/:id/cancel` | CUSTOMER/PROVIDER | Huỷ booking |
-| POST | `/bookings/:id/payment/confirm` | CUSTOMER | Xác nhận thanh toán VNPay |
+| POST | `/payments/vnpay/create-url` | CUSTOMER | Tạo link thanh toán VNPay |
+| GET | `/payments/vnpay/return` | Public | VNPay redirect khách về |
+| GET | `/payments/vnpay/ipn` | Public | VNPay báo kết quả server-to-server |
+| POST | `/payments/bank-webhook` | Public | Webhook đối soát chuyển khoản (mount ở `app.ts`) |
+| POST | `/bookings/:id/checkout` | STAFF | Chốt phiên và thu phần phát sinh |
 
 **POST /bookings body (hỗ trợ multi-vehicle + participants):**
 ```json
@@ -88,8 +102,10 @@
 | Method | Endpoint | Actor | Mô tả |
 |--------|----------|-------|-------|
 | GET | `/bookings/:id/sessions` | Auth | List sessions của booking |
-| GET | `/sessions/:id` | Auth | Chi tiết session (participants, vehicles, inspections) |
-| POST | `/bookings/:id/sessions/checkin` | STAFF | Bắt đầu check-in → tạo session |
+| GET | `/sessions/:sessionId` | Auth | Chi tiết session (participants, vehicles, inspections) |
+| GET | `/staff/sessions/:sessionId` | STAFF | Chi tiết session cho màn hình vận hành |
+| POST | `/staff/bookings` | STAFF | Tạo booking tại quầy (walk-in) |
+| POST | `/staff/sessions/:sessionId/inspections` | STAFF | Bắt đầu check-in / check-out → tạo inspection |
 
 ---
 
@@ -99,13 +115,13 @@
 
 | Method | Endpoint | Actor | Mô tả |
 |--------|----------|-------|-------|
-| POST | `/sessions/:id/inspections/checkin` | STAFF | Submit check-in inspection |
-| POST | `/sessions/:id/inspections/checkout` | STAFF | Submit check-out inspection |
-| GET | `/sessions/:id/inspections` | Auth | Lấy inspections của session |
-| POST | `/sessions/:id/inspections/checkin/confirm` | CUSTOMER | Confirm check-in |
-| POST | `/sessions/:id/inspections/checkout/confirm` | CUSTOMER | Confirm check-out |
-| POST | `/sessions/:id/inspections/checkout/report-damage` | STAFF | Ghi nhận damage charge Phase 1 |
-| POST | `/sessions/:id/inspections/checkout/raise-incident` | CUSTOMER/STAFF | Ghi nhận incident để xử lý theo policy |
+| POST | `/staff/sessions/:sessionId/inspections` | STAFF | Submit inspection (type quyết định check-in hay check-out) |
+| PUT | `/staff/sessions/:sessionId/inspections/:inspectionId/damage-items` | STAFF | Ghi từng hạng mục hư hỏng |
+| POST | `/staff/sessions/:sessionId/confirm-checkout` | STAFF | Chốt check-out |
+| POST | `/sessions/:sessionId/inspection/confirm` | CUSTOMER | Xác nhận inspection mới nhất |
+| POST | `/sessions/:sessionId/inspections/:inspectionId/confirm` | CUSTOMER | Xác nhận đúng một inspection |
+
+> Không còn endpoint `raise-incident`: bảng `incidents` đã bị xoá.
 
 **POST /checkin body (multipart/form-data):**
 ```
@@ -126,9 +142,9 @@ pre_existing_flag: boolean
 
 | Method | Endpoint | Actor | Mô tả |
 |--------|----------|-------|-------|
-| POST | `/sessions/:id/extensions` | STAFF | Gửi đề xuất gia hạn |
-| POST | `/sessions/:id/extensions/:extId/approve` | CUSTOMER | Chấp nhận gia hạn |
-| POST | `/sessions/:id/extensions/:extId/reject` | CUSTOMER | Từ chối gia hạn |
+| POST | `/staff/sessions/:sessionId/extensions` | STAFF | Gửi đề xuất gia hạn |
+| POST | `/sessions/:sessionId/extensions/respond` | CUSTOMER | Chấp nhận hoặc từ chối |
+| POST | `/sessions/:sessionId/extension/respond` | CUSTOMER | Bí danh cũ của endpoint trên |
 
 **POST /extensions body:**
 ```json
@@ -188,6 +204,25 @@ pre_existing_flag: boolean
 | POST | `/contests/:id/open` | PROVIDER owner | DRAFT -> OPEN |
 | POST | `/contests/:id/close` | PROVIDER owner | OPEN -> CLOSED, khóa form đăng ký |
 | POST | `/contests/:id/cancel` | PROVIDER owner | Hủy contest chưa COMPLETED |
+
+### Contest Organizing Fee
+
+Phí Provider trả cho nền tảng để mở giải — tách khỏi gói SaaS hằng tháng và khác chiều với lệ phí VĐV. Xem `docs/spec/03-contest.md` mục 7 và BR-CT-090..099.
+
+| Method | Endpoint | Actor | Mô tả |
+|--------|----------|-------|-------|
+| GET | `/contest-fee-plans` | Auth | Bảng gói tổ chức đang bán |
+| GET | `/contests/:contestId/fee` | PROVIDER owner / ADMIN | Đơn hiện tại của giải + danh sách gói |
+| POST | `/contests/:contestId/fee/order` | PROVIDER owner | Chọn gói; chốt giá và số ngày quảng bá vào đơn. Chỉ khi contest còn DRAFT |
+| DELETE | `/contests/:contestId/fee/order` | PROVIDER owner | Huỷ đơn để đổi gói; chỉ khi chưa khai báo chuyển khoản |
+| POST | `/contests/:contestId/fee/transfer` | PROVIDER owner | Khai báo đã chuyển khoản → chờ đối soát |
+| GET | `/admin/contest-fee-orders` | ADMIN | Hàng đợi đối soát, lọc theo status |
+| POST | `/admin/contest-fee-orders/:orderId/confirm` | ADMIN | Xác nhận đã nhận tiền; sinh suất quảng bá PENDING nếu gói có |
+| POST | `/admin/contest-fee-orders/:orderId/reject` | ADMIN | Từ chối, bắt buộc kèm lý do |
+| GET | `/admin/featured-popups/pending` | ADMIN | Nội dung quảng bá chờ duyệt |
+| POST | `/admin/featured-popups/:popupId/review` | ADMIN | Duyệt hoặc từ chối nội dung trước khi lên trang chủ |
+
+`POST /contests/:id/open` trả **402 `CONTEST_FEE_REQUIRED`** khi giải chưa có đơn phí `PAID`.
 
 ### Registration & Check-In
 
@@ -450,6 +485,16 @@ INSPECTION_INCOMPLETE     422 — thiếu ảnh hoặc checklist
 PAYMENT_REQUIRED          402 — chưa thanh toán
 ```
 
+Riêng module Contest:
+
+```
+CONTEST_FEE_REQUIRED           402 — mở đăng ký khi chưa trả phí tổ chức giải
+CONTEST_FEE_ORDER_EXISTS       409 — giải đã có đơn phí còn hiệu lực
+CONTEST_FEE_CONTEST_NOT_DRAFT  400 — chọn gói khi giải không còn là bản nháp
+CONTEST_FORMAT_NOT_RELEASED    400 — thể thức chưa mở để tạo giải
+CONTEST_TRACK_TYPE_UNAVAILABLE 400 — chi nhánh chưa có sân đúng loại đường đua
+```
+
 ### Contest Vehicle Flow Addendum
 
 Customer vehicles:
@@ -498,3 +543,55 @@ Contest registration vehicle payload:
   }
 }
 ```
+
+---
+
+## Thanh toán chuyển khoản theo chi nhánh
+
+Mỗi chi nhánh có thể nhận tiền booking vào tài khoản ngân hàng của chính mình.
+Chi nhánh **chưa cấu hình hoặc chưa xác minh vẫn dùng cổng thanh toán chung** —
+đây là mặc định và không có gì thay đổi so với trước.
+
+Spec đầy đủ: `specs/019-cafe-bank-payment/`.
+
+### Cấu hình nhận tiền — chỉ PROVIDER chủ sở hữu
+
+| Method | Path | Ghi chú |
+|---|---|---|
+| GET | `/v1/cafes/:cafeId/payment-settings` | số tài khoản đã che; chưa cấu hình trả `null` với 200 |
+| GET | `/v1/cafes/:cafeId/payment-settings/edit` | số tài khoản đầy đủ, chỉ cho màn chỉnh sửa |
+| PUT | `/v1/cafes/:cafeId/payment-settings` | đổi ngân hàng/số tài khoản luôn đặt lại `is_verified = false` |
+| GET | `/v1/cafes/:cafeId/payment-settings/sample-qr` | mã QR mẫu 10.000đ — **luôn là mã ngân hàng thật** |
+| POST | `/v1/cafes/:cafeId/payment-settings/verify` | chủ quán xác nhận đã quét thử; chỉ sau bước này chi nhánh mới nhận chuyển khoản |
+
+STAFF và ADMIN đều bị từ chối 403 trên toàn bộ nhóm này.
+
+### Đối soát
+
+| Method | Path | Ai gọi được |
+|---|---|---|
+| GET | `/v1/cafes/:cafeId/bank-transactions` | PROVIDER chủ sở hữu — sổ đầy đủ kèm số tổng |
+| GET | `/v1/cafes/:cafeId/bank-transactions/pending` | thêm STAFF được phân công — **chỉ** hàng đang treo, không có số tổng |
+| POST | `/v1/bank-transactions/:id/assign` | PROVIDER chủ sở hữu hoặc STAFF được phân công |
+| POST | `/v1/bank-transactions/:id/ignore` | chỉ PROVIDER chủ sở hữu, bắt buộc ghi lý do |
+
+### Điểm nhận thông báo tiền về
+
+`POST /api/v1/payments/bank-webhook` — không có `authenticate`, xác thực bằng
+header `Authorization: Apikey <BANK_WEBHOOK_API_KEY>`. Payload bám đúng định dạng
+SePay để chuyển sang dịch vụ thật không phải sửa mã.
+
+**Luôn trả 200 khi khoá hợp lệ**, kể cả khi không khớp booking nào — trả khác 200
+khiến dịch vụ đối soát gửi lại vô hạn. Sai khoá → 401 và không ghi vào sổ.
+
+Xác nhận booking đi qua `processConfirmationResult` — cùng hàm luồng VNPay dùng,
+nên guard hết hạn giữ chỗ và chống trùng áp dụng y hệt.
+
+### Thay đổi tương thích ngược
+
+`POST /v1/bookings/:id/checkout` nhận thêm `payment_method` tuỳ chọn
+(`vnpay | bank_transfer`). **Vắng mặt = `vnpay`**, hành vi không đổi. Phản hồi có
+thêm `flow` (`redirect | bank_transfer`) và khối `bank_transfer` khi áp dụng.
+
+`GET /v1/cafes/:cafeId/payment-methods` (công khai) trả danh sách phương thức khả
+dụng; một phần tử thì giao diện đi thẳng, không hiện lựa chọn.

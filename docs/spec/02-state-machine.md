@@ -57,7 +57,7 @@ EXTENDING
   -> ACTIVE         [customer approves/rejects/timeout]
 
 CHECKING_OUT
-  -> COMPLETED      [customer confirms or auto-confirms]
+  -> COMPLETED      [staff hoàn tất check-out — không có đường tự động]
 
 CANCELLED, COMPLETED are terminal.
 ```
@@ -77,21 +77,43 @@ Incident policy resolution và dispute cơ bản (`disputes` table) là Phase 1 
 
 ## 3. Timeout Rules
 
+Toàn bộ chạy trong `jobs/booking-timeout.job.ts`, quét mỗi phút.
+
 ### Booking
 
-| State | Timeout | Action |
-|-------|---------|--------|
-| `PENDING` | 30 phút | Auto-cancel, release slot locks |
-| `CONFIRMED` không có session | `slot_start + 30 phút` | Mark `NO_SHOW` |
+| State | Timeout | Action | Nguồn |
+|-------|---------|--------|-------|
+| `PENDING` | tới `payment_expires_at` | Huỷ, trả slot | `booking-timeout.job.ts:33` |
+| `CONFIRMED` không có session | `slot_start + 30 phút` | Đánh dấu `NO_SHOW` | `:194` |
+
+> Cửa sổ thanh toán do `bookings.payment_expires_at` quyết định, không phải một
+> hằng số 30 phút cố định như bản trước mô tả.
 
 ### Session
 
-| State | Timeout | Action |
-|-------|---------|--------|
-| `CHECKED_IN` | 15 phút customer không confirm inspection | Auto-confirm check-in |
-| `EXTENDING` | 10 phút customer không phản hồi | Auto-reject extension, quay lại ACTIVE |
-| `CHECKING_OUT` no damage | 2 giờ | Auto-confirm checkout |
-| `CHECKING_OUT` damage flagged | 24 giờ | Auto-confirm damage charge |
+| State | Timeout | Action | Nguồn |
+|-------|---------|--------|-------|
+| `EXTENDING` | 10 phút khách không phản hồi | Huỷ đề xuất gia hạn | `:147` |
+| `ACTIVE` quá giờ | `planned_end_at + 30 phút` | **Báo cho staff và provider** | `:73` |
+
+### Những gì hệ thống KHÔNG tự làm
+
+Đây là lựa chọn có chủ ý, không phải thiếu sót. Comment trong
+`booking-timeout.job.ts:226` ghi rõ:
+
+> *"An active session is an attended booking, so it must never be changed to
+> NO_SHOW or completed automatically. Alert the assigned staff and provider
+> once instead; checkout remains the explicit inspection flow."*
+
+| Quy tắc bản trước mô tả | Thực tế |
+|---|---|
+| `CHECKED_IN` 15 phút → tự xác nhận check-in | **Không có.** Khách phải tự bấm xác nhận qua `POST /sessions/:id/inspection/confirm` |
+| `CHECKING_OUT` 2 giờ → tự xác nhận checkout | **Không có.** Staff phải hoàn tất check-out |
+| `CHECKING_OUT` + damage 24 giờ → tự chốt tiền hư hỏng | **Không có.** |
+
+Phiên chơi quá giờ chỉ sinh cảnh báo (`SESSION_OVERDUE_ALERT_MINUTES = 30`), rồi
+nằm chờ người xử lý. Không có đường nào đưa session về trạng thái cuối mà không
+có thao tác của staff.
 
 ---
 

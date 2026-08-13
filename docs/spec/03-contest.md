@@ -1,6 +1,6 @@
 # Contest Module Specification
 
-**Last Updated:** 2026-07-31  
+**Last Updated:** 2026-08-05  
 **Status:** Backend-current truth + requested operating flow  
 **Related docs:** `docs/spec/business-rules/BR-contest.md`, `docs/architecture/03-contest.md`, `docs/developer/contest-delivery/05-contest-current-backend-vs-requested-flow.md`, `docs/spec/05-api-contracts.md`, `docs/spec/06-database.md`, `docs/spec/09-universal-racing-network.md`, `specs/016-contest-booking-rental/`
 
@@ -26,7 +26,8 @@ SESSION = ca chơi thực tế, inspection, checkout
 |---|---|---|
 | Thời gian contest | Có `registration_opens_at`, `registration_closes_at`, `starts_at`, `ends_at`; create validate đăng ký đóng trước hoặc bằng giờ bắt đầu | Cron tự chuyển `OPEN -> CLOSED` và `CLOSED -> RUNNING` (khi đã có match và đến giờ `starts_at`) đã có; vẫn cần monitor job |
 | Cafe tham gia | Có `contest_cafes`, `participating_cafe_ids`, chỉ cho cafe ACTIVE thuộc Provider | Update participating_cafe_ids khi đã có registration cần merge metadata thay vì xóa |
-| Track type | Có `track_type_id`; registration rental phải có booking cùng track type | FE cần hiển thị rõ host/participating branches |
+| Track type | Có `track_type_id`; registration rental phải có booking cùng track type; create/update yêu cầu **mọi** chi nhánh tham gia đều có sân active đúng loại (xem BR-CT-021) | FE cần hiển thị rõ host/participating branches |
+| Runtime format | `getRuntimeFormatFromCatalog` map đủ 3 mã: `TIME_TRIAL`, `QUALIFYING_FINAL`, còn lại `KNOCKOUT` | Trước 2026-08-01 hàm này ép mọi mã không phải TIME_TRIAL về KNOCKOUT, khiến `QualifyingFinalEngine` và `generate-final-bracket` không có đường nào chạm tới |
 | Contest↔Booking rental | Có `BookingSource.CONTEST` + `bookings.contest_id` (FK SET NULL); ContestBookingBridge áp `config.rental_policy` (miễn phí sân, cọc FULL/REDUCED/WAIVED, slot_window); WF-A `POST /bookings/contest-rental`; WF-B register kèm `rental_slot`; check-in xe tự sync registration CHECKED_IN; `GET /contests/:id/bookings` | Không còn gap ở backend core; FE theo spec 016 |
 | Khóa sân/cafe | Có `config.resource_locks`, `FULL_BRANCH`, `SELECTED_TRACKS`; backend chặn booking trùng contest | FE cần phản ánh đây là current feature, không phải backlog |
 | Entry fee | Có `entry_fee`, `entry_fee_amount`, `payment_status`; Provider mark paid/waive thủ công; `CONTEST_ENTRY` payment subject; chặn duplicate payment URL; ghi audit khi tạo link thanh toán và khi thanh toán thất bại; tạo REFUND PENDING khi contest bị hủy; Provider/Admin có endpoint xác nhận hoàn tiền | Chưa nối VNPay IPN tự động xác nhận; refund tiền thật do payment flow xử lý (hoặc xác nhận thủ công) |
@@ -36,6 +37,11 @@ SESSION = ca chơi thực tế, inspection, checkout
 | Leaderboard | Có publish local leaderboard vào `contests.config.published_leaderboard`; contest -> `COMPLETED`; áp privacy mask theo `racing_profile.public_profile_enabled` / `leaderboard_opt_in` cho public view | Global leaderboard đọc `race_records` sau sync; sync audit ghi cả id từng race record |
 | Audit | Có `contest_audit_logs`, Provider đọc `/audit-logs` với pagination; `buildContestAuditSummary` trả về câu tiếng Việt đọc được | FE đã có tab Audit; chưa có incident/ban riêng cho contest (ban đã có) |
 | Ban/phá giải | Có `contest_bans` với scope `CONTEST`/`PROVIDER`, evidence, expires, lift | Chưa có contest-specific incident table; chưa có rule tự động chặn đăng ký lại |
+| Phí tổ chức giải | Có `contest_fee_plans` + `contest_fee_orders`; `DRAFT -> OPEN` chặn bằng `assertContestFeePaid` (402 `CONTEST_FEE_REQUIRED`); admin đối soát chuyển khoản; duyệt nội dung quảng bá tách riêng (xem mục 7) | Chưa nối payment gateway — vẫn chuyển khoản + đối soát tay; chưa có refund phí khi giải huỷ sau khi đã trả |
+| Thể thức đã phát hành | `contest_formats.is_released` tách "còn trong catalog" khỏi "dùng được"; create contest chặn thể thức chưa mở bằng `CONTEST_FORMAT_NOT_RELEASED` | Từ 2026-08-05 cả ba thể thức đều mở; cột giữ lại cho thể thức thêm về sau |
+| Lượt chạy tính giờ | `config.runs_per_driver` (1–5, mặc định 3) cho `TIME_TRIAL` và pha vòng loại của `QUALIFYING_FINAL`; mỗi lượt một match, `round_no` = số thứ tự lượt; xếp hạng lấy lap nhanh nhất (BR-CT-027) | Chưa cho thêm lượt sau khi đã bắt đầu thi đấu — số lượt chốt lúc bốc thăm |
+| Người thắng ở lượt solo | `TIME_ATTACK` tôn trọng `winners_to_advance = 0`; trận đối kháng vẫn luôn chốt một người thắng (BR-CT-028) | — |
+| Chọn người vào chung kết | Gộp nhiều lượt về một dòng, loại người không có thành tích hợp lệ; nhánh chung kết bắt đầu sau vòng loại cuối; dựng lại được khi chưa ai đấu (BR-CT-029, BR-CT-029a) | — |
 
 ---
 
@@ -60,7 +66,7 @@ Validation hiện có:
 - `registration_opens_at < registration_closes_at`
 - `registration_closes_at <= starts_at`
 - cafe tham gia phải ACTIVE và thuộc Provider
-- `track_type_id` phải active và phải thuộc danh sách track configs của **ít nhất một** chi nhánh tham gia (`contest_cafe.track_config_ids`). FE chỉ hiển thị các loại đường đua mà chi nhánh đã thực sự có.
+- `track_type_id` phải active và **mọi** chi nhánh tham gia đều phải có ít nhất một track config active thuộc loại đó. FE chỉ hiển thị giao (intersection) các loại đường đua của những chi nhánh đã chọn; khi giao rỗng, FE liệt kê đích danh chi nhánh nào đang thiếu loại nào.
 - contest type/format/template phải active và khớp nhau
 - không được tạo contest nếu resource lock trùng booking đang `PENDING` hoặc `CONFIRMED`
 
@@ -285,7 +291,69 @@ Khi dùng `BYOC`, khách dùng `create-entry-fee-payment` để thanh toán lệ
 
 ---
 
-## 7. Prize / Reward
+## 7. Phí Tổ Chức Giải (Provider → Nền Tảng)
+
+Khoản này đi **ngược chiều** với lệ phí ở mục 6: mục 6 là tiền VĐV trả cho Provider, mục này là tiền Provider trả cho RCField để được mở giải. Hai dòng tiền không dính nhau — nền tảng **không** ăn phần trăm trên lệ phí VĐV.
+
+Phí tính theo **từng giải**, tách hẳn khỏi gói SaaS hằng tháng. Provider đang có gói đăng ký hợp lệ vẫn phải mua gói tổ chức cho mỗi giải.
+
+### Bảng gói — `contest_fee_plans`
+
+| Cột | Ý nghĩa |
+|---|---|
+| `code`, `name`, `description` | Định danh và mô tả gói |
+| `price` | Giá tại thời điểm hiện tại |
+| `featured_days` | Số ngày được hiển thị ở popup trang khám phá; `0` = không kèm quảng bá |
+| `is_active`, `display_order` | Ẩn/hiện và thứ tự bày ra cho provider |
+
+Seed hiện tại: `BASIC` 200.000đ / `featured_days = 0`, `FEATURED` 500.000đ / `featured_days = 7`.
+
+### Vòng đời đơn — `contest_fee_orders`
+
+```text
+PENDING_PAYMENT ──(provider khai báo chuyển khoản)──> PENDING_REVIEW
+                                                          │
+                                     admin đối soát ──────┼──> PAID
+                                                          └──> REJECTED
+       └──(provider huỷ khi chưa khai báo)──> CANCELLED
+```
+
+- `PENDING_PAYMENT`, `PENDING_REVIEW`, `PAID` là các trạng thái **còn hiệu lực**: một giải chỉ được có tối đa một đơn ở nhóm này (unique index từng phần). `REJECTED`/`CANCELLED` không chặn, nên provider làm lại được.
+- Đơn **chốt cứng** `amount` và `featured_days` lúc tạo. Bảng giá đổi về sau không làm thay đổi đơn đã đặt.
+- `REJECTED` bắt buộc có `admin_notes` — provider phải biết vì sao mới khai báo lại được.
+
+### Cửa thu phí
+
+`DRAFT → OPEN` gọi `assertContestFeePaid`. Chưa có đơn `PAID` thì trả **402 `CONTEST_FEE_REQUIRED`**. Mở đăng ký là lúc giải bắt đầu tiêu tài nguyên nền tảng và xuất hiện trước khách, nên đó là cửa. Các chuyển trạng thái khác — kể cả `CANCELLED` — không bị chặn.
+
+### Quảng bá tách khỏi thu tiền
+
+Admin xác nhận tiền **không** đồng nghĩa nội dung lên trang chủ. Khi `confirmContestFeeOrder` chạy và `featured_days > 0`, hệ thống sinh một `featured_popups` ở `review_status = PENDING`, `is_active = false`, lấy tên/mô tả/ảnh bìa từ contest. Admin duyệt nội dung ở một hàng đợi riêng (`POST /admin/featured-popups/:popupId/review`). `getActiveFeaturedPopup` chỉ trả popup vừa `is_active` vừa `review_status = APPROVED`.
+
+Khung ngày quảng bá chạy từ **lúc admin duyệt phí**, không phải lúc provider chuyển khoản — provider không mất ngày vì đối soát chậm.
+
+### Endpoint
+
+```text
+GET    /api/v1/contest-fee-plans                        [auth]
+GET    /api/v1/contests/:contestId/fee                  [PROVIDER, ADMIN]
+POST   /api/v1/contests/:contestId/fee/order            [PROVIDER]   chọn gói
+DELETE /api/v1/contests/:contestId/fee/order            [PROVIDER]   huỷ khi chưa chuyển khoản
+POST   /api/v1/contests/:contestId/fee/transfer         [PROVIDER]   khai báo đã chuyển khoản
+GET    /api/v1/admin/contest-fee-orders                 [ADMIN]
+POST   /api/v1/admin/contest-fee-orders/:orderId/confirm [ADMIN]
+POST   /api/v1/admin/contest-fee-orders/:orderId/reject  [ADMIN]     bắt buộc có lý do
+GET    /api/v1/admin/featured-popups/pending            [ADMIN]
+POST   /api/v1/admin/featured-popups/:popupId/review     [ADMIN]
+```
+
+### Còn thủ công
+
+Thanh toán là **chuyển khoản ngân hàng + admin đối soát tay**, chưa nối payment gateway. Provider tự gõ mã giao dịch; `transfer_amount` gửi lên luôn là `order.amount` chứ không lấy con số provider gõ — chuyển thiếu thì admin phát hiện lúc soi sao kê. Chưa có refund cho phí tổ chức khi giải bị huỷ sau khi đã trả.
+
+---
+
+## 8. Prize / Reward
 
 Backend có thể lưu prize trong `contests.config`, ví dụ:
 
@@ -313,7 +381,7 @@ FE cần hiển thị prize như cam kết thủ công của Provider, không hi
 
 ---
 
-## 8. Check-in Và Trạng Thái Người Dùng
+## 9. Check-in Và Trạng Thái Người Dùng
 
 Registration state thật:
 
@@ -355,7 +423,7 @@ FE Customer không nên hiển thị quá nhiều trạng thái kỹ thuật. D�
 
 ---
 
-## 9. Runtime: Knockout Và Time Trial
+## 10. Runtime: Knockout Và Time Trial
 
 Tất cả runtime dùng:
 
@@ -446,7 +514,7 @@ UI Provider/Staff cần:
 
 ---
 
-## 10. Result Correction Và Publish Leaderboard
+## 11. Result Correction Và Publish Leaderboard
 
 Submit result:
 
@@ -496,7 +564,7 @@ Public sau giải:
 
 ---
 
-## 11. Audit Và Metrics
+## 12. Audit Và Metrics
 
 Audit:
 
@@ -552,7 +620,7 @@ FE Provider cần có tab Audit để xem:
 
 ---
 
-## 12. Unhappy Cases, Disqualification Và Ban
+## 13. Unhappy Cases, Disqualification Và Ban
 
 Backend hiện xử lý được:
 
@@ -597,7 +665,23 @@ Minimum behavior đề xuất:
 
 ---
 
-## 13. FE Screen Contract
+## 14. FE Screen Contract
+
+### Setup — wizard 5 bước (từ 2026-08-01)
+
+Màn hình tạo/sửa giải đấu đi theo trình tự phụ thuộc dữ liệu, mỗi bước validate bằng zod trước khi mở bước sau:
+
+```text
+1 Chi nhánh (+ chủ nhà)  →  2 Loại đường đua + phạm vi khoá  →  3 Thể thức + luật xe + giá thuê xe
+→  4 Lịch trình & quy mô  →  5 Giới thiệu & xác nhận
+```
+
+Quy ước FE:
+
+- **Thể thức chọn bằng template**, không phải ba dropdown rời. Mỗi `contest_template` gắn cứng một cặp (`contest_type`, `contest_format`) nên chọn template là suy ra cả ba id; ba dropdown cũ cho 18 tổ hợp mà chỉ 3 tổ hợp có template thật.
+- **`vehicle_rule.vehicle_policy` mặc định `BYOC_ONLY`** cho giải mới. `MIXED` không còn được đề xuất (bắt staff chạy hai quy trình check-in trong cùng một giải) nhưng vẫn hiển thị nếu giải hiện tại đang dùng — backend vẫn chấp nhận giá trị này.
+- **`config.rental_policy` có UI** ở bước 3, chỉ hiện khi giải cho thuê xe. Mặc định cho giải MỚI là `waive_slot_fee: true` + `deposit_mode: WAIVED`; giải CŨ chưa có `rental_policy` thì form đọc theo mặc định backend (`waive_slot_fee: false`, `deposit_mode: FULL`) để mở form sửa rồi lưu không âm thầm đổi giá.
+- **`vehicle_rule.assignment_policy`** vẫn hiển thị nhưng chưa có logic vận hành nào đọc — FE ghi rõ điều đó cạnh ô chọn.
 
 Provider nên chia contest thành các màn hình/tabs:
 
@@ -627,7 +711,7 @@ Customer nên có:
 
 ---
 
-## 14. Implementation Notes
+## 15. Implementation Notes
 
 - Không viết docs như thể VNPay contest đã xong.
 - Không viết BYOC như đã xong; backend register hiện rental-only.

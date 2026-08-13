@@ -120,23 +120,23 @@ Ngày 2026-06-04:
 
 | Booking | Cafe | Customer | Components | Gross | Platform fee | Net provider |
 |---|---|---|---|---:|---:|---:|
-| BK-001 | Cafe A | Minh | Slot 100k + Rental 300k + Ext 50k | 450k | 67.5k | 382.5k |
-| BK-002 | Cafe A | An | Slot 100k + F&B preorder 60k | 160k | 15k | 145k |
-| BK-003 | Cafe B | Khoa | Slot 120k BYOC | 120k | 18k | 102k |
+| BK-001 | Cafe A | Minh | Slot 100k + Rental 300k + Ext 50k | 450k | 0 | 450k |
+| BK-002 | Cafe A | An | Slot 100k + F&B preorder 60k | 160k | 0 | 160k |
+| BK-003 | Cafe B | Khoa | Slot 120k BYOC | 120k | 0 | 120k |
 
 Ghi chú tính phí:
 
-- Platform fee 15% trên `SLOT_FEE + RENTAL_FEE + EXTENSION_FEE + DAMAGE_CHARGE`.
-- Platform fee 0% trên F&B.
-- Vì vậy BK-002 fee = 15% * 100k = 15k, không tính trên 60k F&B.
+- Platform fee bằng **0** trên mọi component. Provider nhận trọn số tiền khách trả.
+- Nền tảng thu tiền của Provider qua **phí thuê bao SaaS** và **phí tổ chức giải**,
+  hai khoản này nằm ngoài dòng tiền booking.
 
 Tổng ngày:
 
 | Cafe | Gross revenue | Platform fee | Net payout | F&B direct/preorder |
 |---|---:|---:|---:|---:|
-| Cafe A | 610k | 82.5k | 527.5k | 60k |
-| Cafe B | 120k | 18k | 102k | 0 |
-| Provider total | 730k | 100.5k | 629.5k | 60k |
+| Cafe A | 610k | 0 | 610k | 60k |
+| Cafe B | 120k | 0 | 120k | 0 |
+| Provider total | 730k | 0 | 730k | 60k |
 
 ---
 
@@ -362,10 +362,10 @@ THEN: Hệ thống gom các session đã completed thành settlement report theo
 
 **BR-RP-051 — Payout amount**  
 ```
-gross_revenue = SLOT_FEE + RENTAL_FEE + EXTENSION_FEE + DAMAGE_CHARGE + FNB_PREORDER
-commission_base = SLOT_FEE + RENTAL_FEE + EXTENSION_FEE + DAMAGE_CHARGE
-platform_fee = commission_base * platform_fee_pct
-net_payout = gross_revenue - platform_fee - refunds - provider_penalties
+gross_revenue = SLOT_FEE + RENTAL_FEE + EXTENSION_FEE + DAMAGE_CHARGE
+              + FNB_PREORDER + FNB_ON_SITE + CONTEST_ENTRY_FEE
+platform_fee = 0                      ← platform_fee_pct đặt cứng bằng 0
+net_payout = gross_revenue - refunds - provider_penalties
 ```
 
 NOTE: F&B on-site không nằm trong `net_payout` vì customer trả trực tiếp tại quán.

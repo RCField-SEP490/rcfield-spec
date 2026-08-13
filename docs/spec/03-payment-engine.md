@@ -13,7 +13,7 @@
 1. **Snapshot-first**: Mọi tính toán dùng `booking.snapshot`, không dùng giá hiện tại
 2. **Component isolation**: Mỗi PaymentComponent có vòng đời độc lập
 3. **Immutable ledger**: Không update amount đã tạo — tạo component mới nếu cần điều chỉnh
-4. **Platform fee chỉ tính trên consummated**: Nếu refund → platform fee cũng refund theo
+4. **Không thu phí nền tảng trên booking**: `platform_fee_pct` đặt cứng bằng `0`. Doanh thu nền tảng đến từ phí thuê bao SaaS của Provider. Tiền booking về thẳng Provider.
 5. **Race condition**: Dùng DB transaction + row lock khi update component status
 6. **Settlement theo session**: Không phải booking — mỗi session khi COMPLETED sẽ trigger settle riêng
 
@@ -21,29 +21,36 @@
 
 ## Components & Lifecycle
 
-### Luồng thanh toán 2 bước
+### Luồng thanh toán
+
+> **KHÔNG CÓ CỌC.** Nền tảng đã bỏ security deposit khỏi mọi luồng thanh toán.
+> `PaymentComponentType.SECURITY_DEPOSIT` vẫn còn trong enum và logic hoàn cọc
+> vẫn xử lý được các bản ghi cũ, nhưng không code nào tạo component này nữa —
+> xem `payment.service.ts:527` ("Vehicle deposits are no longer a chargeable
+> part of any booking payment"). Không tồn tại cột `market_value` ở đâu cả.
 
 ```
-Bước 1 — Khi booking CONFIRMED:
-  → charge: SECURITY_DEPOSIT (HELD) per vehicle  ← charge NGAY qua gateway
-  → tạo:    SLOT_FEE     (PENDING)               ← ghi nhận, tính vào checkout
-  → tạo:    RENTAL_FEE   (PENDING) per vehicle   ← ghi nhận, tính vào checkout
-  → tạo:    FNB_PREORDER (PENDING)               ← ghi nhận, tính vào checkout
+Bước 1 — Khách trả trước MỘT lần để booking được CONFIRMED:
+  → SLOT_FEE           (HELD)
+  → RENTAL_FEE         (HELD) per vehicle
+  → FNB_PREORDER       (HELD)
+  → CONTEST_ENTRY_FEE  (HELD)  ← chỉ khi booking gắn với đăng ký giải
+  → PROMOTION_DISCOUNT (số âm)  ← chỉ khi áp mã giảm giá
 
-Khi extension APPROVED (trong session):
-  → tạo: EXTENSION_FEE (PENDING)                 ← ghi nhận, tính vào checkout
-  → tổng extension fees không vượt 50% security_deposit
+  Toàn bộ khoản trên gộp thành một giao dịch VNPay hoặc một mã VietQR
+  chuyển khoản. Component tạo với status HELD ngay khi thanh toán thành công.
 
-Khi CHECK_OUT + có damage (customer confirm):
-  → tạo: DAMAGE_CHARGE (PENDING)                 ← tính vào checkout
+Phát sinh trong phiên chơi:
+  → EXTENSION_FEE  khi đề xuất gia hạn được duyệt   (staff.service.ts:2277)
+  → FNB_ON_SITE    khi khách gọi thêm đồ tại quán   (staff.service.ts:2336)
+
+Phát sinh lúc check-out:
+  → DAMAGE_CHARGE  khi staff ghi nhận hư hỏng mới   (staff.service.ts:3628)
 
 Bước 2 — Khi SESSION COMPLETED (checkout):
-  total_charges    = SLOT_FEE + RENTAL_FEE + EXTENSION_FEE + FNB_PREORDER + DAMAGE_CHARGE
-  checkout_amount  = total_charges − security_deposit
-
-  → txn: CAPTURE checkout_amount
-  → disburse: tất cả components (bao gồm SECURITY_DEPOSIT) → Provider
-  → tính platform_fee (15%) trên (total_charges − FNB_PREORDER nếu tách)
+  Thu nốt các component còn PENDING (gia hạn, đồ ăn tại quán, hư hỏng).
+  Chuyển các component sang DISBURSED về Provider.
+  Không trừ phí nền tảng — platform_fee_pct = 0.
 ```
 
 **Ví dụ số (không damage, có extension):**
@@ -105,32 +112,33 @@ Nếu customer no-show (không đến sau slot_start + 30 phút):
 
 ---
 
-## Extension Fee Cap
+## Extension Fee
 
-```
-max_extension_fee = security_deposit × 0.50
+Không có trần phí gia hạn. Bản trước mô tả `max_extension_fee = security_deposit × 0.50`,
+nhưng không tồn tại cọc và cũng không có đoạn kiểm tra trần nào trong mã nguồn.
 
-Nếu customer muốn gia hạn nhưng:
-  tổng extension_fee_đã_tích_lũy + extension_fee_mới > max_extension_fee
-  → Từ chối extension proposal
-  → Thông báo customer đã đạt giới hạn
-```
+Mỗi đề xuất gia hạn được duyệt sinh một component `EXTENSION_FEE`
+(`staff.service.ts:2277`), thu ở checkout. Giới hạn thực tế đến từ khung giờ hoạt
+động của chi nhánh và sức chứa đường đua, không phải từ một con số trần.
+
+Đề xuất gia hạn hết hạn sau **10 phút** nếu khách không phản hồi.
 
 ---
 
 ## Damage Charge Calculation
 
 ```
-damage_charge = base_damage_cost × vehicle.damage_multiplier
-
-Nếu damage_charge ≤ security_deposit:
-  → Trừ vào security_deposit
-  → Hoàn phần còn lại về customer
-
-Nếu damage_charge > security_deposit:
-  → Trừ toàn bộ security_deposit
-  → Tạo thêm charge request (manual, ngoài scope MVP)
+damage_charge = Σ (parts_price + labor_price) của damage_line_items
+                thuộc inspection CHECK_OUT có damage_noted = true
 ```
+
+Xem `staff.service.ts:3696`. Số tiền cộng thẳng từ danh sách hạng mục hư hỏng do
+staff nhập, **không nhân** `damage_multiplier`.
+
+> `vehicle_catalogs.damage_multiplier` và `booking_vehicles.damage_multiplier_snapshot`
+> vẫn tồn tại nhưng chưa được dùng vào công thức nào.
+
+Không có cọc để bù trừ: toàn bộ `damage_charge` là khoản thu thêm ở checkout.
 
 **pre_existing_flag ảnh hưởng:**
 - Nếu hư hỏng đã được flag ở check-in + customer đã confirm → KHÔNG tính damage_charge cho hư hỏng đó
@@ -148,98 +156,90 @@ discount_amount = tính từ promotion (PERCENT hoặc FIXED, xem BR-PR-004)
 total_charge    = subtotal - discount_amount    ← số tiền customer thực sự trả
 ```
 
-`security_deposit` KHÔNG bị discount — luôn thu đủ.
-
-**Bước 1 (booking confirm)**: Customer thanh toán `security_deposit` → HELD.
-**Bước 2 (checkout)**: Platform CAPTURE `total_charges − security_deposit`.
-
 ```
-total_charges = slot_fee + rental_fee + fnb_preorder + extension_fee + damage_charge
-checkout_amount = total_charges − security_deposit   ← số tiền thực trả lúc checkout
-```
+prepaid_amount = slot_fee + rental_fee + fnb_preorder + contest_entry_fee
+                 − discount_amount        ← khách trả một lần khi xác nhận booking
 
-`security_deposit` KHÔNG bị discount — luôn thu đủ theo giá trị xe.
+checkout_amount = extension_fee + fnb_on_site + damage_charge
+                                          ← thu thêm ở checkout, nếu có phát sinh
+```
 
 ---
 
 ## Platform Fee
 
-```
-platform_fee = 0.15 × sum(disbursed_components_to_provider)
+**Bằng 0.** `platform_fee_pct` đặt cứng bằng `0` trong `payment.service.ts`
+(dòng 574 và 1650). Không có khoản nào bị trừ khỏi tiền của Provider.
 
-Disbursed components = SLOT_FEE + RENTAL_FEE + EXTENSION_FEE + DAMAGE_CHARGE
-  (tính theo giá trị thực tế sau discount, không phải subtotal gốc)
-KHÔNG tính trên: SECURITY_DEPOSIT (là tiền của customer)
-```
+Doanh thu nền tảng là **phí thuê bao SaaS** mà Provider trả theo gói
+(`subscription_plans` / `provider_subscriptions`), cộng phí tổ chức giải
+(`contest_fee_plans`). Không phải phần trăm trên booking.
+
+> Bản trước ghi `platform_fee = 0.15 × disbursed_components`. Con số 15% đó chưa
+> bao giờ được cài đặt và mâu thuẫn với mô hình doanh thu SaaS.
 
 ---
 
-## Cách tính security_deposit
+## Security Deposit — ĐÃ BỎ
 
-`security_deposit = vehicle.market_value × 15%`
+Nền tảng không còn thu cọc. Không có cột `market_value` ở bất kỳ bảng nào, và
+không đoạn mã nào tạo component `SECURITY_DEPOSIT`.
 
-Field trực tiếp trên bảng `vehicles`, Provider đặt khi thêm xe vào fleet.
+Dấu vết còn lại, giữ để đọc được dữ liệu cũ:
 
-```
-VD: xe Traxxas TRX-4 trị giá 2,000,000đ → security_deposit = 300,000đ  (15%)
-    xe Arrma Kraton trị giá 5,000,000đ  → security_deposit = 750,000đ  (15%)
-    xe STANDARD mini trị giá 500,000đ   → security_deposit = 75,000đ   (15%)
-```
+| Thứ còn lại | Trạng thái |
+|---|---|
+| `PaymentComponentType.SECURITY_DEPOSIT` | còn trong enum, không nơi nào tạo |
+| `booking_vehicles.security_deposit_snapshot` | còn cột; 15/17 dòng bằng `0.00` |
+| `vehicle_catalogs.security_deposit` | còn cột, không vào công thức nào |
+| Logic hoàn cọc trong `payment.service.ts` | còn, chỉ để xử lý bản ghi cũ |
 
-Khi booking được tạo → `booking_vehicles.security_deposit_snapshot` lấy giá trị này (không đổi về sau).
-
-**Tại checkout:**
-- Không damage → VOID authorization (hold released, không charge thêm, **không refund**)
-- Có damage    → CAPTURE (damage_charge ≤ deposit: capture phần damage + void phần còn lại)
-                          (damage_charge > deposit: capture toàn bộ + additional charge out of scope)
+Nguồn: `payment.service.ts:527` — *"Vehicle deposits are no longer a chargeable
+part of any booking payment"*, và `:232` — *"There is no vehicle deposit."*
 
 ---
 
 ## Ví dụ số thực tế
 
 **Setup:**
-- Slot 3 tiếng, rate 150k/h → `slot_fee = 450,000đ`
-- RENTAL, xe PREMIUM (Traxxas TRX-4, trị giá 8M), `rental_fee = 100,000đ`
-- `security_deposit = 800,000đ` (Provider đặt theo giá trị xe ~8,000,000đ)
-- `damage_multiplier = 1.5`
-
-**Setup:**
-- Xe trị giá 2,000,000đ → `security_deposit = 300,000đ` (15%)
 - Slot 2 tiếng, `slot_fee = 50,000đ`
-- RENTAL, `rental_fee = 300,000đ` (150k/h × 2h)
-- `damage_multiplier = 1.5`
+- RENTAL một xe, `rental_fee = 300,000đ` (150k/h × 2h)
+- Đặt trước đồ ăn `fnb_preorder = 40,000đ`
 
-**Case 1: Hoàn thành bình thường, không damage**
+**Case 1: Hoàn thành bình thường, không hư hỏng**
 ```
-total_charges   = 50,000 + 300,000 = 350,000đ
-checkout_amount = 350,000 − 300,000 = 50,000đ  ← khách trả thêm 50k
-Khách tổng:     300k (cọc) + 50k (checkout) = 350,000đ
+Trả trước khi xác nhận booking:
+  50,000 + 300,000 + 40,000 = 390,000đ
 
-Disburse → Provider:  350,000đ
-Platform fee (15%):   52,500đ
-Provider nhận:        297,500đ
-```
-
-**Case 2: Early checkout sau 1 tiếng, không damage**
-```
-Pro-rata slot_fee:    50,000 × (60/120) = 25,000đ
-total_charges   = 25,000 + 300,000 = 325,000đ  (rental tính đủ vì đã dùng xe)
-checkout_amount = 325,000 − 300,000 = 25,000đ  ← khách trả thêm 25k
-Khách tổng:     300k + 25k = 325,000đ
-Platform fee:   325,000 × 15% = 48,750đ
+Checkout: không phát sinh gì → khách trả thêm 0đ
+Khách trả tổng:        390,000đ
+Provider nhận:         390,000đ   ← không trừ phí nền tảng
 ```
 
-**Case 3: Hoàn thành, có damage**
+**Case 2: Có gia hạn và gọi thêm đồ tại quán**
 ```
-damage_cost     = 200,000đ × 1.5 = 300,000đ
-total_charges   = 50,000 + 300,000 + 300,000 = 650,000đ
-checkout_amount = 650,000 − 300,000 = 350,000đ  ← khách trả thêm 350k
-Khách tổng:     300k (cọc) + 350k (checkout) = 650,000đ
+Trả trước:             390,000đ
+Gia hạn 1 tiếng:       EXTENSION_FEE   = 150,000đ
+Gọi thêm tại quán:     FNB_ON_SITE     =  60,000đ
 
-Disburse → Provider:  650,000đ
-Platform fee (15%):   97,500đ
-Provider nhận:        552,500đ
+Thu thêm ở checkout:   210,000đ
+Khách trả tổng:        600,000đ
+Provider nhận:         600,000đ
 ```
+
+**Case 3: Có hư hỏng ghi nhận lúc check-out**
+```
+Trả trước:             390,000đ
+damage_line_items:     vỏ trước (parts 180,000 + labor 20,000) = 200,000đ
+                       → DAMAGE_CHARGE = 200,000đ
+
+Thu thêm ở checkout:   200,000đ
+Khách trả tổng:        590,000đ
+Provider nhận:         590,000đ
+```
+
+> Không ví dụ nào có dòng "cọc" hay "phí nền tảng" — hai khoản đó không tồn tại
+> trong hệ thống hiện tại.
 
 ---
 
@@ -254,3 +254,48 @@ Provider nhận:        552,500đ
 - [ ] Unit test platform fee calculation
 - [ ] Integration test: full booking lifecycle với payment
 - [ ] DB transaction + row lock khi concurrent updates
+
+---
+
+## Thanh toán chuyển khoản theo chi nhánh (feature 019)
+
+Chi nhánh có thể nhận tiền booking thẳng vào tài khoản ngân hàng của mình thay vì
+đi qua cổng thanh toán chung. Khách quét mã QR, và **đơn tự xác nhận khi dịch vụ
+đối soát báo tiền về** — không ai bấm gì.
+
+### Ranh giới với luồng hiện tại
+
+Luồng VNPay **không đổi một dòng nào**. `createCheckoutUrl` vốn đã nhận cổng làm
+tham số với mặc định `'vnpay'`, nên "chi nhánh chưa cấu hình thì dùng cổng chung"
+đúng nghĩa là không truyền gì.
+
+### Không tạo component mới
+
+`bank_transactions` **không phải** `PaymentComponent` và danh sách
+`PaymentComponentType` không thêm giá trị nào. Nó ghi lại **bằng chứng tiền đã về
+tài khoản ngân hàng**, đứng trước và độc lập với việc hệ thống ghi nhận doanh thu.
+
+Component vẫn do `createPaymentComponents` sinh ra khi booking được xác nhận, y
+hệt luồng VNPay. Một giao dịch `NEEDS_REVIEW` có tiền thật nằm trong tài khoản
+nhưng không sinh component nào — đúng như vậy, vì chưa có dịch vụ nào được bán.
+
+### Một đường xác nhận duy nhất
+
+Webhook gọi lại `processConfirmationResult` — cùng hàm luồng VNPay dùng. Nghĩa là
+guard hết hạn giữ chỗ, kiểm số tiền, chống trùng và `transition()` đều áp dụng y
+hệt, không có nhánh song song nào để lệch nhau.
+
+⚠️ **Không dùng `processMockConfirmation`** cho đường này. Hàm đó là lối tắt cho
+môi trường dev: nó thiếu cả kiểm số tiền lẫn guard hết hạn giữ chỗ.
+
+### Tiền về sau khi hết hạn giữ chỗ
+
+Hệ thống **không bao giờ tự xác nhận lại**, kể cả khi chỗ vẫn còn trống. Giao dịch
+treo ở `NEEDS_REVIEW` và người vận hành quyết định giữ chỗ lại hay hoàn tiền. Đây
+là khác biệt cốt lõi so với cổng thanh toán: chuyển khoản là hành động một chiều
+của khách, tiền đã đi thì hệ thống không tự lấy lại được.
+
+### Nền tảng không thu hộ
+
+Tiền chuyển thẳng vào tài khoản chủ doanh nghiệp. Nền tảng không giữ tiền và không
+cắt phần trăm — nhất quán với mô hình doanh thu là phí thuê phần mềm.

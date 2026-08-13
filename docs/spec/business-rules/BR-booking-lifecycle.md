@@ -20,9 +20,9 @@
 | `docs/spec/00-overview.md` | Phase 1 scope, Booking/Session separation, actors |
 | `docs/spec/01-domain-model.md` | Entity, enum, quan he Booking - Session - Payment - F&B |
 | `docs/spec/02-state-machine.md` | BookingStatus, SessionStatus, timeout |
-| `docs/spec/03-payment-engine.md` | Component-based payment, deposit, checkout, damage |
-| `docs/spec/04-inspection-flow.md` | Check-in/check-out inspection, evidence, confirm timeout |
-| `docs/spec/06-database.md` | Package, customer_package, package_usage, subscription schema |
+| `docs/spec/03-payment-engine.md` | Component-based payment, checkout, damage (KHONG con deposit) |
+| `docs/spec/04-inspection-flow.md` | Check-in/check-out inspection, evidence, customer confirm |
+| `docs/spec/06-database.md` | Package, customer_package schema (bang package_usages va subscriptions da bi xoa) |
 | `docs/spec/business-rules/BR-booking.md` | Slot, availability, cancellation, no-show |
 | `docs/spec/business-rules/BR-fleet.md` | Vehicle status, tier, track compatibility |
 | `docs/spec/business-rules/BR-fnb.md` | F&B pre-order va on-site |
@@ -51,7 +51,7 @@ NOTE: Customer khong tu chuyen booking sang ACTIVE.
 
 **BR-BL-004 — Evidence la dieu kien de tinh damage**  
 IF: Provider muon tinh `DAMAGE_CHARGE`  
-THEN: Phai co inspection check-in va check-out hop le: anh bat buoc, checklist day du, baseline duoc customer confirm hoac auto-confirm.  
+THEN: Phai co inspection check-in va check-out hop le: co anh va checklist, baseline duoc customer xac nhan. Khong co co che tu dong xac nhan.  
 NOTE: Thieu evidence hop le thi Provider mat co so tinh damage.
 
 **BR-BL-005 — Payment settlement theo Session**  
@@ -90,8 +90,8 @@ flowchart TD
     D --> D1[Chon customer_package ACTIVE]
     D1 --> D2["Check remaining_slots >= booking.slot_count"]
     D2 --> D3[Lock availability]
-    D3 --> D4[Create package_usage]
-    D4 --> D5[Booking PENDING neu can deposit, hoac CONFIRMED]
+    D3 --> D4[Tru remaining_slots cua customer_package]
+    D4 --> D5[Booking PENDING cho thanh toan]
 
     E --> E1[Customer tao subscription]
     E1 --> E2[System generate booking theo frequency_rule]
@@ -118,13 +118,13 @@ THEN: `booking.snapshot` phai ghi `booking_mode`, gia tai thoi diem tao booking,
 
 **BR-BL-009 — Payment va entitlement la hai lop rieng**  
 IF: Customer co quyen dung goi hoac lich co dinh  
-THEN: Quyen dat lich chi xac dinh "co duoc tao booking khong"; deposit, rental fee, F&B, extension, damage van tinh theo policy rieng.
+THEN: Quyen dat lich chi xac dinh "co duoc tao booking khong"; rental fee, F&B, extension, damage van tinh theo policy rieng.
 
 ---
 
 ### 3.2 Luong A — Dat binh thuong (`booking_mode = SINGLE`)
 
-Day la luong can uu tien trong Phase 1 vi gom du booking, rental fleet, deposit,
+Day la luong can uu tien trong Phase 1 vi gom du booking, rental fleet,
 inspection, session va settlement.
 
 ```mermaid
@@ -137,7 +137,7 @@ flowchart TD
     E -->|Co| F[Tao Booking PENDING]
     F --> G[Tao booking_participants va booking_vehicles]
     G --> H[Tao payment components tu snapshot]
-    H --> I{Thanh toan trong 30 phut?}
+    H --> I{Thanh toan truoc payment_expires_at?}
     I -->|Fail/timeout| I1[Booking CANCELLED, release slot]
     I -->|Success| J[Booking CONFIRMED]
     J --> K[Customer den quan]
@@ -146,7 +146,7 @@ flowchart TD
     M --> N[Gan session_participants va session_vehicles]
     N --> O[Inspection CHECK_IN]
     O --> P{Customer confirm baseline?}
-    P -->|Confirm hoac 15p timeout| Q[Session ACTIVE]
+    P -->|Customer confirm| Q[Session ACTIVE]
     Q --> R[Customer vao san choi]
     R --> S{Trong khi choi}
     S -->|Order F&B| T[F&B ON_SITE]
@@ -156,8 +156,8 @@ flowchart TD
     U --> S
     V --> W[Inspection CHECK_OUT]
     W --> X{Damage moi?}
-    X -->|Khong| Y[Customer confirm/2h timeout]
-    X -->|Co| Z[Customer confirm/24h timeout hoac dispute]
+    X -->|Khong| Y[Staff hoan tat check-out]
+    X -->|Co| Z[Customer confirm hoac phan doi]
     Y --> AA[Settle session]
     Z --> AA
     AA --> AB[Session COMPLETED]
@@ -172,8 +172,8 @@ THEN: Moi xe phai `AVAILABLE`, khong overlap voi booking `PENDING/CONFIRMED`, va
 
 **BR-BL-011 — Thanh toan truoc khi den quan**  
 IF: Booking vua tao  
-THEN: Booking o `PENDING`, slot bi lock toi da 30 phut, payment phai thanh cong de chuyen `CONFIRMED`.  
-NOTE: Spec payment hien tai dung luong 2 buoc: giu/charge deposit khi confirm, cac fee con lai tinh vao checkout.
+THEN: Booking o `PENDING`, slot bi lock toi `payment_expires_at`, payment phai thanh cong de chuyen `CONFIRMED`.  
+NOTE: Khach tra truoc MOT lan (slot + rental + F&B preorder + le phi giai). Phi gia han, F&B tai quan va damage thu them o checkout.
 
 **BR-BL-012 — QR/code check-in**  
 IF: Customer den quan  
@@ -225,13 +225,10 @@ sequenceDiagram
     API->>DB: Lock customer_package row
     API->>DB: Check remaining_slots >= 2, not expired
     API->>DB: Check slot/vehicle/BYOC availability
-    API->>DB: INSERT bookings(PENDING neu can deposit, hoac CONFIRMED)
-    API->>DB: INSERT package_usages(used_slots=2)
+    API->>DB: INSERT bookings(PENDING)
     API->>DB: customer_packages.remaining_slots 10 -> 8
-    opt Rental vehicle requires deposit
-        API->>Pay: Hold/charge security deposit
-        Pay-->>API: Deposit success
-    end
+    API->>Pay: Thu truoc slot_fee + rental_fee + fnb_preorder
+    Pay-->>API: Payment success
     API-->>App: Booking confirmed, remaining_slots=8
 ```
 
@@ -262,18 +259,18 @@ THEN: `customer_packages.status -> EXPIRED`; khong cho tao booking PACKAGE moi.
 
 **BR-BL-026 — PackageUsage la audit bat buoc**  
 IF: `booking.booking_mode = PACKAGE`  
-THEN: Phai co mot row `package_usages` lien ket `customer_package_id` va `booking_id`.  
+THEN: Ghi nhan lan dung goi. LUU Y: bang `package_usages` da bi xoa khoi DB; hien tai chi tru `customer_packages.remaining_slots`.  
 NOTE: Khong chi update remaining_slots, vi can audit tung lan khach da dung goi.
 
 **BR-BL-027 — Rollback slot goi khi booking khong thanh cong**  
-IF: Booking PACKAGE fail payment deposit, bi cancel truoc check-in theo policy duoc hoan slot, hoac system rollback transaction  
-THEN: Phai hoan lai `remaining_slots` va mark `package_usages` cancelled/void bang audit note.  
-NOTE: Phase 1 neu chua co status tren `package_usages`, can ghi note hoac tao adjustment usage am trong service.
+IF: Booking PACKAGE fail payment, bi cancel truoc check-in theo policy duoc hoan slot, hoac system rollback transaction  
+THEN: Phai hoan lai `remaining_slots`.  
+NOTE: Khong con bang `package_usages` de mark void; viec hoan slot ghi truc tiep tren `customer_packages`.
 
 **BR-BL-028 — Package cover fee can snapshot ro**  
 IF: Package cover `SLOT_FEE` hoac cover them `RENTAL_FEE`  
 THEN: `booking.snapshot.package_coverage` phai ghi ro component nao duoc cover.  
-NOTE: De giam scope, khuyen nghi Phase 1: goi 10 slot cover `SLOT_FEE`; rental/deposit/F&B/extension/damage tinh rieng. Neu mentor muon goi cover ca rental, can them policy ro tren package snapshot.
+NOTE: De giam scope, khuyen nghi Phase 1: goi 10 slot cover `SLOT_FEE`; rental/F&B/extension/damage tinh rieng. Neu mentor muon goi cover ca rental, can them policy ro tren package snapshot.
 
 **Vi du PACKAGE 10 slot**
 
@@ -493,7 +490,8 @@ IF: Staff de xuat gia han
 THEN: Customer approve/reject; neu im lang 10 phut thi auto-reject va session quay lai `ACTIVE`.
 
 **BR-BL-062 — Extension fee cap**  
-IF: Tong extension fee sau khi them lan moi > 50% tong security deposit cua session  
+IF: (quy tac cu — da bo) Tong extension fee vuot 50% security deposit  
+NOTE: Khong con tran phi gia han; xem BR-EX-004.  
 THEN: Tu choi gia han.
 
 **BR-BL-063 — Extension tinh vao checkout**  
@@ -505,9 +503,9 @@ NOTE: Can chot lai voi team BE: `BR-extension.md` ghi HELD, `03-payment-engine.m
 
 ### 3.8 Luong G — BYOC va MIXED
 
-**BR-BL-070 — BYOC khong co rental fee/deposit xe quan**  
+**BR-BL-070 — BYOC khong co rental fee**  
 IF: Booking `play_mode = BYOC`  
-THEN: Khong tao `booking_vehicles`, khong co rental fee/security deposit cho fleet vehicle.  
+THEN: Khong tao `booking_vehicles`, khong co rental fee cho fleet vehicle.  
 NOTE: Van co slot fee va co the co F&B/pre-order/package/promotion.
 
 **BR-BL-071 — BYOC capacity check khi booking**  
@@ -519,8 +517,10 @@ IF: Customer den quan voi xe ca nhan
 THEN: Staff chon/tao `customer_vehicle`, tao `session_vehicle(vehicle_source=BYOC)`, thuc hien inspection check-in cho xe BYOC va facility baseline neu can.
 
 **BR-BL-073 — MIXED tach rental va BYOC**  
-IF: Booking `play_mode = MIXED`  
-THEN: Rental part di qua `booking_vehicles`; BYOC part chi chot o `session_vehicles` tai check-in. Settlement tinh rental/deposit cho rental vehicles, khong tinh rental/deposit cho BYOC vehicles.
+
+> ⛔ **QUY TAC KHONG CON HIEU LUC.** `play_mode` chi nhan `RENTAL` hoac `BYOC`;
+> cot `session_vehicles.customer_vehicle_id` da bi xoa. Nhom vua thue vua mang
+> xe rieng phai tach thanh hai booking.
 
 ---
 
@@ -542,7 +542,7 @@ stateDiagram-v2
 ```mermaid
 stateDiagram-v2
     [*] --> CHECKED_IN: staff check-in booking
-    CHECKED_IN --> ACTIVE: check-in inspection confirmed/auto-confirmed
+    CHECKED_IN --> ACTIVE: check-in inspection confirmed
     CHECKED_IN --> CANCELLED: cancel before start
     ACTIVE --> EXTENDING: staff proposes extension
     EXTENDING --> ACTIVE: approve/reject/timeout
@@ -584,16 +584,16 @@ THEN: Staff chuyen session `ACTIVE -> CHECKING_OUT` va thuc hien inspection chec
 
 **BR-BL-091 — Khong damage**  
 IF: Check-out inspection khong co damage moi  
-THEN: Customer confirm hoac auto-confirm sau 2 gio; settlement tinh slot/rental/extension/F&B preorder va hoan tat session.
+THEN: Staff hoan tat check-out; settlement tinh slot/rental/extension/F&B va hoan tat session. Khong co auto-confirm.
 
 **BR-BL-092 — Co damage**  
 IF: Staff danh dau damage moi  
-THEN: Staff nhap mo ta, estimate cost; he thong tinh `damage_charge = cost * damage_multiplier`; customer confirm hoac phan doi.  
-NOTE: Im lang 24 gio = auto-confirm damage charge theo state machine.
+THEN: Staff nhap mo ta, estimate cost; he thong tinh `damage_charge = tong (parts_price + labor_price)` cua damage_line_items; customer confirm hoac phan doi.  
+NOTE: Khong co timeout tu dong chot tien hu hong.
 
 **BR-BL-093 — Phan doi damage**  
 IF: Customer khong dong y damage  
-THEN: He thong tao incident/dispute tuy muc do; deposit/payment hold giu theo policy cho den khi resolved/waived.
+THEN: He thong tao incident/dispute tuy muc do; khoan damage giu o trang thai PENDING cho den khi resolved/waived.
 
 **BR-BL-094 — Vehicle release**  
 IF: Session completed va rental vehicle khong can maintenance  
@@ -622,7 +622,7 @@ THEN: Staff/Provider co the dua xe sang `MAINTENANCE`.
 |---|---|---|---|
 | Create booking | `POST /bookings` | Customer/Staff | Tao booking PENDING, lock slot |
 | Purchase package | `POST /packages/:id/purchase` | Customer | Mua goi slot, tao `customer_packages` |
-| Use package booking | `POST /bookings` voi `booking_mode=PACKAGE` | Customer/Staff | Tru `remaining_slots`, tao `package_usages` |
+| Use package booking | `POST /bookings` voi `booking_mode=PACKAGE` | Customer/Staff | Tru `remaining_slots` |
 | Create fixed schedule | `POST /subscriptions` | Customer/Staff | Tao lich co dinh, chua phai booking |
 | Generate subscription bookings | Internal scheduler | System | Tao booking theo `frequency_rule` |
 | Confirm payment | `POST /bookings/:id/payment/confirm` | Customer/System | Booking CONFIRMED |
@@ -645,7 +645,7 @@ THEN: Staff/Provider co the dua xe sang `MAINTENANCE`.
 |---|---|
 | Booking create | `bookings`, `booking_participants`, `booking_vehicles` neu rental, `fnb_orders` neu pre-order, `payment_components`, Redis slot lock |
 | Package purchase | `packages` da ACTIVE, `payment_components(PACKAGE_PURCHASE)`, `payment_transactions`, `customer_packages` |
-| Package booking | Lock `customer_packages`, tao `bookings(booking_mode=PACKAGE)`, `package_usages`, tru `remaining_slots` |
+| Package booking | Lock `customer_packages`, tao `bookings(booking_mode=PACKAGE)`, tru `remaining_slots` |
 | Subscription create | `subscriptions(status=ACTIVE)`, snapshot `frequency_rule`, notify customer |
 | Subscription generate | Scheduler tao `bookings(booking_mode=SUBSCRIPTION, source=SYSTEM_SUBSCRIPTION, subscription_id)` neu available |
 | Payment confirm | `payment_transactions`, `payment_components.status`, `bookings.status=CONFIRMED` |
@@ -665,7 +665,7 @@ THEN: Staff/Provider co the dua xe sang `MAINTENANCE`.
 | Multiple active sessions per booking | Phase 1 nen chi cho 1 session active/checking_out moi booking de giam conflict |
 | Extension component status | Dung `PENDING` den checkout de dong bo `03-payment-engine.md` |
 | Package coverage | Phase 1 nen cover `SLOT_FEE` only; neu cover rental thi can package policy/snapshot ro |
-| Package cancellation refund | Can chot khi nao hoan slot vao `remaining_slots`: cancel som, provider cancel, payment deposit fail |
+| Package cancellation refund | Can chot khi nao hoan slot vao `remaining_slots`: cancel som, provider cancel, payment fail |
 | Subscription payment | Phase 1 nen tranh recurring billing that; moi booking sinh ra thanh toan/confirm theo mock policy |
 | Subscription conflict | Khi occurrence bi conflict, khong auto-confirm; notify customer/staff chon slot thay the |
 | On-site F&B trong checkout | Van ghi audit vao session, nhung khong dua vao platform settlement vi customer tra truc tiep |

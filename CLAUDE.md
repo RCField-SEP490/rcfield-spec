@@ -50,6 +50,23 @@ Core value prop: structured evidence at every asset handover → eliminates dama
 
 ---
 
+## Code Intelligence — BẮT BUỘC dùng Codegraph
+
+Khi cần tìm hiểu code (trace function, tìm caller, xem entity, hiểu flow), **BẮT BUỘC** dùng tool `mcp__codegraph__codegraph_explore` trực tiếp. **Không được** spawn sub-agent hoặc dùng grep/Read để tìm code thủ công.
+
+```
+# Đúng
+mcp__codegraph__codegraph_explore("submitInspection settleSessionCheckoutBilling")
+
+# Sai
+Agent({ subagent_type: "Explore", prompt: "tìm submitInspection..." })
+Bash("grep -r 'submitInspection' src/")
+```
+
+Codegraph trả về source code verbatim + call path + blast radius trong 1 lần gọi. Dùng grep/Read thủ công tốn nhiều lượt hơn cho cùng kết quả.
+
+---
+
 ## Project-Specific Guidelines
 
 > **Before writing any code**, read the `CLAUDE.md` inside the relevant project:
@@ -181,18 +198,35 @@ test(payments): add unit tests for damage charge component
 
 ```
 AssetTier:       STANDARD < PREMIUM < RESTRICTED
-                 (deposit amount tăng dần, damage multiplier tăng dần)
+                 (giá thuê và damage multiplier tăng dần)
 
-BookingMode:     RENTAL  = customer thuê xe từ fleet
-                 BYOC    = customer mang xe riêng
+PlayMode:        cột `bookings.play_mode` — RENTAL | BYOC
+                 (enum DB còn giá trị MIXED nhưng code không tạo được và
+                  chưa booking nào dùng)
 
-PaymentFlow:     Bước 1 (booking confirm): charge security_deposit → HELD
-                 Bước 2 (session checkout): CAPTURE (total_charges − security_deposit)
-                 total_charges = slot_fee + rental_fee + extension_fee + fnb + damage_charge
-                 security_deposit = vehicle.market_value × 15%
-                 extension_fee cap → max 50% security_deposit
+BookingMode:     cột `bookings.booking_mode` — SINGLE | PACKAGE | SUBSCRIPTION
+                 CẢNH BÁO: enum TypeScript tên `BookingMode` lại chứa
+                 RENTAL/BYOC, tức là nó ứng với play_mode chứ không phải
+                 booking_mode. Đọc kỹ tên cột trước khi dùng.
 
-PlatformFee:     15% chỉ tính trên consummated components
+PaymentFlow:     Trả trước MỘT lần khi booking được xác nhận:
+                   slot_fee + rental_fee + fnb_preorder
+                   + contest_entry_fee (nếu đăng ký giải)
+                   − promotion_discount
+                 Các component trên tạo với status HELD.
+
+                 Phát sinh trong/sau phiên chơi, thu thêm ở checkout:
+                   EXTENSION_FEE, FNB_ON_SITE, DAMAGE_CHARGE
+
+KHÔNG có cọc:    Nền tảng đã bỏ security deposit khỏi mọi luồng thanh toán.
+                 `PaymentComponentType.SECURITY_DEPOSIT` vẫn còn trong enum và
+                 logic hoàn cọc vẫn xử lý được dữ liệu cũ, nhưng KHÔNG code nào
+                 tạo component này nữa — xem payment.service.ts:527.
+                 Không có cột `market_value` ở bất kỳ bảng nào.
+
+PlatformFee:     0%. `platform_fee_pct` đặt cứng bằng 0.
+                 Doanh thu nền tảng là phí thuê bao SaaS của Provider,
+                 không phải phần trăm trên booking.
 
 Timeout rules:   Xem rcfield-spec/docs/spec/02-state-machine.md
 Refund rules:    Xem rcfield-spec/docs/spec/03-payment-engine.md (R1, R2, R3)
@@ -263,11 +297,17 @@ graphify run                        # build graph từ docs/spec/
 ```
 
 <!-- SPECKIT START -->
-Current active feature plan: `specs/015-booking-qr-checkin/plan.md`
+Current active feature plan: `specs/019-cafe-bank-payment/plan.md`
 For implementation context, read in order:
-1. `specs/015-booking-qr-checkin/plan.md` — technical context, files to modify, backend QR endpoint + email method, frontend QR display + staff upload decoder
-2. `specs/015-booking-qr-checkin/research.md` — 7 decisions: QR in email via URL endpoint (not base64 data URI), `qrcode` npm (backend), `jsqr` (staff FE decode), `qrcode.react` (customer FE display), UUID-only QR content, public endpoint, 2-mode check-in screen
-3. `specs/015-booking-qr-checkin/data-model.md` — no new tables; existing: bookings, cafes, users, sessions
-4. `specs/015-booking-qr-checkin/contracts/api.md` — 1 new endpoint: GET /bookings/:id/qr (public PNG); existing used: GET /bookings/:id, POST /staff/bookings/:id/check-in
-5. `specs/015-booking-qr-checkin/quickstart.md` — 8 E2E scenarios + unit test checklist
+1. `specs/019-cafe-bank-payment/plan.md` — technical context, 13 BE new + 8 modified, 4 FE new + 4 modified, milestones M1–M9, constitution gate PASS
+2. `specs/019-cafe-bank-payment/research.md` — 17 decisions + a consolidated trap table at the end
+3. `specs/019-cafe-bank-payment/data-model.md` — new tables `cafe_payment_settings`, `bank_transactions`, new column `payment_transactions.payment_ref_code`, index predicates, TRUNCATE ordering
+4. `specs/019-cafe-bank-payment/contracts/api.md` — 9 new endpoints + 1 backward-compatible change to `POST /bookings/:id/checkout`; the 11-step webhook processing order is normative
+5. `specs/019-cafe-bank-payment/quickstart.md` — E2E scenarios; B3 / D6 / C2 are the three decisive ones
+
+⚠️ Six traps flagged in `research.md`: (1) the webhook MUST call `processConfirmationResult` (`payment.service.ts:879`) — **never** `processMockConfirmation` (`:1142`), which silently lacks both the amount check and the booking-hold-expiry guard; (2) `payment.service.ts:723` auto-confirms whenever `VNPAY_MOCK_ENABLED` is on — must be narrowed to VNPAY only or bank-transfer bookings self-confirm before the QR renders; (3) do NOT use `getManagedCafeOrThrow` for bank config — it lets STAFF through, use `assertCafeOwner`; (4) the ref code belongs on `payment_transactions`, never on `bookings`, or a stale QR outlives its payment session and double-charges; (5) checking `status === SUCCESS` is not enough — a FAILED (replaced) transaction must also be rejected; (6) do not relax the amount comparison inside `processConfirmationResult` — it is shared with VNPay.
+
+⚠️ Constitution Principle V is a hard gate here: `src/__tests__/services/bank-webhook.test.ts` must be written and confirmed failing before `matchBankTransaction` is implemented (milestone M3 blocks M4).
+
+Prior feature `018-contest-finance` is implemented through US3 (35/47 tasks); US4 (T036–T047) remains.
 <!-- SPECKIT END -->

@@ -131,86 +131,104 @@ erDiagram
     payment_transactions ||--o{ customer_packages : "pays for package"
 ```
 
-> **Bảng backend-only bổ sung ngoài diagram:** `menu_categories`, `menu_item_variants`, `menu_item_components`, `contest_formats`, `contest_types`, `contest_templates`, `contest_staff_assignments`, `contest_bans`, `contest_fee_plans`, `contest_fee_orders`, `damage_line_items`, `ai_analysis_logs`, `featured_popups`, `push_tokens`. Một số bảng trong diagram (ví dụ `subscriptions`, `package_usages`, `promotion_usages`, `notification_logs`, `trust_score_logs`, `feature_flags`, `incidents`, `customer_vehicles`, `vehicle_maintenance_logs`, `staff_cafe_assignments`, `shift_positions`, `shift_time_presets`, `staff_shifts`, `disputes`, `cafe_closures`, `cafe_announcements`, `cafe_widget_configs`) chưa có entity backend trong Phase 1.
+> **Bảng backend-only bổ sung ngoài diagram:** `menu_categories`, `menu_item_variants`, `menu_item_components`, `contest_formats`, `contest_types`, `contest_templates`, `contest_staff_assignments`, `contest_bans`, `contest_fee_plans`, `contest_fee_orders`, `damage_line_items`, `ai_analysis_logs`, `featured_popups`, `push_tokens`. Các bảng trong diagram cần phân biệt ba nhóm:
+>
+> - **Đã bị xoá khỏi database**: `subscriptions`, `package_usages`, `promotion_usages`,
+>   `notification_logs`, `trust_score_logs`, `incidents`, `customer_vehicles`,
+>   `disputes`, `cafe_announcements`.
+> - **Chưa bao giờ được xây**: `shift_positions`, `shift_time_presets`, `staff_shifts`,
+>   `cafe_closures`, `cafe_widget_configs`.
+> - **Đang chạy nhưng không có entity TypeORM** (truy cập bằng raw SQL):
+>   `feature_flags`, `staff_cafe_assignments`, `vehicle_maintenance_logs`.
 
 ---
 
-## 3. Phase 1 Schema Scope — 65 Tables
+## 3. Schema Scope — 70 Bảng Đang Chạy
 
-Phase 1 chỉ tạo schema/migration cho **65 bảng vận hành cốt lõi** dưới đây.
+Danh sách dưới đây được đối chiếu trực tiếp với `pg_tables` của database, không
+phải mục tiêu thiết kế. Bảng `migrations` của TypeORM không tính.
 
-> Không cộng thêm bảng Phase 2 vào scope này. Chỉ các bảng multi-party dispute workflow nâng cao
-> (`dispute_evidences`, `dispute_parties`), AI và analytics nâng cao (không bao gồm chatbot AI / Knowledge Base cơ bản đã thiết kế ở Phase 1) **không được tạo trong Phase 1**.
+> **Đã gỡ khỏi scope.** Bảy bảng từng nằm trong bản thiết kế đầu nhưng **chưa bao
+> giờ được xây**: `cafe_closures`, `cafe_widget_configs`, `driver_profiles`,
+> `driver_cafe_checkins`, `staff_shifts`, `shift_positions`, `shift_time_presets`.
+>
+> Bảy bảng khác **đã tồn tại rồi bị xoá** vì không luồng nghiệp vụ nào đi qua:
+> `cafe_announcements`, `notification_logs`, `package_usages`, `promotion_usages`,
+> `disputes`, `incidents`, `trust_score_logs` — cùng `subscriptions` và
+> `customer_vehicles` bị thay thế bởi `provider_subscriptions` và `vehicles`.
 
-| # | Bảng | Mô tả | Trạng thái backend |
-|---|------|-------|--------------------|
-| 1 | `users` | Tài khoản và role | Đã có entity |
-| 2 | `refresh_tokens` | Refresh token sessions | Đã có entity |
-| 3 | `password_reset_tokens` | Reset password tokens | Đã có entity |
-| 4 | `cafes` | Chi nhánh/sân RC | Đã có entity |
-| 5 | `cafe_images` | Gallery ảnh chi nhánh | Đã có entity |
-| 6 | `vehicle_catalogs` | Danh mục xe thuê | Đã có entity |
-| 7 | `vehicles` | Xe thuê vật lý của quán | Đã có entity |
-| 8 | `vehicle_catalog_images` | Ảnh danh mục xe | Đã có entity |
-| 9 | `vehicle_maintenance_logs` | Lịch sử bảo trì/sửa chữa xe | Chưa có entity backend |
-| 10 | `customer_vehicles` | Xe BYOC của khách | Chưa có entity backend |
-| 11 | `bookings` | Đơn đặt lịch dự kiến | Đã có entity |
-| 12 | `booking_participants` | Người chơi dự kiến | Đã có entity |
-| 13 | `booking_vehicles` | Xe thuê dự kiến | Đã có entity |
-| 14 | `sessions` | Phiên chơi thực tế | Đã có entity |
-| 15 | `session_participants` | Người chơi thực tế | Đã có entity |
-| 16 | `session_vehicles` | Xe thực tế dùng trong session | Đã có entity |
-| 17 | `payment_components` | Ledger thanh toán | Đã có entity |
-| 18 | `payment_transactions` | Log gateway | Đã có entity |
-| 19 | `inspections` | Biên bản kiểm tra | Đã có entity |
-| 20 | `inspection_photos` | Ảnh inspection | Đã có entity |
-| 21 | `inspection_checklists` | Checklist inspection | Đã có entity |
-| 22 | `extension_proposals` | Đề xuất gia hạn | Đã có entity |
-| 23 | `incidents` | Sự cố + log xử lý theo policy | Chưa có entity backend |
-| 24 | `menu_items` | Menu F&B | Đã có entity |
-| 25 | `fnb_orders` | Đơn F&B | Đã có entity |
-| 26 | `fnb_order_items` | Line items F&B | Đã có entity |
-| 27 | `packages` | Định nghĩa gói chơi | Đã có entity |
-| 28 | `customer_packages` | Gói khách đã mua | Đã có entity |
-| 29 | `package_usages` | Audit sử dụng gói | Chưa có entity backend |
-| 30 | `subscriptions` | Lịch chơi định kỳ | Chưa có entity backend |
-| 31 | `contests` | Giải đua/sự kiện do Provider tạo | Đã có entity |
-| 32 | `contest_cafes` | Chi nhánh tham gia contest | Đã có entity |
-| 33 | `contest_registrations` | Đăng ký giải đua | Đã có entity |
-| 34 | `contest_matches` | Match/heat/lượt chạy/final linh hoạt | Đã có entity |
-| 35 | `contest_match_participants` | Người tham gia trong từng match | Đã có entity |
-| 36 | `contest_audit_logs` | Business audit log của contest | Đã có entity |
-| 37 | `promotions` | Mã khuyến mãi | Đã có entity |
-| 38 | `promotion_usages` | Audit dùng mã | Chưa có entity backend |
-| 39 | `reviews` | Đánh giá | Đã có entity |
-| 40 | `notification_logs` | Log thông báo | Chưa có entity backend |
-| 41 | `trust_score_logs` | Audit trust score | Chưa có entity backend |
-| 42 | `feature_flags` | Bật/tắt module, config Phase 2 | Chưa có entity backend |
-| 43 | `staff_cafe_assignments` | Staff assign vào chi nhánh | Chưa có entity backend |
-| 44 | `disputes` | Tranh chấp booking | Chưa có entity backend |
-| 45 | `cafe_closures` | Ngày đóng cửa đặc biệt | Chưa có entity backend |
-| 46 | `cafe_announcements` | Thông báo/banner chi nhánh | Chưa có entity backend |
-| 47 | `provider_profiles` | Hồ sơ đăng ký Provider, trạng thái duyệt | Đã có entity |
-| 48 | `subscription_plans` | Định nghĩa các gói: Trial, Starter, Growth, Pro | Đã có entity |
-| 49 | `provider_subscriptions` | Subscription đang active của từng Provider, quota AI | Đã có entity |
-| 50 | `payment_requests` | Yêu cầu thanh toán thủ công (chuyển khoản) | Đã có entity |
-| 51 | `notifications` | In-app notifications cho Provider | Đã có entity |
-| 52 | `kb_documents` | Tài liệu Knowledge Base AI | Đã có entity |
-| 53 | `kb_chunks` | Các đoạn dữ liệu text cắt nhỏ từ KB document | Đã có entity |
-| 54 | `cafe_widget_configs` | Cấu hình widget chatbot AI theo chi nhánh | Chưa có entity backend |
-| 55 | `track_types` | Các loại đường đua (Drift, Circuit, Offroad...) | Đã có entity |
-| 56 | `cafe_track_configs` | Cấu hình đường đua cụ thể của chi nhánh | Đã có entity |
-| 57 | `staff_invite_tokens` | Token mời nhân viên qua email | Đã có entity |
-| 58 | `shift_positions` | Các vị trí làm việc của nhân viên | Chưa có entity backend |
-| 59 | `shift_time_presets` | Khung giờ ca làm việc định sẵn | Chưa có entity backend |
-| 60 | `staff_shifts` | Lịch phân ca và chấm công thực tế | Chưa có entity backend |
-| 61 | `amenity_catalog` | Danh mục các tiện ích của chi nhánh | Đã có entity |
-| 62 | `cafe_channels` | Cấu hình kênh liên lạc (Facebook, Zalo...) | Đã có entity |
-| 63 | `cafe_holiday_overrides` | Cấu hình hoạt động chi nhánh vào ngày lễ | Đã có entity |
-| 64 | `cafe_pricing_rules` | Cấu hình quy tắc định giá chi tiết theo khung giờ/ngày | Đã có entity |
-| 65 | `holiday_dates` | Danh sách các ngày lễ chính thức | Đã có entity |
-
-> Ngoài 65 bảng trên, backend đã có thêm các entity: `menu_categories`, `menu_item_variants`, `menu_item_components`, `contest_formats`, `contest_types`, `contest_templates`, `contest_staff_assignments`, `contest_bans`, `contest_fee_plans`, `contest_fee_orders`, `damage_line_items`, `ai_analysis_logs`, `featured_popups`, `push_tokens`.
+| # | Bảng | Mô tả | Entity TypeORM |
+|---|------|-------|----------------|
+| 1 | `achievement_definitions` | Danh mục huy hiệu của mạng lưới tay đua | `achievement-definition.entity.ts` |
+| 2 | `ai_analysis_logs` | Nhật ký các lần chạy phân tích doanh thu bằng AI | `ai-analysis-log.entity.ts` |
+| 3 | `amenity_catalog` | Danh mục các tiện ích của chi nhánh | `amenity-catalog.entity.ts` |
+| 4 | `bank_transactions` | Giao dịch chuyển khoản đối soát qua webhook ngân hàng | `bank-transaction.entity.ts` |
+| 5 | `booking_participants` | Người chơi dự kiến | `booking-participant.entity.ts` |
+| 6 | `booking_vehicles` | Xe thuê dự kiến | `booking-vehicle.entity.ts` |
+| 7 | `bookings` | Đơn đặt lịch dự kiến | `booking.entity.ts` |
+| 8 | `cafe_channels` | Cấu hình kênh liên lạc (Facebook, Zalo...) | `cafe-channel.entity.ts` |
+| 9 | `cafe_holiday_overrides` | Cấu hình hoạt động chi nhánh vào ngày lễ | `cafe-holiday-override.entity.ts` |
+| 10 | `cafe_images` | Gallery ảnh chi nhánh | `cafe-image.entity.ts` |
+| 11 | `cafe_payment_settings` | Cấu hình nhận tiền của chi nhánh (VietQR, VNPay riêng) | `cafe-payment-setting.entity.ts` |
+| 12 | `cafe_pricing_rules` | Cấu hình quy tắc định giá chi tiết theo khung giờ/ngày | `cafe-pricing-rule.entity.ts` |
+| 13 | `cafe_track_configs` | Cấu hình đường đua cụ thể của chi nhánh | `cafe-track-config.entity.ts` |
+| 14 | `cafes` | Chi nhánh/sân RC | `cafe.entity.ts` |
+| 15 | `contest_audit_logs` | Business audit log của contest | `contest-audit-log.entity.ts` |
+| 16 | `contest_bans` | Danh sách cấm thi đấu | `contest-ban.entity.ts` |
+| 17 | `contest_cafes` | Chi nhánh tham gia contest | `contest-cafe.entity.ts` |
+| 18 | `contest_fee_orders` | Đơn phí tổ chức của từng giải, kèm thông tin chuyển khoản và kết quả đối soát | `contest-fee-order.entity.ts` |
+| 19 | `contest_fee_plans` | Gói phí tổ chức giải Provider trả cho nền tảng | `contest-fee-plan.entity.ts` |
+| 20 | `contest_formats` | Thể thức thi đấu và cờ năng lực (bracket, time attack) | `contest-format.entity.ts` |
+| 21 | `contest_ledger_entries` | Sổ thu chi của một giải | `contest-ledger-entry.entity.ts` |
+| 22 | `contest_match_participants` | Người tham gia trong từng match | `contest-match-participant.entity.ts` |
+| 23 | `contest_matches` | Match/heat/lượt chạy/final linh hoạt | `contest-match.entity.ts` |
+| 24 | `contest_registrations` | Đăng ký giải đua | `contest-registration.entity.ts` |
+| 25 | `contest_staff_assignments` | Phân công nhân sự điều hành giải | `contest-staff-assignment.entity.ts` |
+| 26 | `contest_templates` | Mẫu cấu hình giải: gộp thể thức + loại + default_config | `contest-template.entity.ts` |
+| 27 | `contest_types` | Loại giải (nhãn phân loại) | `contest-type.entity.ts` |
+| 28 | `contests` | Giải đua/sự kiện do Provider tạo | `contest.entity.ts` |
+| 29 | `customer_packages` | Gói khách đã mua | `customer-package.entity.ts` |
+| 30 | `damage_line_items` | Từng hạng mục hư hỏng: tiền phụ tùng và tiền công | `damage-line-item.entity.ts` |
+| 31 | `extension_proposals` | Đề xuất gia hạn | `extension-proposal.entity.ts` |
+| 32 | `feature_flags` | Bật/tắt module, config Phase 2 | **chưa có entity** — truy cập bằng raw SQL |
+| 33 | `featured_popups` | Popup quảng bá giải trên trang khám phá | `featured-popup.entity.ts` |
+| 34 | `fnb_order_items` | Line items F&B | `fnb-order-item.entity.ts` |
+| 35 | `fnb_orders` | Đơn F&B | `fnb-order.entity.ts` |
+| 36 | `holiday_dates` | Danh sách các ngày lễ chính thức | `holiday-date.entity.ts` |
+| 37 | `inspection_checklists` | Checklist inspection | `inspection-checklist.entity.ts` |
+| 38 | `inspection_photos` | Ảnh inspection | `inspection-photo.entity.ts` |
+| 39 | `inspections` | Biên bản kiểm tra | `inspection.entity.ts` |
+| 40 | `kb_chunks` | Các đoạn dữ liệu text cắt nhỏ từ KB document | `kb-chunk.entity.ts` |
+| 41 | `kb_documents` | Tài liệu Knowledge Base AI | `kb-document.entity.ts` |
+| 42 | `menu_categories` | Nhóm món trong thực đơn chi nhánh | `menu-category.entity.ts` |
+| 43 | `menu_item_components` | Thành phần của món combo | `menu-item-component.entity.ts` |
+| 44 | `menu_item_variants` | Biến thể món (size, mức đá…) | `menu-item-variant.entity.ts` |
+| 45 | `menu_items` | Menu F&B | `menu-item.entity.ts` |
+| 46 | `notifications` | In-app notifications cho Provider | `notification.entity.ts` |
+| 47 | `packages` | Định nghĩa gói chơi | `package.entity.ts` |
+| 48 | `password_reset_tokens` | Reset password tokens | `password-reset-token.entity.ts` |
+| 49 | `payment_components` | Ledger thanh toán | `payment-component.entity.ts` |
+| 50 | `payment_requests` | Yêu cầu thanh toán thủ công (chuyển khoản) | `payment-request.entity.ts` |
+| 51 | `payment_transactions` | Log gateway | `payment-transaction.entity.ts` |
+| 52 | `promotions` | Mã khuyến mãi | `promotion.entity.ts` |
+| 53 | `provider_profiles` | Hồ sơ đăng ký Provider, trạng thái duyệt | `provider-profile.entity.ts` |
+| 54 | `provider_subscriptions` | Subscription đang active của từng Provider, quota AI | `provider-subscription.entity.ts` |
+| 55 | `push_tokens` | Token thiết bị để gửi thông báo đẩy | `push-token.entity.ts` |
+| 56 | `race_records` | Kết quả chạy dùng cho bảng xếp hạng | `race-record.entity.ts` |
+| 57 | `refresh_tokens` | Refresh token sessions | `refresh-token.entity.ts` |
+| 58 | `reviews` | Đánh giá | `review.entity.ts` |
+| 59 | `session_participants` | Người chơi thực tế | `session-participant.entity.ts` |
+| 60 | `session_vehicles` | Xe thực tế dùng trong session | `session-vehicle.entity.ts` |
+| 61 | `sessions` | Phiên chơi thực tế | `session.entity.ts` |
+| 62 | `staff_cafe_assignments` | Staff assign vào chi nhánh | **chưa có entity** — truy cập bằng raw SQL |
+| 63 | `staff_invite_tokens` | Token mời nhân viên qua email | `staff-invite-token.entity.ts` |
+| 64 | `subscription_plans` | Định nghĩa các gói: Trial, Starter, Growth, Pro | `subscription-plan.entity.ts` |
+| 65 | `track_types` | Các loại đường đua (Drift, Circuit, Offroad...) | `track-type.entity.ts` |
+| 66 | `users` | Tài khoản và role | `user.entity.ts` |
+| 67 | `vehicle_catalog_images` | Ảnh danh mục xe | `vehicle-catalog-image.entity.ts` |
+| 68 | `vehicle_catalogs` | Danh mục xe thuê | `vehicle-catalog.entity.ts` |
+| 69 | `vehicle_maintenance_logs` | Lịch sử bảo trì/sửa chữa xe | **chưa có entity** — truy cập bằng raw SQL |
+| 70 | `vehicles` | Xe thuê vật lý của quán | `vehicle.entity.ts` |
 
 Các nghiệp vụ bị loại khỏi schema Phase 1:
 
@@ -221,124 +239,118 @@ Các nghiệp vụ bị loại khỏi schema Phase 1:
 
 ## 4. Enum Chuẩn
 
+Khối dưới đây **trích thẳng từ `rcfeild-be/src/types/index.ts`** — 72 enum, đúng
+với mã đang chạy. Chỗ nào giá trị TypeScript khác chuỗi lưu xuống DB thì ghi rõ
+dạng `KEY='giá_trị_db'`.
+
+> Bản trước liệt kê 59 enum viết tay và lệch 37 chỗ so với code: 18 enum không hề
+> tồn tại (`PlayMode`, `TrackType`, `VehicleTier`, `IncidentType`, `TeamWarStatus`…)
+> và 19 enum sai giá trị. Đáng chú ý nhất là `BookingMode`: spec ghi
+> `SINGLE/PACKAGE/SUBSCRIPTION` (đúng với cột `bookings.booking_mode`), còn enum
+> TypeScript cùng tên lại chứa `RENTAL/BYOC` — tức là nó ứng với cột
+> `bookings.play_mode`. Hai thứ khác nhau dùng chung một tên; đọc kỹ tên cột
+> trước khi dùng.
+
 ```typescript
-enum UserRole { CUSTOMER, PROVIDER, STAFF, ADMIN }
+enum AssetTier { STANDARD, PREMIUM, RESTRICTED }
 enum AuthProvider { LOCAL, GOOGLE }
-
-enum CafeStatus { PENDING, ACTIVE, SUSPENDED }
-// TrackType là bảng (track_types), không phải enum trong backend.
-// enum TrackType { DRIFT, CIRCUIT, OFFROAD } // KHÔNG DÙNG trong backend
-
-enum AssetTier { STANDARD, PREMIUM, RESTRICTED } // vehicle_catalogs.tier
-// enum VehicleTier { STANDARD, PREMIUM, RESTRICTED } // KHÔNG DÙNG; thay bằng AssetTier
-enum VehicleStatus { AVAILABLE, IN_USE, MAINTENANCE, RETIRED }
-enum VehicleSource { RENTAL, BYOC }
-enum SessionVehicleStatus { ASSIGNED, IN_USE, RETURNED, DAMAGED }
-
-enum BookingMode { RENTAL, BYOC } // dùng cho bookings.play_mode
-// enum PlayMode { RENTAL, BYOC, MIXED } // KHÔNG DÙNG trong backend
+enum BankTransactionGateway { SEPAY, SANDBOX }
+enum BankTransactionMatchReason { OVERPAID, NO_REF_CODE, REF_NOT_FOUND, SHORT_PAID, ALREADY_PAID, SESSION_REPLACED, BOOKING_EXPIRED, UNKNOWN_ACCOUNT }
+enum BankTransactionMatchStatus { MATCHED, NEEDS_REVIEW, IGNORED }
+enum BookingMode { RENTAL, BYOC }
+enum BookingParticipantType { BOOKER, REGISTERED_USER, WALK_IN_GUEST }
 enum BookingSource { APP, STAFF_MANUAL, CONTEST }
 enum BookingStatus { PENDING, CONFIRMED, NO_SHOW, AWAITING_PAYMENT, COMPLETED, CANCELLED }
-enum SessionStatus { CHECKED_IN, ACTIVE, EXTENDING, CHECKING_OUT, COMPLETED, CANCELLED }
-
-enum BookingParticipantType { BOOKER, REGISTERED_USER, WALK_IN_GUEST }
-enum ParticipantRole { DRIVER, PLAYER, SPECTATOR, GUARDIAN }
-
-enum PaymentComponentType {
-  SLOT_FEE, RENTAL_FEE, SECURITY_DEPOSIT, EXTENSION_FEE,
-  DAMAGE_CHARGE, FB_PREORDER = 'FNB_PREORDER', FNB_ON_SITE, PACKAGE_PURCHASE, CONTEST_ENTRY_FEE
-}
-enum PaymentComponentStatus {
-  PENDING, HELD, DISBURSED, PENDING_REFUND, REFUNDED, PARTIALLY_REFUNDED
-}
-enum PaymentTransactionType { PAYMENT, REFUND }
-enum PaymentTransactionSubjectType { BOOKING, CONTEST_ENTRY, CUSTOMER_PACKAGE }
-enum PaymentTransactionStatus { PENDING, SUCCESS, FAILED }
-
-enum InspectionType { CHECK_IN, CHECK_OUT } // backend không có STAFF_HANDOVER
-enum InspectionSubjectType { RENTAL_VEHICLE, BYOC_VEHICLE }
-enum DamagePartType { TIRE_WHEEL, SPOILER, CHASSIS, MOTOR, SHELL, SERVO, REMOTE, OTHER }
-enum InspectionItemStatus { OK, SCRATCHED, BROKEN, MISSING, DIRTY, NEEDS_REVIEW }
-enum PhotoAngle { FRONT, BACK, LEFT, RIGHT, TOP, BOTTOM, DETAIL, OTHER }
-
-enum ExtensionProposalStatus { PENDING, APPROVED, REJECTED, EXPIRED, CANCELLED }
-// enum IncidentType { ... } // KHÔNG DÙNG: bảng incidents chưa có entity backend
-
-enum FnbOrderType { PRE_ORDER, ON_SITE }
-enum FnbOrderStatus { PENDING, CONFIRMED, DELIVERED, CANCELLED } // backend không có PREPARING
-
-enum PackageStatus { ACTIVE, INACTIVE, ARCHIVED }
-enum PackageBillingPeriod { WEEK, MONTH }
-enum CustomerPackageStatus { PENDING_PAYMENT, ACTIVE, EXHAUSTED, EXPIRED }
-enum SubscriptionStatus { TRIAL, ACTIVE, GRACE_PERIOD, EXPIRED } // provider_subscriptions.status
-
-enum ContestStatus { DRAFT, OPEN, CLOSED, RUNNING, COMPLETED, CANCELLED }
-enum ContestResourceScope { FULL_BRANCH, SELECTED_TRACKS }
+enum CafePaymentMethod { VNPAY, BANK_TRANSFER }
+enum CafeStatus { PENDING, ACTIVE, SUSPENDED }
+enum ChannelStatus { CONNECTED, DISCONNECTED }
+enum ChannelType { FACEBOOK_MESSENGER }
 enum ContestBanScopeType { CONTEST, PROVIDER }
-enum ContestRegistrationStatus { PENDING, CONFIRMED, CANCELLED, CHECKED_IN }
+enum ContestEntryFeePaymentMethod { ONLINE, CASH, TRANSFER }
 enum ContestEntryFeePaymentStatus { NOT_REQUIRED, PENDING_PAYMENT, PENDING_REVIEW, WAIVED, MARKED_PAID }
-enum ContestMatchType { HEAD_TO_HEAD, MULTI_DRIVER, TIME_ATTACK, FINAL }
-enum ContestMatchStatus { DRAFT, READY, RUNNING, COMPLETED, CANCELLED }
-enum ContestParticipantStatus { READY, STARTED, FINISHED, DNS, DNF, DQ }
 enum ContestFeeOrderStatus { PENDING_PAYMENT, PENDING_REVIEW, PAID, REJECTED, CANCELLED }
-
-enum RaceRecordSourceType { CONTEST, SESSION_TIME_ATTACK, ADMIN_IMPORT }
-enum RaceRecordVerificationStatus { PENDING, VERIFIED, REJECTED, SUPERSEDED }
-enum DriverCheckinSource { QR_SCAN, STAFF_MANUAL, CONTEST_CHECKIN } // Phase B backlog
-
+enum ContestLedgerDirection { IN, OUT }
+enum ContestLedgerExpenseCategory { PRIZE_CASH, PRIZE_ITEM, VENUE, STAFF, MARKETING, FNB, OTHER }
+enum ContestLedgerIncomeCategory { ENTRY_FEE_ADJUSTMENT, SPONSORSHIP, TICKET, FNB, OTHER }
+enum ContestMatchStatus { DRAFT, READY, RUNNING, COMPLETED, CANCELLED }
+enum ContestMatchType { HEAD_TO_HEAD, MULTI_DRIVER, TIME_ATTACK, FINAL }
+enum ContestParticipantStatus { READY, STARTED, FINISHED, DNS, DNF, DQ }
+enum ContestRegistrationStatus { PENDING, CONFIRMED, CANCELLED, CHECKED_IN }
+enum ContestResourceScope { FULL_BRANCH, SELECTED_TRACKS }
+enum ContestStatus { DRAFT, OPEN, CLOSED, RUNNING, COMPLETED, CANCELLED }
+enum CustomerPackageStatus { PENDING_PAYMENT, ACTIVE, EXHAUSTED, EXPIRED }
+enum DamagePartType { TIRE_WHEEL, SPOILER, CHASSIS, MOTOR, SHELL, SERVO, REMOTE, OTHER }
 enum DiscountType { PERCENT, FIXED }
-enum PromoApplicableTo { ALL, RENTAL, BYOC } // backend không có MIXED
-enum PromotionScheduleMode { ONCE, DAILY, WEEKLY }
-enum NotificationChannel { PUSH, SMS, EMAIL }
-enum NotificationStatus { PENDING, SENT, FAILED } // backend không dùng cột status này
-enum NotificationType {
-  SYSTEM, VEHICLE_MAINTENANCE_CREATED, MAINTENANCE_LOG_UPDATED,
-  ACCOUNT_APPROVED, ACCOUNT_REJECTED, ACCOUNT_SUSPENDED, ACCOUNT_UNSUSPENDED,
-  TRIAL_EXPIRING_SOON, GRACE_PERIOD_STARTED, SUBSCRIPTION_EXPIRED, SUBSCRIPTION_ACTIVATED,
-  PAYMENT_REQUEST_CONFIRMED, PAYMENT_REQUEST_REJECTED,
-  SESSION_CHECKIN_INSPECTION, SESSION_CHECKOUT_INSPECTION, SESSION_EXTENSION_PROPOSED, SESSION_FNB_ORDER_ADDED,
-  FNB_ORDER_READY_FOR_PREP, FNB_ORDER_SERVED, SESSION_OVERDUE_ALERT,
-  CUSTOMER_CHECKIN_CONFIRMED, CUSTOMER_CHECKOUT_CONFIRMED, CUSTOMER_INSPECTION_DISPUTED,
-  CUSTOMER_EXTENSION_APPROVED, CUSTOMER_EXTENSION_REJECTED, CUSTOMER_PAYMENT_CONFIRMED,
-  BOOKING_REVIEW_REQUEST,
-  CONTEST_REGISTRATION_CREATED, CONTEST_REGISTRATION_APPROVED, CONTEST_REGISTRATION_REJECTED, CONTEST_REGISTRATION_CANCELLED,
-  CONTEST_CHECKIN_CONFIRMED, CONTEST_REMINDER
-}
-
-enum ReviewStatus { VISIBLE, HIDDEN }
-
-enum ProviderStatus { PENDING, ACTIVE, REJECTED, SUSPENDED }
-enum PlanName { TRIAL, STARTER, GROWTH, PRO }
-enum PaymentRequestStatus { PENDING, CONFIRMED, REJECTED }
-
+enum DisputeStatus { OPEN, UNDER_REVIEW, RESOLVED }
+enum ExtensionProposalStatus { PENDING, APPROVED, REJECTED, EXPIRED, CANCELLED }
+enum FeaturedPopupAudienceScope { ALL }
+enum FeaturedPopupPlacement { EXPLORE }
+enum FeaturedPopupReviewStatus { PENDING, APPROVED, REJECTED }
+enum FnbOrderStatus { PENDING, CONFIRMED, DELIVERED, CANCELLED }
+enum FnbOrderType { PRE_ORDER, ON_SITE }
+enum HolidayType { SYSTEM, CUSTOM }
+enum InspectionItemStatus { OK, SCRATCHED, BROKEN, MISSING, DIRTY, NEEDS_REVIEW }
+enum InspectionSubjectType { RENTAL_VEHICLE, BYOC_VEHICLE }
+enum InspectionType { CHECK_IN, CHECK_OUT }
 enum KbContentType { POLICY, FAQ, ANNOUNCEMENT, CUSTOM }
 enum KbDocumentStatus { PENDING, INDEXED, FAILED }
-enum WidgetPosition { BOTTOM_RIGHT, BOTTOM_LEFT } // WidgetConfigData; không có bảng riêng
-enum ChannelType { FACEBOOK_MESSENGER }
-enum ChannelStatus { CONNECTED, DISCONNECTED }
-enum PricingRuleType { WEEKEND, PEAK_HOURS }
-enum HolidayType { SYSTEM, CUSTOM }
-enum AiAnalysisStatus { SUCCESS, FAILED, QUOTA_EXCEEDED, INSUFFICIENT_DATA }
-
 enum KycBusinessType { INDIVIDUAL, BUSINESS }
 enum KycDocumentType { CCCD_FRONT, CCCD_BACK, GPKD, REPRESENTATIVE_ID, VENUE_PHOTO }
+enum NotificationChannel { PUSH, SMS, EMAIL }
+enum NotificationType { SYSTEM, VEHICLE_MAINTENANCE_CREATED, MAINTENANCE_LOG_UPDATED, ACCOUNT_APPROVED, ACCOUNT_REJECTED, ACCOUNT_SUSPENDED, ACCOUNT_UNSUSPENDED, TRIAL_EXPIRING_SOON, GRACE_PERIOD_STARTED, SUBSCRIPTION_EXPIRED, SUBSCRIPTION_ACTIVATED, PAYMENT_REQUEST_CONFIRMED, PAYMENT_REQUEST_REJECTED, SESSION_CHECKIN_INSPECTION, SESSION_CHECKOUT_INSPECTION, SESSION_EXTENSION_PROPOSED, SESSION_FNB_ORDER_ADDED, FNB_ORDER_READY_FOR_PREP, FNB_ORDER_SERVED, SESSION_OVERDUE_ALERT, CUSTOMER_CHECKIN_CONFIRMED, CUSTOMER_CHECKOUT_CONFIRMED, CUSTOMER_INSPECTION_DISPUTED, CUSTOMER_EXTENSION_APPROVED, CUSTOMER_EXTENSION_REJECTED, CUSTOMER_PAYMENT_CONFIRMED, BOOKING_REVIEW_REQUEST, CONTEST_REGISTRATION_CREATED, CONTEST_REGISTRATION_APPROVED, CONTEST_REGISTRATION_REJECTED, CONTEST_REGISTRATION_CANCELLED, CONTEST_CHECKIN_CONFIRMED, CONTEST_REMINDER, BOOKING_CANCELLED }
+enum PackageBillingPeriod { WEEK, MONTH }
+enum PackageStatus { ACTIVE, INACTIVE, ARCHIVED }
+enum ParticipantRole { DRIVER, PLAYER, SPECTATOR, GUARDIAN }
+enum PaymentComponentStatus { PENDING, HELD, DISBURSED, PENDING_REFUND, REFUNDED, PARTIALLY_REFUNDED }
+enum PaymentComponentType { SLOT_FEE, RENTAL_FEE, SECURITY_DEPOSIT, EXTENSION_FEE, DAMAGE_CHARGE, FB_PREORDER='FNB_PREORDER', FNB_ON_SITE, PACKAGE_PURCHASE, CONTEST_ENTRY_FEE }
+enum PaymentRequestStatus { PENDING, CONFIRMED, REJECTED }
+enum PaymentTransactionStatus { PENDING, SUCCESS, FAILED }
+enum PaymentTransactionSubjectType { BOOKING, CONTEST_ENTRY, CUSTOMER_PACKAGE }
+enum PaymentTransactionType { PAYMENT, REFUND }
+enum PhotoAngle { FRONT, BACK, LEFT, RIGHT, TOP, BOTTOM, DETAIL, OTHER }
+enum PlanName { TRIAL, STARTER, GROWTH, PRO }
+enum PricingRuleType { WEEKEND, PEAK_HOURS }
+enum PromoApplicableTo { ALL, RENTAL, BYOC }
+enum PromotionScheduleMode { ONCE, DAILY, WEEKLY }
+enum ProviderStatus { PENDING, ACTIVE, REJECTED, SUSPENDED }
+enum RaceRecordSourceType { CONTEST, SESSION_TIME_ATTACK, ADMIN_IMPORT }
+enum RaceRecordVerificationStatus { PENDING, VERIFIED, REJECTED, SUPERSEDED }
+enum ReviewStatus { VISIBLE, HIDDEN }
+enum SessionStatus { CHECKED_IN, ACTIVE, EXTENDING, CHECKING_OUT, COMPLETED, CANCELLED }
+enum SessionVehicleStatus { ASSIGNED, IN_USE, RETURNED, DAMAGED }
+enum SubscriptionStatus { TRIAL, ACTIVE, GRACE_PERIOD, EXPIRED }
+enum TrustScoreReason { NO_SHOW, DAMAGE_CONFIRMED, DISPUTE_LOST, BOOKING_STREAK, ADMIN_ADJUSTMENT }
+enum UserRole { CUSTOMER, PROVIDER, STAFF, ADMIN }
+enum VehicleSource { RENTAL, BYOC }
+enum VehicleStatus { AVAILABLE, IN_USE, MAINTENANCE, RETIRED }
+enum WidgetPosition { BOTTOM_RIGHT, BOTTOM_LEFT }
+```
 
-enum FeaturedPopupReviewStatus { PENDING, APPROVED, REJECTED }
-enum FeaturedPopupPlacement { EXPLORE }
-enum FeaturedPopupAudienceScope { ALL }
+**Enum có trong spec cũ nhưng KHÔNG tồn tại trong backend** — giữ lại chú thích của
+đợt đối chiếu trước để khỏi ai đi tìm:
 
-// Các enum Phase 2 / chưa có bảng backend:
+```typescript
+// TrackType là bảng (track_types), không phải enum.
+// enum TrackType { DRIFT, CIRCUIT, OFFROAD }        // KHÔNG DÙNG
+// enum VehicleTier { STANDARD, PREMIUM, RESTRICTED } // KHÔNG DÙNG; thay bằng AssetTier
+// enum PlayMode { RENTAL, BYOC, MIXED }              // KHÔNG DÙNG (cột play_mode dùng enum DB)
+// enum IncidentType { ... }                          // KHÔNG DÙNG: bảng incidents đã bị xoá
+
+// Enum Phase 2 / chưa có bảng backend:
 // enum DisputeStatus { OPEN, UNDER_REVIEW, RESOLVED }
 // enum DisputeFavor { CUSTOMER, PROVIDER }
 // enum MaintenanceType { SCHEDULED, REPAIR, INSPECTION }
 // enum TeamMemberStatus { PENDING, ACTIVE, LEFT, REMOVED }
 // enum TeamWarStatus { DRAFT, OPEN, LOCKED, RUNNING, COMPLETED, CANCELLED }
-```
-
 
 ---
 
 ## 5. Bảng Chi Tiết
+
+> ⚠️ **Mục này chưa đầy đủ.** 23/70 bảng đang chạy chưa có mô tả chi tiết ở đây.
+> Với những bảng đó, đọc entity trong `rcfeild-be/src/models/` hoặc migration tương ứng.
+>
+> Chưa có mô tả: `achievement_definitions`, `ai_analysis_logs`, `bank_transactions`, `cafe_payment_settings`, `contest_bans`, `contest_fee_orders`, `contest_fee_plans`, `contest_formats`, `contest_ledger_entries`, `contest_staff_assignments`, `contest_templates`, `contest_types`, `customer_packages`, `damage_line_items`, `featured_popups`, `fnb_order_items`, `fnb_orders`, `menu_categories`, `menu_item_components`, `menu_item_variants`, `menu_items`, `packages`, `push_tokens`
 
 ### 5.1 Identity
 
@@ -487,8 +499,24 @@ Email không có ràng buộc UNIQUE trong entity backend; `google_id` là UNIQU
 
 #### `cafe_widget_configs`
 
-> **Backend hiện tại không tạo entity bảng riêng.** Cấu hình widget được lưu trong cột `cafes.widget_config` (jsonb) và định nghĩa bởi interface `WidgetConfigData`. Bảng liên kết `cafes` ↔ `amenity_catalog` cũng không tồn tại; `cafes.amenity_ids` là mảng uuid tham chiếu đến `amenity_catalog.id`.
+> ⛔ **CHƯA ĐƯỢC XÂY.** Bảng này không tồn tại trong database. Phần mô tả dưới đây là thiết kế dự kiến, giữ lại để tham khảo nếu sau này làm.
+>
+> Cấu hình widget hiện lưu trong cột `cafes.widget_config` (jsonb), định nghĩa bởi
+> interface `WidgetConfigData`. Bảng liên kết `cafes` ↔ `amenity_catalog` cũng không
+> tồn tại; `cafes.amenity_ids` là mảng uuid trỏ tới `amenity_catalog.id`.
 
+| Column | Type | Constraints | Ghi chú |
+|--------|------|-------------|---------|
+| `id` | `uuid` | PK | |
+| `cafe_id` | `uuid` | NOT NULL, UNIQUE, FK -> cafes(id) ON DELETE CASCADE | 1:1 với cafes |
+| `greeting_message` | `text` | NULL | Tin nhắn chào |
+| `welcome_message` | `text` | NULL | Tin nhắn mở đầu hội thoại |
+| `position` | `varchar(20)` | NOT NULL, DEFAULT `'bottom-right'` | Vị trí hiển thị bong bóng chat |
+| `primary_color` | `varchar(20)` | NOT NULL, DEFAULT `'#111827'` | Tông màu chủ đạo widget |
+| `avatar_url` | `text` | NULL | Ảnh đại diện chatbot |
+| `quick_replies` | `jsonb` | NOT NULL, DEFAULT `'[]'` | Câu trả lời nhanh định sẵn |
+| `is_enabled` | `boolean` | NOT NULL, DEFAULT `true` | Trạng thái bật/tắt widget |
+| `created_at`, `updated_at` | `timestamptz` | | |
 
 #### `amenity_catalog`
 
@@ -649,7 +677,10 @@ Backend đơn giản hóa: chỉ còn rule_type + multiplier + khung giờ cao �
 
 #### `customer_vehicles`
 
-> Chưa có entity backend trong Phase 1. Cột dưới đây là thiết kế cũ/legacy; khi implement sẽ đồng bộ với BYOC registry gồm `name`, `scale`, `chassis_type`, `frequency`, `status`, `image_url`, `metadata` như mô tả ở cuối file.
+> ⛔ **ĐÃ XOÁ KHỎI DATABASE** — xe của khách nay đi theo `vehicles`. Phần mô tả dưới đây chỉ để đọc dữ liệu cũ hoặc hiểu lịch sử.
+>
+> Nếu sau này làm lại BYOC registry, đồng bộ với thiết kế gồm `name`, `scale`,
+> `chassis_type`, `frequency`, `status`, `image_url`, `metadata` mô tả ở cuối file.
 
 | Column | Type | Constraints | Ghi chú |
 |--------|------|-------------|---------|
@@ -955,6 +986,8 @@ Backend đơn giản hóa: chỉ còn rule_type + multiplier + khung giờ cao �
 
 #### `promotion_usages`
 
+> ⛔ **ĐÃ XOÁ KHỎI DATABASE** — đếm lượt dùng ngay trên `promotions`. Phần mô tả dưới đây chỉ để đọc dữ liệu cũ hoặc hiểu lịch sử.
+
 | Column | Type | Constraints |
 |--------|------|-------------|
 | `id` | `uuid` | PK |
@@ -983,6 +1016,8 @@ Backend đơn giản hóa: chỉ còn rule_type + multiplier + khung giờ cao �
 
 #### `notification_logs`
 
+> ⛔ **ĐÃ XOÁ KHỎI DATABASE** — bị `notifications` thay thế. Phần mô tả dưới đây chỉ để đọc dữ liệu cũ hoặc hiểu lịch sử.
+
 | Column | Type | Constraints |
 |--------|------|-------------|
 | `id` | `uuid` | PK |
@@ -999,6 +1034,8 @@ Backend đơn giản hóa: chỉ còn rule_type + multiplier + khung giờ cao �
 | `created_at` | `timestamptz` | NOT NULL |
 
 #### `trust_score_logs`
+
+> ⛔ **ĐÃ XOÁ KHỎI DATABASE** — chưa bao giờ nối vào luồng nghiệp vụ. Phần mô tả dưới đây chỉ để đọc dữ liệu cũ hoặc hiểu lịch sử.
 
 | Column | Type | Constraints |
 |--------|------|-------------|
@@ -1140,7 +1177,6 @@ Rules:
 |------|----------|---------|
 | `packages` | cafe_id, code, name, slot_count, price, valid_days, billing_period, benefits, applicable_play_modes, status, deleted_at | Định nghĩa gói chơi |
 | `customer_packages` | package_id, customer_id, cafe_id, slots_total, slots_remaining, expires_at, status, purchased_price, package_name_snapshot | Gói khách đã mua |
-| `subscriptions` | cafe_id, customer_id, play_mode, track_type, frequency_rule, slot_count, starts_at, ends_at, status | Chưa có entity backend — Phase 2 |
 | `contests` | cafe_id, provider_id, name, track_type_id, contest_type_id, contest_format_id, contest_template_id, registration_*, capacity, entry_fee, status, config | Event chính |
 | `contest_cafes` | contest_id, cafe_id, role, capacity_override, check_in_enabled, display_order | Chi nhánh tham gia contest |
 | `contest_registrations` | contest_id, user_id, vehicle_source, rental_catalog_id, rental_cafe_id, booking_id, status, payment_status, entry_fee_* | Đăng ký giải đua |
@@ -1152,15 +1188,13 @@ Rules:
 | `contest_templates` | contest_type_id, contest_format_id, code, name, default_config, vehicle_policy_options | Mẫu giải đấu |
 | `contest_staff_assignments` | contest_id, staff_id, assigned_by, assigned_at | Phân công staff cho giải |
 | `contest_bans` | provider_id, contest_id, user_id, scope_type, reason, evidence | Cấm VĐV |
-| `contest_fee_plans` | code, name, price, featured_days, is_active | Bảng giá phí tổ chức giải |
-| `contest_fee_orders` | contest_id, provider_id, plan_id, status, amount, transfer_* | Đơn phí tổ chức giải |
-| `package_usages` | customer_package_id, booking_id, used_slots, created_at | Chưa có entity backend — Phase 2 |
-| `promotion_usages` | promotion_id, booking_id, user_id, discount_amount, created_at | Chưa có entity backend — Phase 2 |
+| `contest_fee_plans` | `code`, `name`, `description`, `price`, `featured_days`, `display_order`, `is_active` | Bảng gói phí tổ chức; `featured_days = 0` là gói không kèm quảng bá |
+| `contest_fee_orders` | `contest_id`, `provider_id`, `plan_id`, `status`, `amount`, `featured_days`, `transfer_reference`, `transfer_date`, `transfer_amount`, `admin_notes`, `reviewed_by`, `reviewed_at` | Đơn phí của từng giải; `amount`/`featured_days` chốt cứng lúc đặt |
 
 Rules:
 
-- `bookings.customer_package_id` xác định gói được sử dụng; số slot còn lại được trừ trực tiếp vào `customer_packages.slots_remaining`. Bảng `package_usages` chưa có entity backend.
-- `subscriptions` chưa có entity backend trong Phase 1.
+- `bookings.customer_package_id` xác định gói được sử dụng; số slot còn lại được trừ trực tiếp vào `customer_packages.remaining_slots`. Bảng `package_usages` **đã bị xoá khỏi database**.
+- `subscriptions` **đã bị xoá khỏi database**; gói thuê bao của Provider dùng `provider_subscriptions`.
 - `promotion_usages` chưa có entity backend; lịch sử khuyến mãi có thể suy diễn từ `bookings.promotion_id` và `discount_amount`.
 - Contest chỉ do `PROVIDER` tạo; `STAFF` không tạo contest.
 - Contest có thể gắn nhiều chi nhánh qua `contest_cafes`; mọi chi nhánh phải thuộc cùng `provider_id` và đang `ACTIVE`.
@@ -1173,6 +1207,9 @@ Rules:
 - Prize phase này lưu trong `contests.config.prizes`, không phát voucher/reward claim tự động.
 - Mọi mutation nghiệp vụ contest phải ghi `contest_audit_logs`.
 - Phí tổ chức giải (`contest_fee_orders`) và suất quảng bá (`featured_popups`) là tính năng backend mới, tách biệt với subscription SaaS.
+- Một contest chỉ được có tối đa một `contest_fee_orders` ở nhóm còn hiệu lực (`PENDING_PAYMENT`, `PENDING_REVIEW`, `PAID`) — ràng buộc bằng unique index từng phần, để đơn `REJECTED`/`CANCELLED` không chặn provider đặt lại.
+- `DRAFT -> OPEN` yêu cầu đơn phí `PAID`; các chuyển trạng thái khác không bị chặn.
+- `contest_formats.is_released` quyết định thể thức có tạo giải được hay không, tách khỏi `is_active` (còn hiện trong catalog hay không).
 
 #### `contests`
 
@@ -1440,7 +1477,7 @@ Rules:
 
 | Bảng | Cột chính | Ghi chú |
 |------|----------|---------|
-| `incidents` | `session_id`, `reported_by`, `type`, `status`, `occurred_at`, `description`, `estimated_amount`, `responsible_party`, `final_amount`, `resolution_note`, `resolved_by`, `resolved_at` | Sự cố + log kết quả xử lý theo policy |
+| ~~`incidents`~~ | — | ⛔ **ĐÃ XOÁ KHỎI DATABASE.** Hư hỏng ghi qua `damage_line_items` trên inspection check-out |
 
 Rules:
 
@@ -1486,6 +1523,8 @@ Backend liên kết với `user_id` được mời; không có `cafe_id`, `email
 
 #### `shift_positions`
 
+> ⛔ **CHƯA ĐƯỢC XÂY.** Bảng này không tồn tại trong database. Phần mô tả dưới đây là thiết kế dự kiến, giữ lại để tham khảo nếu sau này làm.
+
 | Column | Type | Constraints | Ghi chú |
 |--------|------|-------------|---------|
 | `id` | `uuid` | PK | |
@@ -1496,6 +1535,8 @@ Backend liên kết với `user_id` được mời; không có `cafe_id`, `email
 
 #### `shift_time_presets`
 
+> ⛔ **CHƯA ĐƯỢC XÂY.** Bảng này không tồn tại trong database. Phần mô tả dưới đây là thiết kế dự kiến, giữ lại để tham khảo nếu sau này làm.
+
 | Column | Type | Constraints | Ghi chú |
 |--------|------|-------------|---------|
 | `id` | `uuid` | PK | |
@@ -1505,6 +1546,8 @@ Backend liên kết với `user_id` được mời; không có `cafe_id`, `email
 | `created_at`, `updated_at` | `timestamptz` | | |
 
 #### `staff_shifts`
+
+> ⛔ **CHƯA ĐƯỢC XÂY.** Bảng này không tồn tại trong database. Phần mô tả dưới đây là thiết kế dự kiến, giữ lại để tham khảo nếu sau này làm.
 
 | Column | Type | Constraints | Ghi chú |
 |--------|------|-------------|---------|
@@ -1521,6 +1564,8 @@ Backend liên kết với `user_id` được mời; không có `cafe_id`, `email
 ---
 
 #### `disputes`
+
+> ⛔ **ĐÃ XOÁ KHỎI DATABASE** — chưa bao giờ nối vào luồng nghiệp vụ. Phần mô tả dưới đây chỉ để đọc dữ liệu cũ hoặc hiểu lịch sử.
 
 | Column | Type | Constraints | Ghi chú |
 |--------|------|-------------|---------|
@@ -1546,6 +1591,8 @@ CREATE INDEX idx_disputes_status ON disputes(status);
 
 #### `cafe_closures`
 
+> ⛔ **CHƯA ĐƯỢC XÂY.** Bảng này không tồn tại trong database. Phần mô tả dưới đây là thiết kế dự kiến, giữ lại để tham khảo nếu sau này làm.
+
 > Ngày đóng cửa đặc biệt — block booking cho ngày đó.
 
 | Column | Type | Constraints | Ghi chú |
@@ -1566,6 +1613,8 @@ CREATE INDEX idx_cafe_closures_cafe_id ON cafe_closures(cafe_id);
 ---
 
 #### `cafe_announcements`
+
+> ⛔ **ĐÃ XOÁ KHỎI DATABASE** — không luồng nghiệp vụ nào đi qua. Phần mô tả dưới đây chỉ để đọc dữ liệu cũ hoặc hiểu lịch sử.
 
 > Thông báo/banner hiển thị trên web của chi nhánh.
 
@@ -1811,6 +1860,8 @@ Backlog chỉ quay lại khi thật sự cần:
 
 #### `driver_profiles`
 
+> ⛔ **CHƯA ĐƯỢC XÂY.** Bảng không tồn tại trong database; thiết kế dự kiến cho Universal Racing Network.
+
 | Column | Type | Constraints | Ghi chú |
 |--------|------|-------------|---------|
 | `id` | `uuid` | PK | |
@@ -1832,6 +1883,8 @@ CREATE UNIQUE INDEX idx_driver_profiles_user ON driver_profiles(user_id) WHERE d
 ```
 
 #### `driver_cafe_checkins`
+
+> ⛔ **CHƯA ĐƯỢC XÂY.** Bảng không tồn tại trong database; thiết kế dự kiến cho Universal Racing Network.
 
 | Column | Type | Constraints | Ghi chú |
 |--------|------|-------------|---------|
@@ -1942,3 +1995,29 @@ Các bảng dưới đây chỉ là backlog thiết kế cho Phase 2. Không t�
 - `contest_registrations.booking_id` links rental contest participation to a normal booking. Rental payment, vehicle hold, session check-in/check-out and inspection remain owned by booking/session tables.
 - `contest_registrations.customer_vehicle_id` is required for BYOC registration, but approval is stored on the contest registration status (`PENDING -> CONFIRMED/CANCELLED`) rather than as a global approval on the vehicle.
 - `contest_matches.cafe_id` and `contest_matches.track_config_id` localize staff operations. Staff match mutations must be scoped to `staff_cafe_assignments.cafe_id = contest_matches.cafe_id`.
+
+### Bank Transfer Payment Schema Notes
+
+Feature `019-cafe-bank-payment` thêm 2 bảng và 1 cột.
+
+- **`cafe_payment_settings`** — tài khoản nhận tiền của một chi nhánh, unique
+  `cafe_id` khi `deleted_at IS NULL`. `is_verified` chỉ bật khi chủ quán tự quét
+  mã QR mẫu và xác nhận; chưa xác minh thì chi nhánh vẫn dùng cổng chung. Tách
+  bảng riêng thay vì thêm cột vào `cafes` vì `cafes` là bảng đọc nhiều nhất hệ
+  thống và dữ liệu ngân hàng cần vòng đời riêng.
+- **`bank_transactions`** — sổ đối soát với sao kê ngân hàng. Ghi MỌI thông báo
+  tiền về, kể cả khoản không khớp booking hay vào tài khoản lạ (`cafe_id` NULL).
+  Chống trùng bằng unique `(gateway, external_id) WHERE deleted_at IS NULL`;
+  `external_id` là mã giao dịch do ngân hàng cấp. `match_status` (3 giá trị) tách
+  khỏi `match_reason` (8 giá trị) để hàng đợi của nhân viên lọc bằng một điều kiện.
+  **Không phải `PaymentComponent`** — nó đứng trước và độc lập với việc ghi nhận
+  doanh thu; một hàng `NEEDS_REVIEW` có tiền thật nhưng không sinh component nào.
+- **`payment_transactions.payment_ref_code`** — mã 8 ký tự (`RCF` + 5 Crockford
+  base32) nhúng vào nội dung chuyển khoản, unique khi khác NULL. Cố ý đặt trên
+  transaction chứ không trên booking: `createCheckoutUrl` tạo transaction mới và
+  đánh dấu cái cũ FAILED mỗi lần khách đổi phương thức, nên một mã QR đã in ra tự
+  hết hiệu lực theo. Gắn ở booking thì mã sống dai hơn phiên thanh toán và khách
+  có thể bị thu hai lần.
+
+Ba bảng dùng `varchar` + `CHECK` thay vì native enum, theo tiền lệ
+`contest_ledger_entries` — thêm giá trị mới không cần `ALTER TYPE`.
