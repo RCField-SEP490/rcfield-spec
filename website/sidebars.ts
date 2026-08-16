@@ -101,6 +101,8 @@ const sidebars: SidebarsConfig = {
       label: 'Developer Guides',
       collapsed: false,
       items: [
+        'developer/system-knowledge-base',
+        'developer/contribution-evidence',
         'developer/provider-subscription-enforcement',
         'developer/bank-transfer-demo-setup',
         {
